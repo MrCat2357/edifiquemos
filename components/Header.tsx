@@ -63,7 +63,7 @@ export default function Header() {
         <div className="flex gap-4 items-center text-sm">
           <Link href="/">Home</Link>
           <Link href="/posts">Posts</Link>
-
+          <Link href="/criar-post">Criar Post</Link>
           {loading ? (
             <span>...</span>
           ) : user ? (
