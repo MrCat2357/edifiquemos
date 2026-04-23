@@ -1,103 +1,142 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Input from "@/components/Input";
-import Button from "@/components/Button";
+import { useState } from "react";
+import { auth } from "@/lib/firebase";
+import { useRouter } from "next/navigation";
 
 import {
   signInWithEmailAndPassword,
-  signInWithPopup,
-  GoogleAuthProvider,
 } from "firebase/auth";
 
-import { auth, db } from "@/lib/firebase";
-import { doc, setDoc } from "firebase/firestore";
-
-import { useRouter } from "next/navigation";
-import { useAuth } from "@/lib/useAuth";
-
-export default function Login() {
-  const [email, setEmail] = useState("");
-  const [senha, setSenha] = useState("");
-
+export default function LoginPage() {
   const router = useRouter();
-  const { user, loading } = useAuth();
 
-  // 🔒 Se já estiver logado, redireciona
-  useEffect(() => {
-    if (!loading && user) {
-      router.push("/posts");
-    }
-  }, [user, loading, router]);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const [error, setError] = useState("");
+  const [attempts, setAttempts] = useState(0);
+  const [loading, setLoading] = useState(false);
+
+  const [userNotFound, setUserNotFound] = useState(false);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
 
-    try {
-      await signInWithEmailAndPassword(auth, email, senha);
+    if (attempts >= 3) {
+      setError("Muitas tentativas. Tente novamente mais tarde.");
+      return;
+    }
 
-      router.push("/posts");
-    } catch (error) {
-      console.error("Erro ao logar:", error);
-      alert("Email ou senha inválidos");
+    setLoading(true);
+    setError("");
+    setUserNotFound(false);
+
+    try {
+      // 🔐 TENTA LOGIN DIRETO (forma correta com Firebase)
+      await signInWithEmailAndPassword(auth, email, password);
+
+      // ✔ sucesso
+      setAttempts(0);
+      setUserNotFound(false);
+
+      router.push("/");
+
+    } catch (err: any) {
+  console.log(err.code);
+
+  // 🔴 senha errada ou login inválido
+  if (
+    err.code === "auth/wrong-password"
+  ) {
+    const newAttempts = attempts + 1;
+    setAttempts(newAttempts);
+
+    if (newAttempts >= 3) {
+      setError("Muitas tentativas. Tente novamente mais tarde.");
+    } else {
+      setError(`Senha incorreta. Tentativa ${newAttempts} de 3.`);
     }
   }
 
-  async function handleGoogleLogin() {
-    const provider = new GoogleAuthProvider();
+  // 🔴 usuário não existe (APENAS ESSE CASO REAL)
+  else if (err.code === "auth/user-not-found") {
+    setError("Usuário não cadastrado.");
+    setUserNotFound(true);
+  }
 
-    try {
-      const userCredential = await signInWithPopup(auth, provider);
-      const user = userCredential.user;
+  // 🔴 fallback REAL (importante!)
+  else if (err.code === "auth/invalid-credential") {
+    setError("Email ou senha incorretos.");
+  }
 
-      // 🗄️ SALVA NO FIRESTORE
-      await setDoc(doc(db, "users", user.uid), {
-        nome: user.displayName || "Usuário",
-        email: user.email,
-        foto: user.photoURL || "",
-        criadoEm: new Date(),
-      });
+  else {
+    setError("Erro ao fazer login. Tente novamente.");
+  }
+}
 
-      router.push("/posts");
-    } catch (error) {
-      console.error("Erro Google:", error);
-      alert("Erro ao entrar com Google");
-    }
+    setLoading(false);
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Login</h1>
+    <div className="max-w-sm mx-auto p-6">
+      <h1 className="text-2xl font-bold mb-4">Login</h1>
 
       <form onSubmit={handleLogin} className="space-y-4">
-        <Input
-          label="Email"
-          placeholder="Digite seu email"
+        <input
+          type="email"
+          placeholder="Email"
+          className="w-full border p-2"
           value={email}
-          onChange={setEmail}
+          onChange={(e) => setEmail(e.target.value)}
         />
 
-        <Input
-          label="Senha"
+        <input
           type="password"
-          placeholder="Digite sua senha"
-          value={senha}
-          onChange={setSenha}
+          placeholder="Senha"
+          className="w-full border p-2"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
         />
 
-        <Button>Entrar</Button>
+        {/* 🔴 ERRO + BOTÃO DE CADASTRO */}
+        {error && (
+          <div className="space-y-2">
+            <p className="text-red-500 text-sm">{error}</p>
 
-        <a href="/esqueci-senha" className="text-sm text-blue-500">
-          Esqueci minha senha
-        </a>
+            {userNotFound && (
+              <button
+                type="button"
+                onClick={() =>
+                  router.push(`/cadastro?email=${email}`)
+                }
+                className="text-sm text-blue-600 underline"
+              >
+                Criar conta
+              </button>
+            )}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-black text-white p-2"
+        >
+          {loading ? "Entrando..." : "Entrar"}
+        </button>
+        <div className="text-right text-sm">
+  <button
+    type="button"
+    onClick={() =>
+      router.push(`/esqueci-senha?email=${email}`)
+    }
+    className="text-blue-600 hover:underline"
+  >
+    Esqueci minha senha
+  </button>
+</div>
       </form>
-
-      <button
-        onClick={handleGoogleLogin}
-        className="w-full border py-2 rounded hover:bg-gray-100"
-      >
-        Entrar com Google
-      </button>
     </div>
   );
 }

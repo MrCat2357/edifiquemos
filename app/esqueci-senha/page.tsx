@@ -3,20 +3,30 @@
 import { useState } from "react";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { useSearchParams } from "next/navigation";
 
 export default function EsqueciSenha() {
-  const [email, setEmail] = useState("");
+  const searchParams = useSearchParams();
+  const emailParam = searchParams.get("email") || "";
+
+  const [email, setEmail] = useState(emailParam);
   const [mensagem, setMensagem] = useState("");
   const [erro, setErro] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function handleReset(e: React.FormEvent) {
     e.preventDefault();
+
     setMensagem("");
     setErro("");
+    setLoading(true);
 
     try {
       await sendPasswordResetEmail(auth, email);
-      setMensagem("Email de recuperação enviado! Verifique sua caixa de entrada.");
+
+      setMensagem(
+        "Email de recuperação enviado! Verifique sua caixa de entrada."
+      );
     } catch (error: any) {
       console.error(error);
 
@@ -28,12 +38,17 @@ export default function EsqueciSenha() {
         setErro("Erro ao enviar email.");
       }
     }
+
+    setLoading(false);
   }
 
   return (
     <div className="flex flex-col items-center justify-center h-screen">
       <form onSubmit={handleReset} className="flex flex-col gap-3 w-80">
-        <h1 className="text-xl font-bold">Recuperar senha</h1>
+
+        <h1 className="text-xl font-bold">
+          Recuperar senha
+        </h1>
 
         <input
           type="email"
@@ -43,12 +58,21 @@ export default function EsqueciSenha() {
           className="border p-2"
         />
 
-        <button className="bg-blue-500 text-white p-2 rounded">
-          Enviar email
+        <button
+          disabled={loading}
+          className="bg-blue-500 text-white p-2 rounded"
+        >
+          {loading ? "Enviando..." : "Enviar email"}
         </button>
 
-        {mensagem && <p className="text-green-600">{mensagem}</p>}
-        {erro && <p className="text-red-600">{erro}</p>}
+        {mensagem && (
+          <p className="text-green-600">{mensagem}</p>
+        )}
+
+        {erro && (
+          <p className="text-red-600">{erro}</p>
+        )}
+
       </form>
     </div>
   );
