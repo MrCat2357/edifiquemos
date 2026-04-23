@@ -11,12 +11,15 @@ import { useEffect, useState } from "react";
 export default function Header() {
   const { user, loading } = useAuth();
 
-  const [nomeExibicao, setNomeExibicao] = useState("...");
+  const [nomeExibicao, setNomeExibicao] = useState("");
   const [carregandoNome, setCarregandoNome] = useState(false);
 
   useEffect(() => {
     async function fetchUser() {
-      if (!user) return;
+      if (!user) {
+        setNomeExibicao("");
+        return;
+      }
 
       setCarregandoNome(true);
 
@@ -58,18 +61,34 @@ export default function Header() {
   return (
     <header className="bg-gray-900 text-white">
       <nav className="max-w-2xl mx-auto flex justify-between items-center p-4">
-        <span className="font-bold text-lg">Sermões</span>
 
+        {/* 🔥 LOGO */}
+        <span className="font-bold text-lg">
+        Sermões e Artigos
+        </span>
+
+        {/* 🔗 LINKS */}
         <div className="flex gap-4 items-center text-sm">
+
           <Link href="/">Home</Link>
           <Link href="/posts">Posts</Link>
-          <Link href="/criar-post">Criar Post</Link>
+
+          {/* ⚠️ criar post só faz sentido logado */}
+          {user && (
+            <Link href="/criar-post">Criar Post</Link>
+          )}
+
+          {/* 🔐 ESTADO LOGIN */}
           {loading ? (
             <span>...</span>
+
           ) : user ? (
-            <>
-              <span>
-                {carregandoNome ? "..." : nomeExibicao}
+            <div className="flex items-center gap-3">
+
+              <span className="text-gray-300">
+                {carregandoNome
+                  ? "Carregando..."
+                  : nomeExibicao}
               </span>
 
               <button
@@ -78,13 +97,15 @@ export default function Header() {
               >
                 Sair
               </button>
-            </>
+            </div>
+
           ) : (
-            <>
+            <div className="flex gap-3">
               <Link href="/login">Login</Link>
               <Link href="/cadastro">Cadastro</Link>
-            </>
+            </div>
           )}
+
         </div>
       </nav>
     </header>
