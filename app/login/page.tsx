@@ -1,17 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { auth } from "@/lib/firebase";
+import { auth, db } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { signInWithEmailAndPassword } from "firebase/auth";
+
+import {
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
+} from "firebase/auth";
+
+import { doc, getDoc, setDoc } from "firebase/firestore";
 
 export default function LoginPage() {
   const router = useRouter();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
   const [showPassword, setShowPassword] = useState(false);
 
   const [error, setError] = useState("");
@@ -19,6 +25,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [userNotFound, setUserNotFound] = useState(false);
 
+  // 🔐 LOGIN NORMAL
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
 
@@ -33,20 +40,13 @@ export default function LoginPage() {
 
     try {
       await signInWithEmailAndPassword(auth, email, password);
-
       setAttempts(0);
       router.push("/");
     } catch (err: any) {
-      console.log(err.code);
-
-      // ❌ usuário não existe
       if (err.code === "auth/user-not-found") {
         setError("Usuário não cadastrado.");
         setUserNotFound(true);
-      }
-
-      // ❌ senha errada
-      else if (err.code === "auth/wrong-password") {
+      } else if (err.code === "auth/wrong-password") {
         const newAttempts = attempts + 1;
         setAttempts(newAttempts);
 
@@ -55,17 +55,43 @@ export default function LoginPage() {
         } else {
           setError(`Senha incorreta. Tentativa ${newAttempts} de 3.`);
         }
-      }
-
-      // ❌ email inválido
-      else if (err.code === "auth/invalid-email") {
+      } else if (err.code === "auth/invalid-email") {
         setError("Email inválido.");
-      }
-
-      // ❌ erro genérico
-      else {
+      } else {
         setError("Erro ao fazer login.");
       }
+    }
+
+    setLoading(false);
+  }
+
+  // 🔥 LOGIN COM GOOGLE
+  async function handleGoogleLogin() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+
+      const user = result.user;
+
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+
+      if (!userSnap.exists()) {
+        await setDoc(userRef, {
+          nome: user.displayName || "",
+          titulo: "",
+          email: user.email,
+          criadoEm: new Date(),
+        });
+      }
+
+      router.push("/");
+    } catch (err) {
+      console.error(err);
+      setError("Erro ao entrar com Google.");
     }
 
     setLoading(false);
@@ -77,7 +103,6 @@ export default function LoginPage() {
         onSubmit={handleLogin}
         className="bg-neutral-800 p-6 rounded-lg w-full max-w-sm space-y-5 border border-neutral-700"
       >
-        {/* TÍTULO */}
         <h1 className="text-2xl font-semibold text-center text-emerald-300">
           Entrar
         </h1>
@@ -86,17 +111,17 @@ export default function LoginPage() {
         <input
           type="email"
           placeholder="Email"
-          className="w-full p-2 rounded bg-neutral-900 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
+          className="w-full p-2 rounded bg-neutral-900 border border-neutral-700 text-neutral-100"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
 
-        {/* SENHA + OLHINHO */}
+        {/* SENHA */}
         <div className="relative">
           <input
             type={showPassword ? "text" : "password"}
             placeholder="Senha"
-            className="w-full p-2 pr-10 rounded bg-neutral-900 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
+            className="w-full p-2 pr-10 rounded bg-neutral-900 border border-neutral-700 text-neutral-100"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -104,7 +129,7 @@ export default function LoginPage() {
           <button
             type="button"
             onClick={() => setShowPassword(!showPassword)}
-            className="absolute right-2 top-2 text-neutral-400 hover:text-neutral-200 text-sm"
+            className="absolute right-2 top-2 text-neutral-400"
           >
             {showPassword ? "🙈" : "👁"}
           </button>
@@ -115,11 +140,10 @@ export default function LoginPage() {
           <div className="space-y-2 text-center">
             <p className="text-red-400 text-sm">{error}</p>
 
-            {/* 🔥 aparece só quando precisa */}
             {userNotFound && (
               <Link
                 href={`/cadastro?email=${email}`}
-                className="text-sm text-blue-400 underline hover:text-blue-300"
+                className="text-sm text-blue-400 underline"
               >
                 Criar conta
               </Link>
@@ -127,7 +151,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* BOTÃO */}
+        {/* BOTÃO LOGIN */}
         <button
           type="submit"
           disabled={loading}
@@ -136,7 +160,6 @@ export default function LoginPage() {
             bg-emerald-600
             hover:bg-emerald-700
             active:scale-95
-            active:translate-y-0.5
             transition
             shadow-md
             cursor-pointer
@@ -144,6 +167,26 @@ export default function LoginPage() {
           "
         >
           {loading ? "Entrando..." : "Entrar"}
+        </button>
+
+        {/* 🔥 GOOGLE (AGORA PADRÃO VISUAL) */}
+        <button
+          type="button"
+          onClick={handleGoogleLogin}
+          disabled={loading}
+          className="
+            w-full py-2 rounded text-white
+            bg-emerald-600
+            hover:bg-emerald-700
+            active:scale-95
+            transition
+            shadow-md
+            cursor-pointer
+            border border-emerald-400/30
+            disabled:opacity-50
+          "
+        >
+          Entrar com Google
         </button>
 
         {/* LINKS */}

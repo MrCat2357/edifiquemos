@@ -7,9 +7,12 @@ import { auth, db } from "@/lib/firebase";
 
 import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function Header() {
   const { user, loading } = useAuth();
+
+  const router = useRouter(); // ✅ AGORA ESTÁ NO LUGAR CERTO
 
   const [nomeExibicao, setNomeExibicao] = useState("");
   const [carregandoNome, setCarregandoNome] = useState(false);
@@ -64,7 +67,7 @@ export default function Header() {
 
         {/* 🔥 LOGO */}
         <span className="font-bold text-lg">
-        Sermões e Artigos
+          Sermões e Artigos
         </span>
 
         {/* 🔗 LINKS */}
@@ -73,30 +76,39 @@ export default function Header() {
           <Link href="/">Home</Link>
           <Link href="/posts">Posts</Link>
 
-          {/* ⚠️ criar post só faz sentido logado */}
           {user && (
             <Link href="/criar-post">Criar Post</Link>
           )}
 
-          {/* 🔐 ESTADO LOGIN */}
           {loading ? (
             <span>...</span>
 
           ) : user ? (
             <div className="flex items-center gap-3">
 
-              <span className="text-gray-300">
-                {carregandoNome
-                  ? "Carregando..."
-                  : nomeExibicao}
-              </span>
+              {/* 👤 NOME (LINK PRO PERFIL) */}
+              <button
+                onClick={() => router.push("/perfil")}
+                className="hover:underline cursor-pointer"
+              >
+                {carregandoNome ? "..." : nomeExibicao}
+              </button>
 
+              {/* 🔴 SAIR */}
               <button
                 onClick={handleLogout}
-                className="bg-red-600 px-3 py-1 rounded"
+                className="
+                  bg-red-600
+                  hover:bg-red-700
+                  px-3 py-1 rounded
+                  cursor-pointer
+                  transition
+                  active:scale-95
+                "
               >
                 Sair
               </button>
+
             </div>
 
           ) : (
