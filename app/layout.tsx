@@ -1,6 +1,10 @@
-import React from "react";
 import "./globals.css";
 import Header from "@/components/Header";
+
+export const metadata = {
+  title: "Voz da Fé",
+  description: "Compartilhe e leia sermões e reflexões cristãs",
+};
 
 export default function RootLayout({
   children,
@@ -8,17 +12,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-br">
-      <body>
+    <html lang="pt-BR">
+      <body className="bg-neutral-900 text-neutral-100 min-h-screen">
+
         <Header />
 
-        <main className="max-w-2xl mx-auto p-4">
+        <main className="max-w-3xl mx-auto px-4 py-8">
           {children}
         </main>
 
-        <footer className="text-center text-sm text-gray-500 py-6">
-          © {new Date().getFullYear()} Sermões
-        </footer>
       </body>
     </html>
   );

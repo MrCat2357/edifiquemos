@@ -14,12 +14,12 @@ export default function Button({
   onClick,
 }: ButtonProps) {
   const base =
-    "w-full py-2 rounded text-white transition duration-200";
+    "w-full py-2 rounded transition duration-200 text-center";
 
   const styles =
     variant === "primary"
-      ? "bg-blue-600 hover:bg-blue-700"
-      : "bg-green-600 hover:bg-green-700";
+      ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+      : "bg-emerald-600 hover:bg-emerald-700 text-white";
 
   return (
     <button
@@ -27,7 +27,9 @@ export default function Button({
       onClick={onClick}
       disabled={disabled}
       className={`${base} ${styles} ${
-        disabled ? "opacity-50 cursor-not-allowed" : ""
+        disabled
+          ? "opacity-50 cursor-not-allowed"
+          : "cursor-pointer active:scale-95 active:translate-y-0.5 shadow-md"
       }`}
     >
       {children}
