@@ -9,20 +9,31 @@ import { doc, setDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 
 export default function Cadastro() {
+  const router = useRouter();
+
   const [nome, setNome] = useState("");
   const [titulo, setTitulo] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
-
-  const router = useRouter();
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function handleCadastro(e: React.FormEvent) {
     e.preventDefault();
 
-    if (senha.length < 6) {
-      alert("A senha deve ter pelo menos 6 caracteres");
+    setError("");
+
+    if (!nome.trim()) {
+      setError("O nome é obrigatório.");
       return;
     }
+
+    if (senha.length < 6) {
+      setError("A senha deve ter pelo menos 6 caracteres.");
+      return;
+    }
+
+    setLoading(true);
 
     try {
       const userCredential = await createUserWithEmailAndPassword(
@@ -33,54 +44,65 @@ export default function Cadastro() {
 
       const user = userCredential.user;
 
-      // 🗄️ salva no Firestore (PADRÃO LIMPO)
       await setDoc(doc(db, "users", user.uid), {
         nome,
-        titulo,
+        titulo: titulo || "",
         email,
         criadoEm: new Date(),
       });
 
-      router.push("/posts");
+      const redirect = sessionStorage.getItem("redirect-after-auth");
 
-      console.log("Usuário criado com perfil");
-    } catch (error) {
-      console.error("Erro ao cadastrar:", error);
-      alert("Erro ao criar conta");
+      if (redirect) {
+        sessionStorage.removeItem("redirect-after-auth");
+        router.push(redirect);
+      } else {
+        router.push("/criar-post");
+      }
+
+    } catch (error: any) {
+      console.log(error.code);
+
+      if (error.code === "auth/email-already-in-use") {
+        setError("Esse email já está em uso.");
+      } else if (error.code === "auth/invalid-email") {
+        setError("Email inválido.");
+      } else {
+        setError("Erro ao criar conta.");
+      }
     }
+
+    setLoading(false);
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Cadastro</h1>
+    <div className="max-w-sm mx-auto p-6 space-y-6">
+
+      <h1 className="text-2xl font-bold">
+        Cadastro
+      </h1>
 
       <form onSubmit={handleCadastro} className="space-y-4">
 
         {/* TÍTULO */}
         <div>
-          <label className="block text-sm mb-1">Título</label>
+          <label className="block text-sm mb-1">Título (opcional)</label>
 
           <input
             list="titulos"
             value={titulo}
             onChange={(e) => setTitulo(e.target.value)}
             className="w-full border p-2 rounded"
-            placeholder="Ex: Pr., Pastor, Padre..."
+            placeholder="Ex: Pr., Pastor, Missionário..."
           />
 
           <datalist id="titulos">
             <option value="Pr." />
             <option value="Rev." />
             <option value="Pastor" />
-            <option value="Reverendo" />
-            <option value="Diácono" />
-            <option value="Presbítero" />
-            <option value="Padre" />
+            <option value="Missionário" />
             <option value="Irmão" />
             <option value="Irmã" />
-            <option value="Seminarista" />
-            <option value="Missionário" />
-            <option value="Missionária" />
           </datalist>
         </div>
 
@@ -106,9 +128,21 @@ export default function Cadastro() {
           onChange={setSenha}
         />
 
-        <Button variant="secondary">
-          Criar conta
+        {error && (
+          <p className="text-red-600 text-sm">
+            {error}
+          </p>
+        )}
+
+        {/* 🔥 CORREÇÃO CRÍTICA */}
+        <Button
+          type="submit"
+          variant="secondary"
+          disabled={loading}
+        >
+          {loading ? "Criando conta..." : "Criar conta"}
         </Button>
+
       </form>
     </div>
   );
