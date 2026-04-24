@@ -76,24 +76,29 @@ export default function Cadastro() {
   }
 
   return (
-    <div className="max-w-sm mx-auto p-6 space-y-6">
+    <div className="min-h-screen flex items-center justify-center bg-neutral-900 px-4">
 
-      <h1 className="text-2xl font-bold">
-        Cadastro
-      </h1>
-
-      <form onSubmit={handleCadastro} className="space-y-4">
-
+      <form
+        onSubmit={handleCadastro}
+        className="bg-neutral-800 p-6 rounded-lg w-full max-w-sm space-y-5 border border-neutral-700"
+      >
         {/* TÍTULO */}
+        <h1 className="text-2xl font-semibold text-center text-emerald-300">
+          Cadastro
+        </h1>
+
+        {/* TÍTULO (OPCIONAL) */}
         <div>
-          <label className="block text-sm mb-1">Título (opcional)</label>
+          <label className="block text-sm mb-1 text-neutral-300">
+            Título (opcional)
+          </label>
 
           <input
             list="titulos"
             value={titulo}
             onChange={(e) => setTitulo(e.target.value)}
-            className="w-full border p-2 rounded"
-            placeholder="Ex: Pr., Pastor, Missionário..."
+            className="w-full p-2 rounded bg-neutral-900 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
+            placeholder="Ex: Pr., Pastor..."
           />
 
           <datalist id="titulos">
@@ -106,6 +111,7 @@ export default function Cadastro() {
           </datalist>
         </div>
 
+        {/* INPUTS */}
         <Input
           label="Nome"
           placeholder="Seu nome"
@@ -128,16 +134,17 @@ export default function Cadastro() {
           onChange={setSenha}
         />
 
+        {/* ERRO */}
         {error && (
-          <p className="text-red-600 text-sm">
+          <p className="text-red-400 text-sm text-center">
             {error}
           </p>
         )}
 
-        {/* 🔥 CORREÇÃO CRÍTICA */}
+        {/* BOTÃO (COM MÃOZINHA AUTOMÁTICA) */}
         <Button
           type="submit"
-          variant="secondary"
+          variant="primary"
           disabled={loading}
         >
           {loading ? "Criando conta..." : "Criar conta"}

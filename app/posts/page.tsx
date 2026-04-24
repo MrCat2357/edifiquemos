@@ -38,35 +38,59 @@ export default function Posts() {
   }, []);
 
   if (loading) {
-    return <p className="p-4">Carregando posts...</p>;
+    return <p className="p-4 text-neutral-400">Carregando posts...</p>;
   }
 
   return (
-    <div className="max-w-xl mx-auto p-4 space-y-4">
-      <h1 className="text-2xl font-bold">Posts</h1>
+    <div className="max-w-xl mx-auto p-4 space-y-6">
 
-      {posts.length === 0 && <p>Nenhum post ainda.</p>}
+      {/* TÍTULO */}
+      <h1 className="text-2xl font-bold text-neutral-100">
+        Conteúdos
+      </h1>
+
+      {posts.length === 0 && (
+        <p className="text-neutral-400">Nenhum post ainda.</p>
+      )}
 
       {posts.map((post) => (
         <div
           key={post.id}
           onClick={() => router.push(`/post/${post.id}`)}
-          className="border p-4 rounded hover:shadow cursor-pointer"
+          className="
+            bg-neutral-800
+            border border-neutral-700
+            p-5
+            rounded
+            cursor-pointer
+            transition
+            space-y-2
+            hover:bg-neutral-800
+            hover:border-emerald-600
+            hover:shadow-[0_0_10px_rgba(16,185,129,0.15)]
+            hover:-translate-y-0.5
+          "
         >
-          <h2 className="text-lg font-semibold">{post.titulo}</h2>
+          {/* TÍTULO DO POST */}
+          <h2 className="text-lg font-semibold text-emerald-300">
+            {post.titulo}
+          </h2>
 
-          <p className="text-sm text-gray-500">
+          {/* AUTOR + DATA */}
+          <p className="text-sm text-neutral-400">
             {post.autorNome || "Autor"} •{" "}
             {post.data?.toDate
               ? post.data.toDate().toLocaleDateString()
               : ""}
           </p>
 
-          <p className="text-sm mt-2 text-gray-600">
+          {/* TIPO */}
+          <p className="text-sm text-emerald-400">
             {post.tipo === "sermao" ? "Sermão" : "Artigo"}
           </p>
         </div>
       ))}
+
     </div>
   );
 }

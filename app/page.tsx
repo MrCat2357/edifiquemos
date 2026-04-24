@@ -7,42 +7,61 @@ export default function HomePage() {
   const { user } = useAuth();
 
   return (
-    <div className="max-w-2xl mx-auto px-6 py-20 text-center space-y-8">
+    <div className="min-h-screen bg-neutral-900 text-neutral-100">
+      <div className="max-w-2xl mx-auto px-6 py-20 text-center space-y-10">
 
-      {/* 🔥 MENSAGEM PRINCIPAL */}
-      <h1 className="text-3xl font-bold leading-tight">
-        Sabia que o seu conhecimento pode fortalecer outros irmãos na fé?
-      </h1>
+        {/* ✝️ VERSÍCULO */}
+        <div className="space-y-4">
+          <h1 className="text-3xl font-semibold leading-relaxed">
+            “Assim como o ferro afia o ferro,
+            <br />
+            o homem afia o seu companheiro.”
+          </h1>
 
-      <p className="text-gray-600 text-lg">
-        Compartilhe sermões, reflexões e ensinamentos que edificam vidas.
-      </p>
+          <p className="text-neutral-400 text-sm">
+            Provérbios 27:17
+          </p>
+        </div>
 
-      {/* 🔘 BOTÕES PRINCIPAIS */}
-      <div className="flex flex-col gap-3 items-center">
+        {/* 🌿 PROPÓSITO */}
+        <div className="space-y-4">
+          <p className="text-neutral-200 text-lg leading-relaxed">
+            Um espaço para edificação mútua.
+          </p>
 
-        <Link
-          href="/criar-post"
-          className="bg-black text-white px-6 py-3 rounded w-64"
-        >
-          Publicar sermão ou artigo
-        </Link>
+          <p className="text-neutral-300">
+            Aqui, irmãos na fé compartilham sermões, reflexões e ensinamentos
+            para fortalecer uns aos outros na caminhada cristã.
+          </p>
+        </div>
 
-        <Link
-          href="/posts"
-          className="border px-6 py-3 rounded w-64"
-        >
-          Ver conteúdos
-        </Link>
+        {/* 🔘 BOTÕES PADRONIZADOS */}
+        <div className="flex flex-col gap-3 items-center">
+
+  <Link
+    href="/posts"
+    className="w-64 py-3 rounded bg-emerald-600 hover:bg-emerald-700 transition"
+  >
+    Ler Conteúdos
+  </Link>
+
+  <Link
+    href="/criar-post"
+    className="w-64 py-3 rounded bg-emerald-600 hover:bg-emerald-700 transition"
+  >
+    Publicar Sermões ou Artigos
+  </Link>
+
+</div>
+
+        {/* 🔐 OBSERVAÇÃO */}
+        {!user && (
+          <p className="text-sm text-neutral-500">
+            É necessário estar logado para publicar conteúdos.
+          </p>
+        )}
+
       </div>
-
-      {/* 🔐 INFO EXTRA */}
-      {!user && (
-        <p className="text-sm text-gray-500">
-          Para publicar conteúdos, é necessário criar uma conta.
-        </p>
-      )}
-
     </div>
   );
 }
