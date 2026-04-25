@@ -108,13 +108,6 @@ export default function Perfil() {
     setSalvando(false);
   }
 
-  async function copiarLink(slug: string, postId: string) {
-    const url = `${window.location.origin}/posts/${postId}/${slug}`;
-    await navigator.clipboard.writeText(url);
-    setCopiado(postId);
-    setTimeout(() => setCopiado(null), 2000);
-  }
-
   function getUrlPost(post: any) {
     const tipo = post.tipo === "sermao" ? "sermoes" : "artigos";
     return `${window.location.origin}/posts/${tipo}/${post.slug}`;
@@ -175,11 +168,8 @@ export default function Perfil() {
           const urlEncoded = encodeURIComponent(urlPost);
 
           return (
-            <div
-              key={post.id}
-              className="bg-neutral-800 border border-neutral-700 p-4 rounded transition hover:border-emerald-600 hover:shadow-[0_0_10px_rgba(16,185,129,0.15)]"
-            >
-              {/* CABEÇALHO CLICÁVEL */}
+            <div key={post.id} className="bg-neutral-800 border border-neutral-700 p-4 rounded transition hover:border-emerald-600 hover:shadow-[0_0_10px_rgba(16,185,129,0.15)]">
+
               <div
                 onClick={() => router.push(`/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`)}
                 className="cursor-pointer"
@@ -193,7 +183,6 @@ export default function Perfil() {
                 </p>
               </div>
 
-              {/* COMPARTILHAR */}
               <div className="mt-3 flex flex-col gap-2">
                 <button
                   onClick={() => setCompartilharAberto(compartilharAberto === post.id ? null : post.id)}
@@ -212,6 +201,15 @@ export default function Perfil() {
                     </a>
                     <a href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-xs rounded bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 text-white cursor-pointer">
                       Threads
+                    </a>
+                    <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-xs rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-600 text-white cursor-pointer">
+                      X (Twitter)
+                    </a>
+                    <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white cursor-pointer">
+                      LinkedIn
+                    </a>
+                    <a href={`mailto:?subject=${textoCompartilhar}&body=${urlEncoded}`} className="px-3 py-1 text-xs rounded bg-neutral-500 hover:bg-neutral-400 text-white cursor-pointer">
+                      Email
                     </a>
                     <button
                       onClick={() => { navigator.clipboard.writeText(urlPost); setCopiado(post.id); setTimeout(() => setCopiado(null), 2000); }}
