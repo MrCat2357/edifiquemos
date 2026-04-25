@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useSearchParams } from "next/navigation";
 
-export default function EsqueciSenha() {
+function EsqueciSenhaForm() {
   const searchParams = useSearchParams();
   const emailParam = searchParams.get("email") || "";
 
@@ -23,10 +23,7 @@ export default function EsqueciSenha() {
 
     try {
       await sendPasswordResetEmail(auth, email);
-
-      setMensagem(
-        "Email de recuperação enviado! Verifique sua caixa de entrada."
-      );
+      setMensagem("Email de recuperação enviado! Verifique sua caixa de entrada.");
     } catch (error: any) {
       console.error(error);
 
@@ -43,37 +40,38 @@ export default function EsqueciSenha() {
   }
 
   return (
+    <form onSubmit={handleReset} className="flex flex-col gap-3 w-80">
+
+      <h1 className="text-xl font-bold">Recuperar senha</h1>
+
+      <input
+        type="email"
+        placeholder="Digite seu email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        className="border p-2"
+      />
+
+      <button
+        disabled={loading}
+        className="bg-blue-500 text-white p-2 rounded"
+      >
+        {loading ? "Enviando..." : "Enviar email"}
+      </button>
+
+      {mensagem && <p className="text-green-600">{mensagem}</p>}
+      {erro && <p className="text-red-600">{erro}</p>}
+
+    </form>
+  );
+}
+
+export default function EsqueciSenha() {
+  return (
     <div className="flex flex-col items-center justify-center h-screen">
-      <form onSubmit={handleReset} className="flex flex-col gap-3 w-80">
-
-        <h1 className="text-xl font-bold">
-          Recuperar senha
-        </h1>
-
-        <input
-          type="email"
-          placeholder="Digite seu email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="border p-2"
-        />
-
-        <button
-          disabled={loading}
-          className="bg-blue-500 text-white p-2 rounded"
-        >
-          {loading ? "Enviando..." : "Enviar email"}
-        </button>
-
-        {mensagem && (
-          <p className="text-green-600">{mensagem}</p>
-        )}
-
-        {erro && (
-          <p className="text-red-600">{erro}</p>
-        )}
-
-      </form>
+      <Suspense fallback={<p className="text-neutral-400">Carregando...</p>}>
+        <EsqueciSenhaForm />
+      </Suspense>
     </div>
   );
 }
