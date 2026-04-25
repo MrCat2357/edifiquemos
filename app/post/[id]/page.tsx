@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { db, auth } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { useParams, useRouter } from "next/navigation";
+
+type User = {
+  nome?: string;
+  titulo?: string;
+};
 
 function formatData(data: any) {
   if (!data) return new Date().toLocaleDateString("pt-BR");
@@ -16,16 +21,15 @@ function formatData(data: any) {
     return data;
   }
 
-  return new Date().toLocaleDateString("pt-BR");
+  return new Date(data).toLocaleDateString("pt-BR");
 }
 
-function buildFrase(post: any) {
+function buildFrase(post: any, autorNomeFinal: string) {
   const tipo = post.tipo;
   const igreja = post.igreja?.trim();
   const data = formatData(post.data);
-  const autor = post.autorNome || "Autor";
+  const autor = autorNomeFinal || "Autor";
 
-  // 📖 SERMÃO
   if (tipo === "sermao") {
     if (igreja && post.data) {
       return `Sermão pregado na igreja ${igreja} em ${data}`;
@@ -42,51 +46,67 @@ function buildFrase(post: any) {
     return `Sermão publicado em ${data}`;
   }
 
-  // ✍️ ARTIGO
   return `Artigo publicado por ${autor} em ${data}`;
 }
 
 export default function PostPage() {
-  const params = useParams();
+  const { id } = useParams();
   const router = useRouter();
-  const id = params?.id as string;
 
   const [post, setPost] = useState<any>(null);
+  const [autor, setAutor] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function fetchPost() {
+    async function load() {
       if (!id) return;
 
       try {
-        const ref = doc(db, "posts", id);
-        const snap = await getDoc(ref);
+        const postRef = doc(db, "posts", id as string);
+        const snap = await getDoc(postRef);
 
-        if (snap.exists()) {
-          setPost({ id: snap.id, ...snap.data() });
-        } else {
+        if (!snap.exists()) {
           setPost(null);
+          setLoading(false);
+          return;
+        }
+
+        const data = snap.data();
+        setPost(data);
+
+        // 🔥 AUTOR SEMPRE ATUALIZADO
+        if (data.autorId) {
+          const userRef = doc(db, "users", data.autorId);
+          const userSnap = await getDoc(userRef);
+
+          if (userSnap.exists()) {
+            setAutor(userSnap.data() as User);
+          }
         }
       } catch (err) {
-        console.error("Erro ao buscar post:", err);
+        console.error("Erro ao carregar post:", err);
         setPost(null);
       }
 
       setLoading(false);
     }
 
-    fetchPost();
+    load();
   }, [id]);
 
   if (loading) {
-    return <p className="p-4 text-neutral-400">Carregando post...</p>;
+    return <p className="p-4 text-neutral-400">Carregando...</p>;
   }
 
   if (!post) {
-    return <p className="p-4 text-red-400">Post não encontrado.</p>;
+    return <p className="p-4 text-red-400">Post não encontrado</p>;
   }
 
-  const isOwner = auth.currentUser?.uid === post.autorId;
+  // 🔥 NOME FINAL SEM BUG
+  const nomeExibicao =
+    autor?.titulo && autor?.nome
+      ? `${autor.titulo} ${autor.nome}`
+      : autor?.nome || post.autorNome || "Autor";
 
   return (
     <article className="max-w-2xl mx-auto p-6 space-y-6">
@@ -97,20 +117,18 @@ export default function PostPage() {
       </h1>
 
       {/* META */}
-      <div className="text-sm text-neutral-400 flex flex-wrap gap-1 items-center">
+      <div className="text-sm text-neutral-400 flex gap-2 flex-wrap">
 
         {/* AUTOR CLICÁVEL */}
         <span
-          title="Ver perfil do autor"
-          className="
-            text-emerald-400
-            hover:underline
-            cursor-pointer
-            font-medium
-          "
-          onClick={() => router.push(`/perfil/${post.autorId}`)}
+          className="text-emerald-400 hover:underline cursor-pointer"
+          onClick={() => {
+            if (post.autorId) {
+              router.push(`/perfil/${post.autorId}`);
+            }
+          }}
         >
-          {post.autorNome || "Autor"}
+          {nomeExibicao}
         </span>
 
         <span>•</span>
@@ -121,58 +139,23 @@ export default function PostPage() {
         <span>•</span>
 
         {/* TIPO */}
-        <span className="text-emerald-400">
-          {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+        <span className="text-emerald-400 capitalize">
+          {post.tipo}
         </span>
-
       </div>
-
-      {/* FRASE DINÂMICA */}
-      <p className="text-neutral-300 italic">
-        {buildFrase(post)}
-      </p>
-
-      <hr className="border-neutral-700" />
 
       {/* CONTEÚDO */}
       <div className="text-neutral-200 leading-relaxed whitespace-pre-line">
         {post.conteudo}
       </div>
 
-      {/* AÇÕES DONO */}
-      {isOwner && (
-        <div className="flex gap-3 pt-4">
+      {/* SEPARADOR */}
+      <hr className="border-neutral-700 my-6" />
 
-          <button
-            onClick={() => router.push(`/editar/${id}`)}
-            className="
-              px-4 py-2
-              bg-emerald-600 hover:bg-emerald-700
-              rounded
-              cursor-pointer
-              transition
-              active:scale-95
-            "
-          >
-            Editar
-          </button>
-
-          <button
-            onClick={() => alert("implementar delete")}
-            className="
-              px-4 py-2
-              bg-red-600 hover:bg-red-700
-              rounded
-              cursor-pointer
-              transition
-              active:scale-95
-            "
-          >
-            Apagar
-          </button>
-
-        </div>
-      )}
+      {/* FRASE FINAL (ENCERRAMENTO DE LEITURA) */}
+      <p className="text-center text-sm text-emerald-400 italic opacity-80">
+        {buildFrase(post, nomeExibicao)}
+      </p>
 
     </article>
   );
