@@ -2,33 +2,55 @@
 
 import { useEffect, useState } from "react";
 import { db, auth } from "@/lib/firebase";
-import { doc, getDoc, deleteDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { useParams, useRouter } from "next/navigation";
 
-type Post = {
-  titulo: string;
-  autorNome?: string;
-  autorId?: string;
-  data?: any;
-  tipo?: "sermao" | "artigo";
-  conteudo: string;
-};
+function formatData(data: any) {
+  if (!data) return new Date().toLocaleDateString("pt-BR");
 
-type Autor = {
-  nome?: string;
-  titulo?: string;
-};
+  if (data?.toDate) {
+    return data.toDate().toLocaleDateString("pt-BR");
+  }
+
+  if (typeof data === "string") {
+    return data;
+  }
+
+  return new Date().toLocaleDateString("pt-BR");
+}
+
+function buildFrase(post: any) {
+  const tipo = post.tipo;
+  const igreja = post.igreja?.trim();
+  const data = formatData(post.data);
+  const autor = post.autorNome || "Autor";
+
+  if (tipo === "sermao") {
+    if (igreja && post.data) {
+      return `Sermão pregado na igreja ${igreja} em ${data}`;
+    }
+
+    if (igreja) {
+      return `Sermão pregado na igreja ${igreja}`;
+    }
+
+    if (post.data) {
+      return `Sermão pregado em ${data}`;
+    }
+
+    return `Sermão publicado em ${data}`;
+  }
+
+  return `Artigo publicado por ${autor} em ${data}`;
+}
 
 export default function PostPage() {
   const params = useParams();
   const router = useRouter();
   const id = params?.id as string;
 
-  const [post, setPost] = useState<Post | null>(null);
-  const [autor, setAutor] = useState<Autor | null>(null);
-
+  const [post, setPost] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
 
   useEffect(() => {
     async function fetchPost() {
@@ -38,135 +60,79 @@ export default function PostPage() {
         const ref = doc(db, "posts", id);
         const snap = await getDoc(ref);
 
-        if (!snap.exists()) {
-          setError("Post não encontrado.");
-          setLoading(false);
-          return;
+        if (snap.exists()) {
+          setPost({ id: snap.id, ...snap.data() });
         }
-
-        const data = snap.data() as Post;
-        setPost(data);
-
-        // 🔥 BUSCAR AUTOR REAL (corrige "Usuário")
-        if (data.autorId) {
-          const userRef = doc(db, "users", data.autorId);
-          const userSnap = await getDoc(userRef);
-
-          if (userSnap.exists()) {
-            setAutor(userSnap.data() as Autor);
-          }
-        }
-
       } catch (err) {
         console.error(err);
-        setError("Erro ao carregar o post.");
-      } finally {
-        setLoading(false);
       }
+
+      setLoading(false);
     }
 
     fetchPost();
   }, [id]);
 
-  async function handleDelete() {
-    if (!confirm("Tem certeza que deseja apagar este post?")) return;
-
-    try {
-      await deleteDoc(doc(db, "posts", id));
-      router.push("/posts");
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao apagar post.");
-    }
-  }
-
   if (loading) {
-    return <p className="p-4 text-neutral-400">Carregando conteúdo...</p>;
+    return <p className="p-4 text-neutral-400">Carregando post...</p>;
   }
 
-  if (error || !post) {
-    return <p className="p-4 text-red-400">{error}</p>;
+  if (!post) {
+    return <p className="p-4 text-red-400">Post não encontrado.</p>;
   }
 
   const isOwner = auth.currentUser?.uid === post.autorId;
 
-  let dataFormatada = "";
-  if (post.data?.toDate) {
-    dataFormatada = post.data.toDate().toLocaleDateString("pt-BR");
-  }
-
-  const nomeExibicao =
-    autor?.titulo && autor?.nome
-      ? `${autor.titulo} ${autor.nome}`
-      : autor?.nome || post.autorNome || "Autor desconhecido";
-
   return (
     <article className="max-w-2xl mx-auto p-6 space-y-6">
 
-      {/* HEADER */}
-      <header className="space-y-2">
+      {/* TÍTULO */}
+      <h1 className="text-3xl font-bold text-neutral-100">
+        {post.titulo}
+      </h1>
 
-        <h1 className="text-3xl font-bold text-neutral-100">
-          {post.titulo}
-        </h1>
+      {/* META */}
+      <div className="text-sm text-neutral-400">
+        <span
+          className="hover:underline cursor-pointer"
+          onClick={() => router.push(`/perfil/${post.autorId}`)}
+        >
+          {post.autorNome || "Autor"}
+        </span>
+        {" • "}
+        {formatData(post.data)}
+        {" • "}
+        <span className="text-emerald-400">
+          {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+        </span>
+      </div>
 
-        <div className="text-sm text-neutral-400 flex gap-2 flex-wrap items-center">
-
-          {/* 👤 AUTOR CLICÁVEL */}
-          <button
-            onClick={() => router.push(`/perfil/${post.autorId}`)}
-            className="hover:underline cursor-pointer text-emerald-400"
-          >
-            {nomeExibicao}
-          </button>
-
-          <span>•</span>
-
-          <span>{dataFormatada}</span>
-
-          <span>•</span>
-
-          <span className="capitalize">
-            {post.tipo || "conteúdo"}
-          </span>
-        </div>
-      </header>
+      {/* FRASE DINÂMICA */}
+      <p className="text-neutral-300 italic">
+        {buildFrase(post)}
+      </p>
 
       <hr className="border-neutral-700" />
 
       {/* CONTEÚDO */}
-      <section className="text-lg leading-relaxed whitespace-pre-line text-neutral-200">
+      <div className="text-neutral-200 leading-relaxed whitespace-pre-line">
         {post.conteudo}
-      </section>
+      </div>
 
-      {/* BOTÕES DONO */}
+      {/* AÇÕES DONO */}
       {isOwner && (
         <div className="flex gap-3 pt-4">
 
           <button
             onClick={() => router.push(`/editar/${id}`)}
-            className="
-              px-4 py-2
-              bg-emerald-600 hover:bg-emerald-700
-              text-white rounded
-              cursor-pointer
-              transition
-              active:scale-95
-            "
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded cursor-pointer"
           >
             Editar
           </button>
 
           <button
-            onClick={handleDelete}
-            className="
-              px-4 py-2
-              bg-red-600 hover:bg-red-700
-              text-white rounded
-              cursor-pointer
-              transition
-              active:scale-95
-            "
+            onClick={() => alert("implementar delete")}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded cursor-pointer"
           >
             Apagar
           </button>
