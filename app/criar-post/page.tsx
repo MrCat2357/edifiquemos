@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { db, auth } from "@/lib/firebase";
 import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
+import { gerarSlugUnico } from "@/lib/slug";
 
 export default function CriarPost() {
   const router = useRouter();
@@ -20,7 +21,6 @@ export default function CriarPost() {
 
   useEffect(() => {
     const draft = sessionStorage.getItem("draft-post");
-
     if (draft) {
       const d = JSON.parse(draft);
       setTitulo(d.titulo || "");
@@ -35,19 +35,12 @@ export default function CriarPost() {
     try {
       const ref = doc(db, "users", uid);
       const snap = await getDoc(ref);
-
-      if (!snap.exists()) {
-        return "Autor";
-      }
-
+      if (!snap.exists()) return "Autor";
       const data = snap.data();
-
       const nome = data?.nome?.trim();
       const titulo = data?.titulo?.trim();
-
       if (nome && titulo) return `${titulo} ${nome}`;
       if (nome) return nome;
-
       return "Autor";
     } catch {
       return "Autor";
@@ -56,7 +49,6 @@ export default function CriarPost() {
 
   async function handleCriarPost(e: React.FormEvent) {
     e.preventDefault();
-
     if (loading) return;
 
     if (!titulo.trim() || !conteudo.trim()) {
@@ -80,6 +72,7 @@ export default function CriarPost() {
 
     try {
       const autorNome = await getAutorInfo(user.uid);
+      const slug = await gerarSlugUnico(autorNome, titulo);
 
       await addDoc(collection(db, "posts"), {
         titulo: titulo.trim(),
@@ -89,11 +82,13 @@ export default function CriarPost() {
         data: data || new Date(),
         autorId: user.uid,
         autorNome,
+        slug, // ✅ SALVA O SLUG
       });
 
       sessionStorage.removeItem("draft-post");
 
-      router.push("/posts");
+      // ✅ REDIRECIONA PARA A URL BONITA
+      router.push(`/posts/${tipo === "sermao" ? "sermoes" : "artigos"}/${slug}`);
     } catch (err) {
       console.error(err);
       setError("Erro ao publicar.");
@@ -105,25 +100,19 @@ export default function CriarPost() {
   return (
     <div className="max-w-xl mx-auto p-6 space-y-6">
 
-      <h1 className="text-2xl font-bold text-neutral-100">
-        Criar Post
-      </h1>
+      <h1 className="text-2xl font-bold text-neutral-100">Criar Post</h1>
 
-      {/* 🚧 AVISO */}
       {mostrarAviso && (
         <div className="bg-neutral-800 border border-emerald-600 p-4 rounded text-center">
-
           <p className="text-neutral-200 mb-3">
             Para publicar, você precisa criar uma conta.
           </p>
-
           <button
             onClick={() => router.push("/cadastro")}
             className="bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded text-white cursor-pointer"
           >
             Ir para cadastro
           </button>
-
         </div>
       )}
 
@@ -160,26 +149,21 @@ export default function CriarPost() {
         />
 
         <input
-          placeholder="Data (ex: 04/2019 ou 2018)"
+          placeholder="Data"
           value={data}
           onChange={(e) => setData(e.target.value)}
           className="w-full bg-neutral-800 border border-neutral-700 p-2 rounded text-neutral-100"
         />
 
-        {error && (
-          <p className="text-red-400 text-sm">{error}</p>
-        )}
+        {error && <p className="text-red-400 text-sm">{error}</p>}
 
         <button
           type="submit"
           disabled={loading}
           className="
-            w-full
-            bg-emerald-600 hover:bg-emerald-700
-            text-white p-2 rounded
-            cursor-pointer
-            transition
-            active:scale-95
+            w-full bg-emerald-600 hover:bg-emerald-700
+            text-white p-2 rounded cursor-pointer
+            transition active:scale-95
           "
         >
           {loading ? "Publicando..." : "Publicar"}
