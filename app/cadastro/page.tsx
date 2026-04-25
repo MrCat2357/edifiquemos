@@ -7,6 +7,7 @@ import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, setDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function Cadastro() {
   const router = useRouter();
@@ -15,6 +16,8 @@ export default function Cadastro() {
   const [titulo, setTitulo] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const [aceitouTermos, setAceitouTermos] = useState(false);
+
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -30,6 +33,11 @@ export default function Cadastro() {
 
     if (senha.length < 6) {
       setError("A senha deve ter pelo menos 6 caracteres.");
+      return;
+    }
+
+    if (!aceitouTermos) {
+      setError("Você precisa aceitar os termos de uso.");
       return;
     }
 
@@ -49,6 +57,7 @@ export default function Cadastro() {
         titulo: titulo || "",
         email,
         criadoEm: new Date(),
+        aceitouTermos: true,
       });
 
       const redirect = sessionStorage.getItem("redirect-after-auth");
@@ -134,6 +143,26 @@ export default function Cadastro() {
           onChange={setSenha}
         />
 
+        {/* 📜 TERMOS */}
+        <div className="flex items-start gap-2 text-sm text-neutral-300">
+          <input
+            type="checkbox"
+            checked={aceitouTermos}
+            onChange={(e) => setAceitouTermos(e.target.checked)}
+            className="mt-1 cursor-pointer"
+          />
+
+          <p>
+            Eu li e aceito os{" "}
+            <Link
+              href="/termos"
+              className="text-emerald-400 hover:underline cursor-pointer"
+            >
+              Termos de Uso
+            </Link>
+          </p>
+        </div>
+
         {/* ERRO */}
         {error && (
           <p className="text-red-400 text-sm text-center">
@@ -141,7 +170,7 @@ export default function Cadastro() {
           </p>
         )}
 
-        {/* 👆 BOTÃO COM CURSOR DE MÃO GARANTIDO */}
+        {/* BOTÃO */}
         <div className="cursor-pointer">
           <Button
             type="submit"
