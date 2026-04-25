@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getAnalytics, isSupported } from "firebase/analytics"; // ✅ ADICIONADO
 
 const firebaseConfig = {
   apiKey: "AIzaSyB4VndXA9ohPCK4vKA-xx-PBdlAx66KUsA",
@@ -17,5 +18,11 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// 🔥 AUTO-LOGIN (persistência local)
+// ✅ INICIA O ANALYTICS APENAS NO NAVEGADOR
+if (typeof window !== "undefined") {
+  isSupported().then((yes) => {
+    if (yes) getAnalytics(app);
+  });
+}
+
 setPersistence(auth, browserLocalPersistence);
