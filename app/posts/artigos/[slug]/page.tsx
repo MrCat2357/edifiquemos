@@ -24,6 +24,8 @@ export default function PostArtigoPage() {
   const [postId, setPostId] = useState<string>("");
   const [autor, setAutor] = useState<AutorType | null>(null);
   const [loading, setLoading] = useState(true);
+  const [copiado, setCopiado] = useState(false);
+  const [compartilharAberto, setCompartilharAberto] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -67,6 +69,12 @@ export default function PostArtigoPage() {
     }
   }
 
+  async function copiarLink() {
+    await navigator.clipboard.writeText(window.location.href);
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 2000);
+  }
+
   if (loading) return <p className="p-4 text-neutral-400">Carregando...</p>;
   if (!post) return <p className="p-4 text-red-400">Post não encontrado</p>;
 
@@ -76,6 +84,10 @@ export default function PostArtigoPage() {
       : autor?.nome || post.autorNome || "Autor";
 
   const isAutor = user?.uid === post.autorId;
+
+  const urlAtual = typeof window !== "undefined" ? window.location.href : "";
+  const textoCompartilhar = encodeURIComponent(`${post.titulo} - ${nomeExibicao}`);
+  const urlEncoded = encodeURIComponent(urlAtual);
 
   return (
     <article className="max-w-2xl mx-auto p-6 space-y-6">
@@ -104,6 +116,52 @@ export default function PostArtigoPage() {
         Artigo publicado por {nomeExibicao} em {formatData(post.data)}
       </p>
 
+      {/* COMPARTILHAR */}
+      <div className="flex flex-col items-center gap-3">
+        <button
+          onClick={() => setCompartilharAberto(!compartilharAberto)}
+          className="px-4 py-2 text-sm rounded bg-neutral-700 hover:bg-neutral-600 text-white cursor-pointer transition"
+        >
+          Compartilhar
+        </button>
+
+        {compartilharAberto && (
+          <div className="flex flex-wrap gap-2 justify-center">
+            <a
+            href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1 text-sm rounded bg-green-600 hover:bg-green-500 text-white cursor-pointer"
+            >
+              WhatsApp
+            </a>
+            <a
+              href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
+            >
+              Facebook
+            </a>
+            <a
+              href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2 text-sm rounded bg-white hover:bg-neutral-200 text-neutral-900 cursor-pointer transition font-semibold"
+            >
+              Threads
+            </a>
+            <button
+              onClick={copiarLink}
+              className="px-3 py-1 text-sm rounded bg-neutral-600 hover:bg-neutral-500 text-white cursor-pointer"
+            >
+              {copiado ? "Link copiado!" : "Copiar link"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* BOTÕES EDITAR/APAGAR */}
       {isAutor && (
         <div className="flex gap-2 justify-end">
           <button
