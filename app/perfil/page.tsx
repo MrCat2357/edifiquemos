@@ -27,57 +27,58 @@ export default function Perfil() {
 
   const [posts, setPosts] = useState<any[]>([]);
 
-  // 📥 Carregar dados do usuário + posts
-  useEffect(() => {
-    async function carregar() {
-      const user = auth.currentUser;
-      if (!user) return;
+  // 📥 FUNÇÃO CENTRAL DE CARREGAMENTO (IMPORTANTE)
+  async function carregar() {
+    const user = auth.currentUser;
+    if (!user) return;
 
-      try {
-        // 🔹 dados do perfil
-        const ref = doc(db, "users", user.uid);
-        const snap = await getDoc(ref);
+    try {
+      // 🔹 perfil
+      const ref = doc(db, "users", user.uid);
+      const snap = await getDoc(ref);
 
-        if (snap.exists()) {
-          const data = snap.data();
+      if (snap.exists()) {
+        const data = snap.data();
 
-          setNome(data.nome || "");
-          setTitulo(data.titulo || "");
-          setBio(data.bio || "");
-        } else {
-          setNome(user.displayName || "");
-        }
-
-        // 🔹 posts do usuário
-        const q = query(
-          collection(db, "posts"),
-          where("autorId", "==", user.uid),
-          orderBy("data", "desc")
-        );
-
-        const snapshot = await getDocs(q);
-
-        const lista: any[] = [];
-
-        snapshot.forEach((doc) => {
-          lista.push({
-            id: doc.id,
-            ...doc.data(),
-          });
-        });
-
-        setPosts(lista);
-      } catch (error) {
-        console.error(error);
+        setNome(data.nome || "");
+        setTitulo(data.titulo || "");
+        setBio(data.bio || "");
+      } else {
+        setNome(user.displayName || "");
       }
 
-      setLoading(false);
+      // 🔹 posts
+      const q = query(
+        collection(db, "posts"),
+        where("autorId", "==", user.uid),
+        orderBy("data", "desc")
+      );
+
+      const snapshot = await getDocs(q);
+
+      const lista: any[] = [];
+
+      snapshot.forEach((doc) => {
+        lista.push({
+          id: doc.id,
+          ...doc.data(),
+        });
+      });
+
+      setPosts(lista);
+    } catch (error) {
+      console.error(error);
     }
 
+    setLoading(false);
+  }
+
+  // 📥 primeira carga
+  useEffect(() => {
     carregar();
   }, []);
 
-  // 💾 salvar perfil
+  // 💾 salvar perfil (AGORA RECARREGA AUTOMATICAMENTE)
   async function salvar() {
     const user = auth.currentUser;
     if (!user) return;
@@ -99,6 +100,9 @@ export default function Perfil() {
       await updateProfile(user, {
         displayName: nome,
       });
+
+      // 🔥 RECARREGA TUDO IMEDIATAMENTE
+      await carregar();
 
       alert("Perfil atualizado com sucesso!");
     } catch (error) {
@@ -123,48 +127,44 @@ export default function Perfil() {
           Meu Perfil
         </h1>
 
-        {/* TÍTULO */}
         <input
-          className="w-full p-2 rounded bg-neutral-900 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
+          className="w-full p-2 rounded bg-neutral-900 border border-neutral-700 text-neutral-100"
           placeholder="Título (ex: Pastor, Presbítero...)"
           value={titulo}
           onChange={(e) => setTitulo(e.target.value)}
         />
 
-        {/* NOME */}
         <input
-          className="w-full p-2 rounded bg-neutral-900 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-emerald-500"
+          className="w-full p-2 rounded bg-neutral-900 border border-neutral-700 text-neutral-100"
           placeholder="Seu nome"
           value={nome}
           onChange={(e) => setNome(e.target.value)}
         />
 
-        {/* BIO (NOVO) */}
         <textarea
-          className="w-full p-2 rounded bg-neutral-900 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-emerald-500 h-28"
-          placeholder="Descrição do perfil (ex: membro da igreja, formação, chamado...)"
+          className="w-full p-2 rounded bg-neutral-900 border border-neutral-700 text-neutral-100 h-28"
+          placeholder="Descrição do perfil"
           value={bio}
           onChange={(e) => setBio(e.target.value)}
         />
 
-        {/* BOTÃO */}
         <button
           onClick={salvar}
           disabled={salvando}
           className="
             w-full py-2 rounded text-white
             bg-emerald-600 hover:bg-emerald-700
-            active:scale-95 active:translate-y-0.5
-            transition shadow-md
-            disabled:opacity-50
+            transition
             cursor-pointer
+            active:scale-95
+            disabled:opacity-50
           "
         >
           {salvando ? "Salvando..." : "Salvar"}
         </button>
       </div>
 
-      {/* 📝 POSTS DO USUÁRIO */}
+      {/* 📝 POSTS */}
       <div className="space-y-4">
 
         <h2 className="text-xl font-semibold text-neutral-100">

@@ -25,6 +25,7 @@ function buildFrase(post: any) {
   const data = formatData(post.data);
   const autor = post.autorNome || "Autor";
 
+  // 📖 SERMÃO
   if (tipo === "sermao") {
     if (igreja && post.data) {
       return `Sermão pregado na igreja ${igreja} em ${data}`;
@@ -41,6 +42,7 @@ function buildFrase(post: any) {
     return `Sermão publicado em ${data}`;
   }
 
+  // ✍️ ARTIGO
   return `Artigo publicado por ${autor} em ${data}`;
 }
 
@@ -62,9 +64,12 @@ export default function PostPage() {
 
         if (snap.exists()) {
           setPost({ id: snap.id, ...snap.data() });
+        } else {
+          setPost(null);
         }
       } catch (err) {
-        console.error(err);
+        console.error("Erro ao buscar post:", err);
+        setPost(null);
       }
 
       setLoading(false);
@@ -92,19 +97,34 @@ export default function PostPage() {
       </h1>
 
       {/* META */}
-      <div className="text-sm text-neutral-400">
+      <div className="text-sm text-neutral-400 flex flex-wrap gap-1 items-center">
+
+        {/* AUTOR CLICÁVEL */}
         <span
-          className="hover:underline cursor-pointer"
+          title="Ver perfil do autor"
+          className="
+            text-emerald-400
+            hover:underline
+            cursor-pointer
+            font-medium
+          "
           onClick={() => router.push(`/perfil/${post.autorId}`)}
         >
           {post.autorNome || "Autor"}
         </span>
-        {" • "}
-        {formatData(post.data)}
-        {" • "}
+
+        <span>•</span>
+
+        {/* DATA */}
+        <span>{formatData(post.data)}</span>
+
+        <span>•</span>
+
+        {/* TIPO */}
         <span className="text-emerald-400">
           {post.tipo === "sermao" ? "Sermão" : "Artigo"}
         </span>
+
       </div>
 
       {/* FRASE DINÂMICA */}
@@ -125,14 +145,28 @@ export default function PostPage() {
 
           <button
             onClick={() => router.push(`/editar/${id}`)}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded cursor-pointer"
+            className="
+              px-4 py-2
+              bg-emerald-600 hover:bg-emerald-700
+              rounded
+              cursor-pointer
+              transition
+              active:scale-95
+            "
           >
             Editar
           </button>
 
           <button
             onClick={() => alert("implementar delete")}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded cursor-pointer"
+            className="
+              px-4 py-2
+              bg-red-600 hover:bg-red-700
+              rounded
+              cursor-pointer
+              transition
+              active:scale-95
+            "
           >
             Apagar
           </button>

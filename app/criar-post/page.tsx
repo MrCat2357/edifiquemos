@@ -20,6 +20,7 @@ export default function CriarPost() {
 
   useEffect(() => {
     const draft = sessionStorage.getItem("draft-post");
+
     if (draft) {
       const d = JSON.parse(draft);
       setTitulo(d.titulo || "");
@@ -31,19 +32,26 @@ export default function CriarPost() {
   }, []);
 
   async function getAutorInfo(uid: string) {
-    const ref = doc(db, "users", uid);
-    const snap = await getDoc(ref);
+    try {
+      const ref = doc(db, "users", uid);
+      const snap = await getDoc(ref);
 
-    if (snap.exists()) {
+      if (!snap.exists()) {
+        return "Autor";
+      }
+
       const data = snap.data();
-      const nome = data.nome || "";
-      const titulo = data.titulo || "";
+
+      const nome = data?.nome?.trim();
+      const titulo = data?.titulo?.trim();
 
       if (nome && titulo) return `${titulo} ${nome}`;
       if (nome) return nome;
-    }
 
-    return "Usuário";
+      return "Autor";
+    } catch {
+      return "Autor";
+    }
   }
 
   async function handleCriarPost(e: React.FormEvent) {
@@ -71,22 +79,21 @@ export default function CriarPost() {
     setLoading(true);
 
     try {
-      // 🔥 BUSCA NOME REAL NO FIRESTORE
       const autorNome = await getAutorInfo(user.uid);
 
-      const docRef = await addDoc(collection(db, "posts"), {
-        titulo,
-        conteudo,
+      await addDoc(collection(db, "posts"), {
+        titulo: titulo.trim(),
+        conteudo: conteudo.trim(),
         tipo,
-        igreja,
+        igreja: igreja.trim() || "",
         data: data || new Date(),
         autorId: user.uid,
-        autorNome, // ✅ AGORA CORRETO
+        autorNome,
       });
 
       sessionStorage.removeItem("draft-post");
 
-      router.push(`/post/${docRef.id}`);
+      router.push("/posts");
     } catch (err) {
       console.error(err);
       setError("Erro ao publicar.");
@@ -105,6 +112,7 @@ export default function CriarPost() {
       {/* 🚧 AVISO */}
       {mostrarAviso && (
         <div className="bg-neutral-800 border border-emerald-600 p-4 rounded text-center">
+
           <p className="text-neutral-200 mb-3">
             Para publicar, você precisa criar uma conta.
           </p>
@@ -115,6 +123,7 @@ export default function CriarPost() {
           >
             Ir para cadastro
           </button>
+
         </div>
       )}
 
@@ -157,12 +166,21 @@ export default function CriarPost() {
           className="w-full bg-neutral-800 border border-neutral-700 p-2 rounded text-neutral-100"
         />
 
-        {error && <p className="text-red-400 text-sm">{error}</p>}
+        {error && (
+          <p className="text-red-400 text-sm">{error}</p>
+        )}
 
         <button
           type="submit"
           disabled={loading}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white p-2 rounded cursor-pointer"
+          className="
+            w-full
+            bg-emerald-600 hover:bg-emerald-700
+            text-white p-2 rounded
+            cursor-pointer
+            transition
+            active:scale-95
+          "
         >
           {loading ? "Publicando..." : "Publicar"}
         </button>
