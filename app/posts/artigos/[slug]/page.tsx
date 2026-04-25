@@ -120,7 +120,7 @@ export default function PostArtigoPage() {
       <div className="flex flex-col items-center gap-3">
         <button
           onClick={() => setCompartilharAberto(!compartilharAberto)}
-          className="px-4 py-2 text-sm rounded bg-neutral-700 hover:bg-neutral-600 text-white cursor-pointer transition"
+          className="px-4 py-2 text-sm rounded bg-white hover:bg-neutral-200 text-neutral-900 cursor-pointer transition font-semibold"
         >
           Compartilhar
         </button>
