@@ -16,7 +16,7 @@ function formatData(data: any) {
     return data;
   }
 
-  return new Date().toLocaleDateString("pt-BR");
+  return new Date(data).toLocaleDateString("pt-BR");
 }
 
 function buildFrase(post: any) {
@@ -25,7 +25,6 @@ function buildFrase(post: any) {
   const data = formatData(post.data);
   const autor = post.autorNome || "Autor";
 
-  // 📖 SERMÃO
   if (tipo === "sermao") {
     if (igreja && post.data) {
       return `Sermão pregado na igreja ${igreja} em ${data}`;
@@ -42,14 +41,12 @@ function buildFrase(post: any) {
     return `Sermão publicado em ${data}`;
   }
 
-  // ✍️ ARTIGO
   return `Artigo publicado por ${autor} em ${data}`;
 }
 
 export default function Posts() {
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-
   const [filtro, setFiltro] = useState<"todos" | "sermao" | "artigo">("todos");
 
   const router = useRouter();
@@ -96,7 +93,7 @@ export default function Posts() {
         Conteúdos
       </h1>
 
-      {/* 🔎 FILTRO */}
+      {/* FILTRO */}
       <div className="flex gap-2">
         {["todos", "sermao", "artigo"].map((f) => (
           <button
@@ -137,14 +134,33 @@ export default function Posts() {
             hover:-translate-y-0.5
           "
         >
+          {/* TÍTULO */}
           <h2 className="text-lg font-semibold text-emerald-300">
             {post.titulo}
           </h2>
 
-          <p className="text-sm text-neutral-400">
-            {buildFrase(post)}
-          </p>
+          {/* AUTOR + FRASE */}
+          <div className="text-sm text-neutral-400 flex flex-wrap gap-1 items-center">
 
+            {/* AUTOR CLICÁVEL (corrigido stopPropagation) */}
+            <span
+              className="text-emerald-400 hover:underline cursor-pointer font-medium"
+              onClick={(e) => {
+                e.stopPropagation(); // 🔥 impede abrir o post
+                router.push(`/perfil/${post.autorId}`);
+              }}
+            >
+              {post.autorNome || "Autor"}
+            </span>
+
+            <span>•</span>
+
+            {/* FRASE DINÂMICA */}
+            <span>{buildFrase(post)}</span>
+
+          </div>
+
+          {/* TIPO */}
           <p className="text-sm text-emerald-400">
             {post.tipo === "sermao" ? "Sermão" : "Artigo"}
           </p>
