@@ -1,5 +1,5 @@
 import "./globals.css";
-import Header from "@/components/Header";
+import HeaderWrapper from "@/components/HeaderWrapper";
 
 export const metadata = {
   title: "Voz da Fé",
@@ -15,7 +15,7 @@ export default function RootLayout({
     <html lang="pt-BR">
       <body className="bg-neutral-900 text-neutral-100 min-h-screen">
 
-        <Header />
+        <HeaderWrapper />
 
         <main className="max-w-3xl mx-auto px-4 py-8">
           {children}

@@ -15,6 +15,7 @@ export default function EditarPost() {
   const [tipo, setTipo] = useState("sermao");
   const [igreja, setIgreja] = useState("");
   const [data, setData] = useState("");
+  const [slug, setSlug] = useState(""); // ✅ GUARDA O SLUG
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -35,7 +36,6 @@ export default function EditarPost() {
 
         const data = snap.data();
 
-        // 🔐 segurança: só autor pode editar
         if (auth.currentUser?.uid !== data.autorId) {
           setError("Você não tem permissão para editar este post.");
           return;
@@ -45,6 +45,7 @@ export default function EditarPost() {
         setConteudo(data.conteudo || "");
         setTipo(data.tipo || "sermao");
         setIgreja(data.igreja || "");
+        setSlug(data.slug || ""); // ✅ SALVA O SLUG
 
         if (data.data?.toDate) {
           const d = data.data.toDate();
@@ -84,7 +85,8 @@ export default function EditarPost() {
         data: data ? new Date(data) : new Date(),
       });
 
-      router.push(`/post/${id}`);
+      // ✅ REDIRECIONA PARA URL BONITA
+      router.push(`/posts/${tipo === "sermao" ? "sermoes" : "artigos"}/${slug}`);
     } catch (err) {
       console.error(err);
       setError("Erro ao atualizar post.");
@@ -93,24 +95,16 @@ export default function EditarPost() {
     setSaving(false);
   }
 
-  if (loading) {
-    return <p className="p-4 text-neutral-400">Carregando...</p>;
-  }
-
-  if (error) {
-    return <p className="p-4 text-red-400">{error}</p>;
-  }
+  if (loading) return <p className="p-4 text-neutral-400">Carregando...</p>;
+  if (error) return <p className="p-4 text-red-400">{error}</p>;
 
   return (
     <div className="max-w-xl mx-auto p-6 space-y-6">
 
-      <h1 className="text-2xl font-bold text-neutral-100">
-        Editar Post
-      </h1>
+      <h1 className="text-2xl font-bold text-neutral-100">Editar Post</h1>
 
       <form onSubmit={handleUpdate} className="space-y-4">
 
-        {/* TIPO */}
         <select
           value={tipo}
           onChange={(e) => setTipo(e.target.value)}
@@ -120,7 +114,6 @@ export default function EditarPost() {
           <option value="artigo">Artigo</option>
         </select>
 
-        {/* TÍTULO */}
         <input
           className="w-full bg-neutral-800 border border-neutral-700 text-neutral-100 p-2 rounded"
           placeholder="Título"
@@ -128,7 +121,6 @@ export default function EditarPost() {
           onChange={(e) => setTitulo(e.target.value)}
         />
 
-        {/* CONTEÚDO */}
         <textarea
           className="w-full bg-neutral-800 border border-neutral-700 text-neutral-100 p-2 rounded h-40"
           placeholder="Conteúdo..."
@@ -136,7 +128,6 @@ export default function EditarPost() {
           onChange={(e) => setConteudo(e.target.value)}
         />
 
-        {/* IGREJA (opcional) */}
         <input
           className="w-full bg-neutral-800 border border-neutral-700 text-neutral-100 p-2 rounded"
           placeholder="Igreja (opcional)"
@@ -144,7 +135,6 @@ export default function EditarPost() {
           onChange={(e) => setIgreja(e.target.value)}
         />
 
-        {/* DATA (opcional) */}
         <input
           type="date"
           value={data}
@@ -152,21 +142,13 @@ export default function EditarPost() {
           className="w-full bg-neutral-800 border border-neutral-700 text-neutral-100 p-2 rounded"
         />
 
-        {/* BOTÃO */}
         <button
           type="submit"
           disabled={saving}
           className="
-            w-full
-            bg-emerald-600
-            hover:bg-emerald-700
-            text-white
-            p-2
-            rounded
-            transition
-            cursor-pointer
-            active:scale-95
-            disabled:opacity-50
+            w-full bg-emerald-600 hover:bg-emerald-700
+            text-white p-2 rounded transition
+            cursor-pointer active:scale-95 disabled:opacity-50
           "
         >
           {saving ? "Salvando..." : "Salvar alterações"}

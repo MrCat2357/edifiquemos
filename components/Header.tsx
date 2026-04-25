@@ -5,72 +5,63 @@ import { useAuth } from "@/lib/useAuth";
 import { signOut } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 
-import { doc, getDoc } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 export default function Header() {
   const { user, loading } = useAuth();
-
-  const router = useRouter(); // ✅ AGORA ESTÁ NO LUGAR CERTO
+  const router = useRouter();
 
   const [nomeExibicao, setNomeExibicao] = useState("");
   const [carregandoNome, setCarregandoNome] = useState(false);
 
   useEffect(() => {
-    async function fetchUser() {
-      if (!user) {
-        setNomeExibicao("");
-        return;
-      }
+    if (!user) {
+      setNomeExibicao("");
+      return;
+    }
 
-      setCarregandoNome(true);
+    setCarregandoNome(true);
 
-      try {
-        const docRef = doc(db, "users", user.uid);
-        const docSnap = await getDoc(docRef);
+    const docRef = doc(db, "users", user.uid);
 
-        if (docSnap.exists()) {
-          const data = docSnap.data();
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const nome = data.nome || "";
+        const titulo = data.titulo || "";
 
-          const nome = data.nome || "";
-          const titulo = data.titulo || "";
-
-          if (nome && titulo) {
-            setNomeExibicao(`${titulo} ${nome}`);
-          } else if (nome) {
-            setNomeExibicao(nome);
-          } else {
-            setNomeExibicao(user.email || "Usuário");
-          }
+        if (nome && titulo) {
+          setNomeExibicao(`${titulo} ${nome}`);
+        } else if (nome) {
+          setNomeExibicao(nome);
         } else {
           setNomeExibicao(user.email || "Usuário");
         }
-      } catch (error) {
-        console.error("Erro ao buscar usuário:", error);
+      } else {
         setNomeExibicao(user.email || "Usuário");
       }
 
       setCarregandoNome(false);
-    }
+    });
 
-    fetchUser();
+    return () => unsubscribe();
   }, [user]);
 
   async function handleLogout() {
     await signOut(auth);
+    router.push("/login"); // ✅
   }
 
   return (
     <header className="bg-gray-900 text-white">
       <nav className="max-w-2xl mx-auto flex justify-between items-center p-4">
 
-        {/* 🔥 LOGO */}
         <span className="font-bold text-lg">
           Sermões e Artigos
         </span>
 
-        {/* 🔗 LINKS */}
         <div className="flex gap-4 items-center text-sm">
 
           <Link href="/">Home</Link>
@@ -86,7 +77,6 @@ export default function Header() {
           ) : user ? (
             <div className="flex items-center gap-3">
 
-              {/* 👤 NOME (LINK PRO PERFIL) */}
               <button
                 onClick={() => router.push("/perfil")}
                 className="hover:underline cursor-pointer"
@@ -94,7 +84,6 @@ export default function Header() {
                 {carregandoNome ? "..." : nomeExibicao}
               </button>
 
-              {/* 🔴 SAIR */}
               <button
                 onClick={handleLogout}
                 className="

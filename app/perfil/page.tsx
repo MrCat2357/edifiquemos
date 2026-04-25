@@ -12,6 +12,7 @@ import {
   where,
   getDocs,
   orderBy,
+  writeBatch,
 } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 
@@ -27,19 +28,16 @@ export default function Perfil() {
 
   const [posts, setPosts] = useState<any[]>([]);
 
-  // 📥 FUNÇÃO CENTRAL DE CARREGAMENTO (IMPORTANTE)
   async function carregar() {
     const user = auth.currentUser;
     if (!user) return;
 
     try {
-      // 🔹 perfil
       const ref = doc(db, "users", user.uid);
       const snap = await getDoc(ref);
 
       if (snap.exists()) {
         const data = snap.data();
-
         setNome(data.nome || "");
         setTitulo(data.titulo || "");
         setBio(data.bio || "");
@@ -47,7 +45,6 @@ export default function Perfil() {
         setNome(user.displayName || "");
       }
 
-      // 🔹 posts
       const q = query(
         collection(db, "posts"),
         where("autorId", "==", user.uid),
@@ -57,12 +54,8 @@ export default function Perfil() {
       const snapshot = await getDocs(q);
 
       const lista: any[] = [];
-
       snapshot.forEach((doc) => {
-        lista.push({
-          id: doc.id,
-          ...doc.data(),
-        });
+        lista.push({ id: doc.id, ...doc.data() });
       });
 
       setPosts(lista);
@@ -73,12 +66,10 @@ export default function Perfil() {
     setLoading(false);
   }
 
-  // 📥 primeira carga
   useEffect(() => {
     carregar();
   }, []);
 
-  // 💾 salvar perfil (AGORA RECARREGA AUTOMATICAMENTE)
   async function salvar() {
     const user = auth.currentUser;
     if (!user) return;
@@ -91,6 +82,11 @@ export default function Perfil() {
     setSalvando(true);
 
     try {
+      const nomeCompleto = titulo.trim()
+        ? `${titulo.trim()} ${nome.trim()}`
+        : nome.trim();
+
+      // ATUALIZA O PERFIL
       await updateDoc(doc(db, "users", user.uid), {
         nome,
         titulo,
@@ -101,7 +97,19 @@ export default function Perfil() {
         displayName: nome,
       });
 
-      // 🔥 RECARREGA TUDO IMEDIATAMENTE
+      // ATUALIZA autorNome EM TODOS OS POSTS DO USUÁRIO
+      const q = query(
+        collection(db, "posts"),
+        where("autorId", "==", user.uid)
+      );
+      const snapshot = await getDocs(q);
+
+      const batch = writeBatch(db);
+      snapshot.forEach((postDoc) => {
+        batch.update(postDoc.ref, { autorNome: nomeCompleto });
+      });
+      await batch.commit();
+
       await carregar();
 
       alert("Perfil atualizado com sucesso!");
@@ -120,7 +128,7 @@ export default function Perfil() {
   return (
     <div className="max-w-2xl mx-auto p-6 space-y-8">
 
-      {/* 🧑 PERFIL */}
+      {/* PERFIL */}
       <div className="bg-neutral-800 border border-neutral-700 rounded-lg p-6 space-y-4">
 
         <h1 className="text-2xl font-bold text-emerald-300">
@@ -164,7 +172,7 @@ export default function Perfil() {
         </button>
       </div>
 
-      {/* 📝 POSTS */}
+      {/* POSTS */}
       <div className="space-y-4">
 
         <h2 className="text-xl font-semibold text-neutral-100">
