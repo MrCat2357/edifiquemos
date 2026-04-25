@@ -12,6 +12,7 @@ type Post = {
   data?: any;
   tipo?: "sermao" | "artigo";
   conteudo: string;
+  igreja?: string;
 };
 
 export default function PostPage() {
@@ -25,8 +26,6 @@ export default function PostPage() {
 
   useEffect(() => {
     async function fetchPost() {
-      if (!id) return;
-
       try {
         const ref = doc(db, "posts", id);
         const snap = await getDoc(ref);
@@ -36,8 +35,7 @@ export default function PostPage() {
         } else {
           setError("Post não encontrado.");
         }
-      } catch (err) {
-        console.error(err);
+      } catch {
         setError("Erro ao carregar o post.");
       } finally {
         setLoading(false);
@@ -50,23 +48,12 @@ export default function PostPage() {
   async function handleDelete() {
     if (!confirm("Tem certeza que deseja apagar este post?")) return;
 
-    try {
-      await deleteDoc(doc(db, "posts", id));
-      router.push("/posts");
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao apagar post.");
-    }
+    await deleteDoc(doc(db, "posts", id));
+    router.push("/posts");
   }
 
-  if (loading) {
-    return <p className="p-4 text-neutral-400">Carregando conteúdo...</p>;
-  }
-
-  if (error) {
-    return <p className="p-4 text-red-400">{error}</p>;
-  }
-
+  if (loading) return <p className="p-4 text-neutral-400">Carregando...</p>;
+  if (error) return <p className="p-4 text-red-400">{error}</p>;
   if (!post) return null;
 
   const isOwner = auth.currentUser?.uid === post.autorId;
@@ -76,52 +63,64 @@ export default function PostPage() {
     dataFormatada = post.data.toDate().toLocaleDateString("pt-BR");
   }
 
+  // ✨ FRASE FINAL
+  let fraseFinal = "";
+
+  if (post.tipo === "sermao") {
+    if (post.igreja || dataFormatada) {
+      fraseFinal = `Sermão pregado ${
+        post.igreja ? `na igreja ${post.igreja}` : ""
+      } ${dataFormatada ? `em ${dataFormatada}` : ""}.`;
+    }
+  } else {
+    fraseFinal = `Artigo publicado por ${post.autorNome || "autor"} ${
+      post.igreja ? `da igreja ${post.igreja}` : ""
+    } ${dataFormatada ? `em ${dataFormatada}` : ""}.`;
+  }
+
   return (
     <article className="max-w-2xl mx-auto p-6 space-y-6">
 
-      <header className="space-y-2">
+      <header>
         <h1 className="text-3xl font-bold text-neutral-100">
           {post.titulo}
         </h1>
 
-        <div className="text-sm text-neutral-400 flex gap-2 flex-wrap">
-          <span>{post.autorNome || "Autor desconhecido"}</span>
-          <span>•</span>
-          <span>{dataFormatada}</span>
-          <span>•</span>
-          <span className="capitalize">
-            {post.tipo || "conteúdo"}
-          </span>
-        </div>
+        <p className="text-sm text-neutral-400">
+          {post.autorNome} • {dataFormatada}
+        </p>
       </header>
 
       <hr className="border-neutral-700" />
 
-      <section className="text-lg leading-relaxed whitespace-pre-line text-neutral-200">
+      <section className="text-lg text-neutral-200 whitespace-pre-line">
         {post.conteudo}
       </section>
 
-      {/* 🔐 BOTÕES DO DONO */}
+      {/* ✨ FRASE FINAL */}
+      {fraseFinal && (
+        <p className="text-sm text-neutral-400 italic pt-4">
+          {fraseFinal}
+        </p>
+      )}
+
       {isOwner && (
         <div className="flex gap-3 pt-4">
-
           <button
             onClick={() => router.push(`/editar/${id}`)}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded cursor-pointer"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded"
           >
             Editar
           </button>
 
           <button
             onClick={handleDelete}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded cursor-pointer"
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded"
           >
             Apagar
           </button>
-
         </div>
       )}
-
     </article>
   );
 }
