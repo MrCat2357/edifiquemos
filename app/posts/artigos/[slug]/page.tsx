@@ -127,34 +127,25 @@ export default function PostArtigoPage() {
 
         {compartilharAberto && (
           <div className="flex flex-wrap gap-2 justify-center">
-            <a
-            href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-1 text-sm rounded bg-green-600 hover:bg-green-500 text-white cursor-pointer"
-            >
+            <a href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-sm rounded bg-green-600 hover:bg-green-500 text-white cursor-pointer">
               WhatsApp
             </a>
-            <a
-              href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-1 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white cursor-pointer"
-            >
+            <a href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white cursor-pointer">
               Facebook
             </a>
-            <a
-              href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2 text-sm rounded bg-white hover:bg-neutral-200 text-neutral-900 cursor-pointer transition font-semibold"
-            >
+            <a href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-sm rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-600 text-white cursor-pointer">
               Threads
             </a>
-            <button
-              onClick={copiarLink}
-              className="px-3 py-1 text-sm rounded bg-neutral-600 hover:bg-neutral-500 text-white cursor-pointer"
-            >
+            <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-sm rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-600 text-white cursor-pointer">
+              X (Twitter)
+            </a>
+            <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-sm rounded bg-blue-700 hover:bg-blue-600 text-white cursor-pointer">
+              LinkedIn
+            </a>
+            <a href={`mailto:?subject=${textoCompartilhar}&body=${urlEncoded}`} className="px-3 py-1 text-sm rounded bg-neutral-500 hover:bg-neutral-400 text-white cursor-pointer">
+              Email
+            </a>
+            <button onClick={copiarLink} className="px-3 py-1 text-sm rounded bg-neutral-600 hover:bg-neutral-500 text-white cursor-pointer">
               {copiado ? "Link copiado!" : "Copiar link"}
             </button>
           </div>
@@ -164,16 +155,10 @@ export default function PostArtigoPage() {
       {/* BOTÕES EDITAR/APAGAR */}
       {isAutor && (
         <div className="flex gap-2 justify-end">
-          <button
-            onClick={() => router.push(`/editar/${postId}`)}
-            className="px-3 py-1 text-sm rounded bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
-          >
+          <button onClick={() => router.push(`/editar/${postId}`)} className="px-3 py-1 text-sm rounded bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer">
             Editar
           </button>
-          <button
-            onClick={handleDelete}
-            className="px-3 py-1 text-sm rounded bg-red-600 hover:bg-red-500 text-white cursor-pointer"
-          >
+          <button onClick={handleDelete} className="px-3 py-1 text-sm rounded bg-red-600 hover:bg-red-500 text-white cursor-pointer">
             Apagar
           </button>
         </div>

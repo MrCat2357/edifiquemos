@@ -80,10 +80,8 @@ export default function PerfilPublico() {
   return (
     <div className="max-w-2xl mx-auto p-6 space-y-8">
 
-      {/* HEADER PERFIL */}
       <div className="bg-neutral-800 border border-neutral-700 p-6 rounded space-y-3">
         <h1 className="text-2xl font-bold text-emerald-300">{nomeExibicao}</h1>
-
         {user.bio ? (
           <p className="text-neutral-300 leading-relaxed">{user.bio}</p>
         ) : (
@@ -91,7 +89,6 @@ export default function PerfilPublico() {
         )}
       </div>
 
-      {/* POSTS */}
       <div className="space-y-4">
         <h2 className="text-xl font-semibold text-neutral-100">Publicações</h2>
 
@@ -105,11 +102,8 @@ export default function PerfilPublico() {
           const urlEncoded = encodeURIComponent(urlPost);
 
           return (
-            <div
-              key={post.id}
-              className="bg-neutral-800 border border-neutral-700 p-4 rounded hover:border-emerald-600 hover:shadow-[0_0_10px_rgba(16,185,129,0.15)]"
-            >
-              {/* CABEÇALHO CLICÁVEL */}
+            <div key={post.id} className="bg-neutral-800 border border-neutral-700 p-4 rounded hover:border-emerald-600 hover:shadow-[0_0_10px_rgba(16,185,129,0.15)]">
+
               <div
                 onClick={() => router.push(`/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`)}
                 className="cursor-pointer"
@@ -123,7 +117,6 @@ export default function PerfilPublico() {
                 </p>
               </div>
 
-              {/* COMPARTILHAR */}
               <div className="mt-3 flex flex-col gap-2">
                 <button
                   onClick={() => setCompartilharAberto(compartilharAberto === post.id ? null : post.id)}
@@ -142,6 +135,15 @@ export default function PerfilPublico() {
                     </a>
                     <a href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-xs rounded bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 text-white cursor-pointer">
                       Threads
+                    </a>
+                    <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-xs rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-600 text-white cursor-pointer">
+                      X (Twitter)
+                    </a>
+                    <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white cursor-pointer">
+                      LinkedIn
+                    </a>
+                    <a href={`mailto:?subject=${textoCompartilhar}&body=${urlEncoded}`} className="px-3 py-1 text-xs rounded bg-neutral-500 hover:bg-neutral-400 text-white cursor-pointer">
+                      Email
                     </a>
                     <button
                       onClick={() => { navigator.clipboard.writeText(urlPost); setCopiado(post.id); setTimeout(() => setCopiado(null), 2000); }}
