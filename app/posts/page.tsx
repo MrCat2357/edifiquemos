@@ -9,6 +9,8 @@ export default function Posts() {
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const [filtro, setFiltro] = useState<"todos" | "sermao" | "artigo">("todos");
+
   const router = useRouter();
 
   useEffect(() => {
@@ -37,6 +39,11 @@ export default function Posts() {
     fetchPosts();
   }, []);
 
+  const postsFiltrados =
+    filtro === "todos"
+      ? posts
+      : posts.filter((p) => p.tipo === filtro);
+
   if (loading) {
     return <p className="p-4 text-neutral-400">Carregando posts...</p>;
   }
@@ -44,16 +51,33 @@ export default function Posts() {
   return (
     <div className="max-w-xl mx-auto p-4 space-y-6">
 
-      {/* TÍTULO */}
       <h1 className="text-2xl font-bold text-neutral-100">
         Conteúdos
       </h1>
 
-      {posts.length === 0 && (
-        <p className="text-neutral-400">Nenhum post ainda.</p>
+      {/* 🔎 FILTRO */}
+      <div className="flex gap-2">
+        {["todos", "sermao", "artigo"].map((f) => (
+          <button
+            key={f}
+            onClick={() => setFiltro(f as any)}
+            className={`
+              px-3 py-1 rounded text-sm capitalize
+              ${filtro === f
+                ? "bg-emerald-600 text-white"
+                : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"}
+            `}
+          >
+            {f === "todos" ? "Todos" : f}
+          </button>
+        ))}
+      </div>
+
+      {postsFiltrados.length === 0 && (
+        <p className="text-neutral-400">Nenhum post encontrado.</p>
       )}
 
-      {posts.map((post) => (
+      {postsFiltrados.map((post) => (
         <div
           key={post.id}
           onClick={() => router.push(`/post/${post.id}`)}
@@ -65,18 +89,14 @@ export default function Posts() {
             cursor-pointer
             transition
             space-y-2
-            hover:bg-neutral-800
             hover:border-emerald-600
             hover:shadow-[0_0_10px_rgba(16,185,129,0.15)]
-            hover:-translate-y-0.5
           "
         >
-          {/* TÍTULO DO POST */}
           <h2 className="text-lg font-semibold text-emerald-300">
             {post.titulo}
           </h2>
 
-          {/* AUTOR + DATA */}
           <p className="text-sm text-neutral-400">
             {post.autorNome || "Autor"} •{" "}
             {post.data?.toDate
@@ -84,13 +104,11 @@ export default function Posts() {
               : ""}
           </p>
 
-          {/* TIPO */}
           <p className="text-sm text-emerald-400">
             {post.tipo === "sermao" ? "Sermão" : "Artigo"}
           </p>
         </div>
       ))}
-
     </div>
   );
 }
