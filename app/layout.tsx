@@ -4,6 +4,9 @@ import HeaderWrapper from "@/components/HeaderWrapper";
 export const metadata = {
   title: "Voz da Fé",
   description: "Compartilhe e leia sermões e reflexões cristãs",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
