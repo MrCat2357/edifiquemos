@@ -208,7 +208,7 @@ export default function Perfil() {
                     <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white cursor-pointer">
                       LinkedIn
                     </a>
-                    <a href={`mailto:?subject=${textoCompartilhar}&body=${urlEncoded}`} className="px-3 py-1 text-xs rounded bg-neutral-500 hover:bg-neutral-400 text-white cursor-pointer">
+                    <a href={`mailto:?subject=${textoCompartilhar}&body=${urlEncoded}`} className="px-3 py-1 text-xs rounded bg-red-600 hover:bg-red-500 text-white cursor-pointer">
                       Email
                     </a>
                     <button
