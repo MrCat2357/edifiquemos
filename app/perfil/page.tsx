@@ -20,6 +20,8 @@ export default function Perfil() {
 
   const [nome, setNome] = useState("");
   const [titulo, setTitulo] = useState("");
+  const [bio, setBio] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
@@ -38,8 +40,10 @@ export default function Perfil() {
 
         if (snap.exists()) {
           const data = snap.data();
+
           setNome(data.nome || "");
           setTitulo(data.titulo || "");
+          setBio(data.bio || "");
         } else {
           setNome(user.displayName || "");
         }
@@ -63,7 +67,6 @@ export default function Perfil() {
         });
 
         setPosts(lista);
-
       } catch (error) {
         console.error(error);
       }
@@ -90,6 +93,7 @@ export default function Perfil() {
       await updateDoc(doc(db, "users", user.uid), {
         nome,
         titulo,
+        bio,
       });
 
       await updateProfile(user, {
@@ -133,6 +137,14 @@ export default function Perfil() {
           placeholder="Seu nome"
           value={nome}
           onChange={(e) => setNome(e.target.value)}
+        />
+
+        {/* BIO (NOVO) */}
+        <textarea
+          className="w-full p-2 rounded bg-neutral-900 border border-neutral-700 text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-emerald-500 h-28"
+          placeholder="Descrição do perfil (ex: membro da igreja, formação, chamado...)"
+          value={bio}
+          onChange={(e) => setBio(e.target.value)}
         />
 
         {/* BOTÃO */}

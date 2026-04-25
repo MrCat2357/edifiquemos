@@ -12,7 +12,11 @@ type Post = {
   data?: any;
   tipo?: "sermao" | "artigo";
   conteudo: string;
-  igreja?: string;
+};
+
+type Autor = {
+  nome?: string;
+  titulo?: string;
 };
 
 export default function PostPage() {
@@ -21,21 +25,40 @@ export default function PostPage() {
   const id = params?.id as string;
 
   const [post, setPost] = useState<Post | null>(null);
+  const [autor, setAutor] = useState<Autor | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     async function fetchPost() {
+      if (!id) return;
+
       try {
         const ref = doc(db, "posts", id);
         const snap = await getDoc(ref);
 
-        if (snap.exists()) {
-          setPost(snap.data() as Post);
-        } else {
+        if (!snap.exists()) {
           setError("Post não encontrado.");
+          setLoading(false);
+          return;
         }
-      } catch {
+
+        const data = snap.data() as Post;
+        setPost(data);
+
+        // 🔥 BUSCAR AUTOR REAL (corrige "Usuário")
+        if (data.autorId) {
+          const userRef = doc(db, "users", data.autorId);
+          const userSnap = await getDoc(userRef);
+
+          if (userSnap.exists()) {
+            setAutor(userSnap.data() as Autor);
+          }
+        }
+
+      } catch (err) {
+        console.error(err);
         setError("Erro ao carregar o post.");
       } finally {
         setLoading(false);
@@ -48,13 +71,22 @@ export default function PostPage() {
   async function handleDelete() {
     if (!confirm("Tem certeza que deseja apagar este post?")) return;
 
-    await deleteDoc(doc(db, "posts", id));
-    router.push("/posts");
+    try {
+      await deleteDoc(doc(db, "posts", id));
+      router.push("/posts");
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao apagar post.");
+    }
   }
 
-  if (loading) return <p className="p-4 text-neutral-400">Carregando...</p>;
-  if (error) return <p className="p-4 text-red-400">{error}</p>;
-  if (!post) return null;
+  if (loading) {
+    return <p className="p-4 text-neutral-400">Carregando conteúdo...</p>;
+  }
+
+  if (error || !post) {
+    return <p className="p-4 text-red-400">{error}</p>;
+  }
 
   const isOwner = auth.currentUser?.uid === post.autorId;
 
@@ -63,64 +95,85 @@ export default function PostPage() {
     dataFormatada = post.data.toDate().toLocaleDateString("pt-BR");
   }
 
-  // ✨ FRASE FINAL
-  let fraseFinal = "";
-
-  if (post.tipo === "sermao") {
-    if (post.igreja || dataFormatada) {
-      fraseFinal = `Sermão pregado ${
-        post.igreja ? `na igreja ${post.igreja}` : ""
-      } ${dataFormatada ? `em ${dataFormatada}` : ""}.`;
-    }
-  } else {
-    fraseFinal = `Artigo publicado por ${post.autorNome || "autor"} ${
-      post.igreja ? `da igreja ${post.igreja}` : ""
-    } ${dataFormatada ? `em ${dataFormatada}` : ""}.`;
-  }
+  const nomeExibicao =
+    autor?.titulo && autor?.nome
+      ? `${autor.titulo} ${autor.nome}`
+      : autor?.nome || post.autorNome || "Autor desconhecido";
 
   return (
     <article className="max-w-2xl mx-auto p-6 space-y-6">
 
-      <header>
+      {/* HEADER */}
+      <header className="space-y-2">
+
         <h1 className="text-3xl font-bold text-neutral-100">
           {post.titulo}
         </h1>
 
-        <p className="text-sm text-neutral-400">
-          {post.autorNome} • {dataFormatada}
-        </p>
+        <div className="text-sm text-neutral-400 flex gap-2 flex-wrap items-center">
+
+          {/* 👤 AUTOR CLICÁVEL */}
+          <button
+            onClick={() => router.push(`/perfil/${post.autorId}`)}
+            className="hover:underline cursor-pointer text-emerald-400"
+          >
+            {nomeExibicao}
+          </button>
+
+          <span>•</span>
+
+          <span>{dataFormatada}</span>
+
+          <span>•</span>
+
+          <span className="capitalize">
+            {post.tipo || "conteúdo"}
+          </span>
+        </div>
       </header>
 
       <hr className="border-neutral-700" />
 
-      <section className="text-lg text-neutral-200 whitespace-pre-line">
+      {/* CONTEÚDO */}
+      <section className="text-lg leading-relaxed whitespace-pre-line text-neutral-200">
         {post.conteudo}
       </section>
 
-      {/* ✨ FRASE FINAL */}
-      {fraseFinal && (
-        <p className="text-sm text-neutral-400 italic pt-4">
-          {fraseFinal}
-        </p>
-      )}
-
+      {/* BOTÕES DONO */}
       {isOwner && (
         <div className="flex gap-3 pt-4">
+
           <button
             onClick={() => router.push(`/editar/${id}`)}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded"
+            className="
+              px-4 py-2
+              bg-emerald-600 hover:bg-emerald-700
+              text-white rounded
+              cursor-pointer
+              transition
+              active:scale-95
+            "
           >
             Editar
           </button>
 
           <button
             onClick={handleDelete}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded"
+            className="
+              px-4 py-2
+              bg-red-600 hover:bg-red-700
+              text-white rounded
+              cursor-pointer
+              transition
+              active:scale-95
+            "
           >
             Apagar
           </button>
+
         </div>
       )}
+
     </article>
   );
 }

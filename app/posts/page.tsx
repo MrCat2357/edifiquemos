@@ -62,10 +62,12 @@ export default function Posts() {
             key={f}
             onClick={() => setFiltro(f as any)}
             className={`
-              px-3 py-1 rounded text-sm capitalize
-              ${filtro === f
-                ? "bg-emerald-600 text-white"
-                : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"}
+              px-3 py-1 rounded text-sm capitalize cursor-pointer transition
+              ${
+                filtro === f
+                  ? "bg-emerald-600 text-white"
+                  : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+              }
             `}
           >
             {f === "todos" ? "Todos" : f}
@@ -91,6 +93,7 @@ export default function Posts() {
             space-y-2
             hover:border-emerald-600
             hover:shadow-[0_0_10px_rgba(16,185,129,0.15)]
+            hover:-translate-y-0.5
           "
         >
           <h2 className="text-lg font-semibold text-emerald-300">
