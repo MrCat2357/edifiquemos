@@ -5,6 +5,47 @@ import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 
+function formatData(data: any) {
+  if (!data) return new Date().toLocaleDateString("pt-BR");
+
+  if (data?.toDate) {
+    return data.toDate().toLocaleDateString("pt-BR");
+  }
+
+  if (typeof data === "string") {
+    return data;
+  }
+
+  return new Date().toLocaleDateString("pt-BR");
+}
+
+function buildFrase(post: any) {
+  const tipo = post.tipo;
+  const igreja = post.igreja?.trim();
+  const data = formatData(post.data);
+  const autor = post.autorNome || "Autor";
+
+  // 📖 SERMÃO
+  if (tipo === "sermao") {
+    if (igreja && post.data) {
+      return `Sermão pregado na igreja ${igreja} em ${data}`;
+    }
+
+    if (igreja) {
+      return `Sermão pregado na igreja ${igreja}`;
+    }
+
+    if (post.data) {
+      return `Sermão pregado em ${data}`;
+    }
+
+    return `Sermão publicado em ${data}`;
+  }
+
+  // ✍️ ARTIGO
+  return `Artigo publicado por ${autor} em ${data}`;
+}
+
 export default function Posts() {
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,10 +142,7 @@ export default function Posts() {
           </h2>
 
           <p className="text-sm text-neutral-400">
-            {post.autorNome || "Autor"} •{" "}
-            {post.data?.toDate
-              ? post.data.toDate().toLocaleDateString()
-              : ""}
+            {buildFrase(post)}
           </p>
 
           <p className="text-sm text-emerald-400">
