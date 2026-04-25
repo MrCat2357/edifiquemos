@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { auth, db } from "@/lib/firebase";
-import { addDoc, collection } from "firebase/firestore";
+import { useEffect, useState } from "react";
+import { db, auth } from "@/lib/firebase";
+import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 
 export default function CriarPost() {
@@ -30,6 +30,22 @@ export default function CriarPost() {
     }
   }, []);
 
+  async function getAutorInfo(uid: string) {
+    const ref = doc(db, "users", uid);
+    const snap = await getDoc(ref);
+
+    if (snap.exists()) {
+      const data = snap.data();
+      const nome = data.nome || "";
+      const titulo = data.titulo || "";
+
+      if (nome && titulo) return `${titulo} ${nome}`;
+      if (nome) return nome;
+    }
+
+    return "Usuário";
+  }
+
   async function handleCriarPost(e: React.FormEvent) {
     e.preventDefault();
 
@@ -47,7 +63,6 @@ export default function CriarPost() {
       JSON.stringify({ titulo, conteudo, tipo, igreja, data })
     );
 
-    // 🔐 MOSTRA AVISO EM VEZ DE REDIRECIONAR DIRETO
     if (!user) {
       setMostrarAviso(true);
       return;
@@ -56,6 +71,9 @@ export default function CriarPost() {
     setLoading(true);
 
     try {
+      // 🔥 BUSCA NOME REAL NO FIRESTORE
+      const autorNome = await getAutorInfo(user.uid);
+
       const docRef = await addDoc(collection(db, "posts"), {
         titulo,
         conteudo,
@@ -63,12 +81,14 @@ export default function CriarPost() {
         igreja,
         data: data || new Date(),
         autorId: user.uid,
-        autorNome: user.displayName || "Usuário",
+        autorNome, // ✅ AGORA CORRETO
       });
 
       sessionStorage.removeItem("draft-post");
+
       router.push(`/post/${docRef.id}`);
-    } catch {
+    } catch (err) {
+      console.error(err);
       setError("Erro ao publicar.");
     }
 
@@ -91,7 +111,7 @@ export default function CriarPost() {
 
           <button
             onClick={() => router.push("/cadastro")}
-            className="bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded text-white"
+            className="bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded text-white cursor-pointer"
           >
             Ir para cadastro
           </button>
@@ -130,7 +150,6 @@ export default function CriarPost() {
           className="w-full bg-neutral-800 border border-neutral-700 p-2 rounded text-neutral-100"
         />
 
-        {/* ✨ DATA FLEXÍVEL */}
         <input
           placeholder="Data (ex: 04/2019 ou 2018)"
           value={data}
@@ -143,7 +162,7 @@ export default function CriarPost() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white p-2 rounded"
+          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white p-2 rounded cursor-pointer"
         >
           {loading ? "Publicando..." : "Publicar"}
         </button>

@@ -87,7 +87,7 @@ export default function Cadastro() {
           Cadastro
         </h1>
 
-        {/* TÍTULO (OPCIONAL) */}
+        {/* TÍTULO OPCIONAL */}
         <div>
           <label className="block text-sm mb-1 text-neutral-300">
             Título (opcional)
@@ -141,14 +141,16 @@ export default function Cadastro() {
           </p>
         )}
 
-        {/* BOTÃO (COM MÃOZINHA AUTOMÁTICA) */}
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={loading}
-        >
-          {loading ? "Criando conta..." : "Criar conta"}
-        </Button>
+        {/* 👆 BOTÃO COM CURSOR DE MÃO GARANTIDO */}
+        <div className="cursor-pointer">
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={loading}
+          >
+            {loading ? "Criando conta..." : "Criar conta"}
+          </Button>
+        </div>
 
       </form>
     </div>
