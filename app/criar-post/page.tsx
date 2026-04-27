@@ -6,6 +6,22 @@ import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { gerarSlugUnico } from "@/lib/slug";
 
+async function getAutorInfo(uid: string): Promise<{ nome: string; foto: string | null }> {
+  try {
+    const ref = doc(db, "users", uid);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return { nome: "Autor", foto: null };
+    const data = snap.data();
+    const nome = data?.nome?.trim();
+    const titulo = data?.titulo?.trim();
+    const foto = data?.fotoUrl ?? null;
+    const nomeCompleto = nome && titulo ? `${titulo} ${nome}` : nome || "Autor";
+    return { nome: nomeCompleto, foto };
+  } catch {
+    return { nome: "Autor", foto: null };
+  }
+}
+
 export default function CriarPost() {
   const router = useRouter();
 
@@ -31,22 +47,6 @@ export default function CriarPost() {
     }
   }, []);
 
-  async function getAutorInfo(uid: string) {
-    try {
-      const ref = doc(db, "users", uid);
-      const snap = await getDoc(ref);
-      if (!snap.exists()) return "Autor";
-      const data = snap.data();
-      const nome = data?.nome?.trim();
-      const titulo = data?.titulo?.trim();
-      if (nome && titulo) return `${titulo} ${nome}`;
-      if (nome) return nome;
-      return "Autor";
-    } catch {
-      return "Autor";
-    }
-  }
-
   async function handleCriarPost(e: React.FormEvent) {
     e.preventDefault();
     if (loading) return;
@@ -69,9 +69,10 @@ export default function CriarPost() {
     }
 
     setLoading(true);
+    setError("");
 
     try {
-      const autorNome = await getAutorInfo(user.uid);
+      const { nome: autorNome, foto: autorFoto } = await getAutorInfo(user.uid);
       const slug = await gerarSlugUnico(autorNome, titulo);
 
       await addDoc(collection(db, "posts"), {
@@ -82,12 +83,11 @@ export default function CriarPost() {
         data: data || new Date(),
         autorId: user.uid,
         autorNome,
-        slug, // ✅ SALVA O SLUG
+        autorFoto: autorFoto ?? null,
+        slug,
       });
 
       sessionStorage.removeItem("draft-post");
-
-      // ✅ REDIRECIONA PARA A URL BONITA
       router.push(`/posts/${tipo === "sermao" ? "sermoes" : "artigos"}/${slug}`);
     } catch (err) {
       console.error(err);
@@ -98,78 +98,173 @@ export default function CriarPost() {
   }
 
   return (
-    <div className="max-w-xl mx-auto p-6 space-y-6">
-
-      <h1 className="text-2xl font-bold text-neutral-100">Criar Post</h1>
-
-      {mostrarAviso && (
-        <div className="bg-neutral-800 border border-emerald-600 p-4 rounded text-center">
-          <p className="text-neutral-200 mb-3">
-            Para publicar, você precisa criar uma conta.
-          </p>
-          <button
-            onClick={() => router.push("/cadastro")}
-            className="bg-emerald-600 hover:bg-emerald-700 px-4 py-2 rounded text-white cursor-pointer"
+    <div style={{ paddingTop: "calc(var(--header-h) + 2rem)", paddingBottom: "4rem" }}>
+      <div
+        style={{
+          maxWidth: "680px",
+          margin: "0 auto",
+          padding: "0 1.25rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: "1.5rem",
+        }}
+      >
+        {/* Cabeçalho */}
+        <div>
+          <h1
+            style={{
+              fontSize: "clamp(1.4rem, 3vw, 2rem)",
+              fontWeight: 800,
+              color: "var(--text-1)",
+              letterSpacing: "-0.02em",
+              marginBottom: "0.25rem",
+            }}
           >
-            Ir para cadastro
+            Publicar conteúdo
+          </h1>
+          <p style={{ fontSize: "0.875rem", color: "var(--text-3)" }}>
+            Compartilhe um sermão ou artigo com a comunidade
+          </p>
+        </div>
+
+        {/* Aviso de login */}
+        {mostrarAviso && (
+          <div
+            style={{
+              background: "var(--bg-card)",
+              border: "1px solid var(--emerald-dim)",
+              borderRadius: "var(--radius-lg)",
+              padding: "1.5rem",
+              textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.875rem",
+            }}
+          >
+            <p style={{ color: "var(--text-2)", fontSize: "0.9rem" }}>
+              Para publicar, você precisa criar uma conta.
+            </p>
+            <button
+              onClick={() => router.push("/cadastro")}
+              className="btn-hero-primary"
+              style={{ alignSelf: "center" }}
+            >
+              Criar conta agora
+            </button>
+          </div>
+        )}
+
+        {/* Card do formulário */}
+        <div
+          style={{
+            background: "var(--bg-card)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-lg)",
+            padding: "2rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "1.25rem",
+          }}
+        >
+          {/* Tipo */}
+          <div className="auth-field">
+            <label className="auth-label">Tipo de conteúdo</label>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              {(["sermao", "artigo"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTipo(t)}
+                  style={{
+                    flex: 1,
+                    padding: "8px 0",
+                    borderRadius: "var(--radius-full)",
+                    border: tipo === t
+                      ? "1px solid var(--emerald)"
+                      : "1px solid var(--border-light)",
+                    background: tipo === t ? "var(--emerald)" : "var(--bg-elevated)",
+                    color: tipo === t ? "#fff" : "var(--text-2)",
+                    fontWeight: 600,
+                    fontSize: "0.85rem",
+                    cursor: "pointer",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {t === "sermao" ? "Sermão" : "Artigo"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Título */}
+          <div className="auth-field">
+            <label className="auth-label">Título</label>
+            <input
+              placeholder="Ex: A graça de Deus em Romanos 8"
+              value={titulo}
+              onChange={(e) => setTitulo(e.target.value)}
+              className="auth-input"
+            />
+          </div>
+
+          {/* Conteúdo */}
+          <div className="auth-field">
+            <label className="auth-label">Conteúdo</label>
+            <textarea
+              placeholder="Escreva seu sermão ou artigo aqui..."
+              value={conteudo}
+              onChange={(e) => setConteudo(e.target.value)}
+              className="auth-input"
+              style={{ minHeight: "14rem", resize: "vertical", lineHeight: 1.75 }}
+            />
+          </div>
+
+          {/* Igreja e Data lado a lado */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+            <div className="auth-field">
+              <label className="auth-label">
+                Igreja <span className="auth-label-opt">(opcional)</span>
+              </label>
+              <input
+                placeholder="Nome da igreja"
+                value={igreja}
+                onChange={(e) => setIgreja(e.target.value)}
+                className="auth-input"
+              />
+            </div>
+            <div className="auth-field">
+              <label className="auth-label">
+                Data <span className="auth-label-opt">(opcional)</span>
+              </label>
+              <input
+                type="date"
+                value={data}
+                onChange={(e) => setData(e.target.value)}
+                className="auth-input"
+                style={{ colorScheme: "dark" }}
+              />
+            </div>
+          </div>
+
+          {/* Erro */}
+          {error && (
+            <div className="auth-error">
+              <p>{error}</p>
+            </div>
+          )}
+
+          {/* Botão */}
+          <button
+            type="button"
+            onClick={handleCriarPost}
+            disabled={loading}
+            className="auth-btn-primary"
+            style={{ marginTop: "0.25rem" }}
+          >
+            {loading ? "Publicando..." : "Publicar"}
           </button>
         </div>
-      )}
-
-      <form onSubmit={handleCriarPost} className="space-y-4">
-
-        <select
-          value={tipo}
-          onChange={(e) => setTipo(e.target.value)}
-          className="w-full bg-neutral-800 border border-neutral-700 text-neutral-100 p-2 rounded"
-        >
-          <option value="sermao">Sermão</option>
-          <option value="artigo">Artigo</option>
-        </select>
-
-        <input
-          placeholder="Título"
-          value={titulo}
-          onChange={(e) => setTitulo(e.target.value)}
-          className="w-full bg-neutral-800 border border-neutral-700 p-2 rounded text-neutral-100"
-        />
-
-        <textarea
-          placeholder="Conteúdo..."
-          value={conteudo}
-          onChange={(e) => setConteudo(e.target.value)}
-          className="w-full bg-neutral-800 border border-neutral-700 p-2 rounded text-neutral-100 h-40"
-        />
-
-        <input
-          placeholder="Igreja (opcional)"
-          value={igreja}
-          onChange={(e) => setIgreja(e.target.value)}
-          className="w-full bg-neutral-800 border border-neutral-700 p-2 rounded text-neutral-100"
-        />
-
-        <input
-          placeholder="Data"
-          value={data}
-          onChange={(e) => setData(e.target.value)}
-          className="w-full bg-neutral-800 border border-neutral-700 p-2 rounded text-neutral-100"
-        />
-
-        {error && <p className="text-red-400 text-sm">{error}</p>}
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="
-            w-full bg-emerald-600 hover:bg-emerald-700
-            text-white p-2 rounded cursor-pointer
-            transition active:scale-95
-          "
-        >
-          {loading ? "Publicando..." : "Publicar"}
-        </button>
-
-      </form>
+      </div>
     </div>
   );
 }

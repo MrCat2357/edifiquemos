@@ -27,8 +27,55 @@ function buildFrase(post: any) {
 }
 
 function getInitials(name: string) {
-  if (!name) return "??";
-  return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  if (!name) return "?";
+  return name
+    .split(" ")
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+}
+
+// Avatar que usa foto real quando disponível, iniciais como fallback
+function AuthorAvatar({ src, name, size = 36 }: { src?: string | null; name: string; size?: number }) {
+  const base: React.CSSProperties = {
+    width: size,
+    height: size,
+    borderRadius: "50%",
+    flexShrink: 0,
+  };
+
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        style={{ ...base, objectFit: "cover" }}
+        onError={(e) => {
+          // Se a imagem falhar, esconde e mostra as iniciais via estado
+          (e.target as HTMLImageElement).style.display = "none";
+        }}
+      />
+    );
+  }
+
+  return (
+    <div
+      style={{
+        ...base,
+        background: "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
+        color: "#fff",
+        fontSize: Math.round(size * 0.36) + "px",
+        fontWeight: 700,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        userSelect: "none",
+      }}
+    >
+      {getInitials(name)}
+    </div>
+  );
 }
 
 function PostCard({ post, index, onAuthorClick }: {
@@ -44,9 +91,12 @@ function PostCard({ post, index, onAuthorClick }: {
   return (
     <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
       <div className="card-header-row">
-        <div className="author-avatar">{getInitials(post.autorNome)}</div>
+        <AuthorAvatar src={post.autorFoto} name={post.autorNome || "Autor"} size={36} />
         <div className="author-col">
-          <span className="author-name-link" onClick={(e) => onAuthorClick(e, post.autorId)}>
+          <span
+            className="author-name-link"
+            onClick={(e) => onAuthorClick(e, post.autorId)}
+          >
             {post.autorNome || "Autor"}
           </span>
           <span className="card-meta">{buildFrase(post)}</span>
@@ -109,7 +159,8 @@ export default function Posts() {
     fetchPosts();
   }, []);
 
-  const postsFiltrados = filtro === "todos" ? posts : posts.filter((p) => p.tipo === filtro);
+  const postsFiltrados =
+    filtro === "todos" ? posts : posts.filter((p) => p.tipo === filtro);
 
   function handleAuthorClick(e: React.MouseEvent, autorId: string) {
     e.stopPropagation();
@@ -145,7 +196,12 @@ export default function Posts() {
         ) : (
           <div className="posts-list">
             {postsFiltrados.map((post, i) => (
-              <PostCard key={post.id} post={post} index={i} onAuthorClick={handleAuthorClick} />
+              <PostCard
+                key={post.id}
+                post={post}
+                index={i}
+                onAuthorClick={handleAuthorClick}
+              />
             ))}
           </div>
         )}
@@ -163,7 +219,9 @@ export default function Posts() {
                   className="trending-link"
                 >
                   <span className="trending-text">{p.titulo}</span>
-                  <span className="trending-count">{p.tipo === "sermao" ? "🎤" : "📝"}</span>
+                  <span className="trending-count">
+                    {p.tipo === "sermao" ? "🎤" : "📝"}
+                  </span>
                 </Link>
               </li>
             ))}
@@ -174,7 +232,9 @@ export default function Posts() {
           <div style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>✍️</div>
           <h3>Compartilhe sua fé</h3>
           <p>Publique seu sermão ou reflexão e edifique a comunidade.</p>
-          <Link href="/criar-post" className="btn-cta">Publicar agora</Link>
+          <Link href="/criar-post" className="btn-cta">
+            Publicar agora
+          </Link>
         </div>
 
         <div className="sidebar-card">
