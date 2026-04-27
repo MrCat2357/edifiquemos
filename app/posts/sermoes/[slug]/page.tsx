@@ -75,8 +75,18 @@ export default function PostSermaoPage() {
     setTimeout(() => setCopiado(false), 2000);
   }
 
-  if (loading) return <p className="p-4 text-neutral-400">Carregando...</p>;
-  if (!post) return <p className="p-4 text-red-400">Post não encontrado</p>;
+  if (loading) return (
+    <div className="post-detail-loading">
+      <div className="spinner" />
+      Carregando...
+    </div>
+  );
+
+  if (!post) return (
+    <div className="post-detail-notfound">
+      Post não encontrado.
+    </div>
+  );
 
   const nomeExibicao =
     autor?.titulo && autor?.nome
@@ -90,81 +100,104 @@ export default function PostSermaoPage() {
   const urlEncoded = encodeURIComponent(urlAtual);
 
   return (
-    <article className="max-w-2xl mx-auto p-6 space-y-6">
-      <h1 className="text-3xl font-bold text-neutral-100">{post.titulo}</h1>
+    <div className="post-detail-wrapper">
+      <article className="post-detail-card">
 
-      <div className="text-sm text-neutral-400 flex gap-2 flex-wrap">
-        <span
-          className="text-emerald-400 hover:underline cursor-pointer"
-          onClick={() => { if (post.autorId) router.push(`/perfil/${post.autorId}`); }}
-        >
-          {nomeExibicao}
-        </span>
-        <span>•</span>
-        <span>{formatData(post.data)}</span>
-        <span>•</span>
-        <span className="text-emerald-400 capitalize">{post.tipo}</span>
-      </div>
-
-      <div className="text-neutral-200 leading-relaxed whitespace-pre-line">
-        {post.conteudo}
-      </div>
-
-      <hr className="border-neutral-700 my-6" />
-
-      <p className="text-center text-sm text-emerald-400 italic opacity-80">
-        {post.igreja
-          ? `Sermão pregado na igreja ${post.igreja} em ${formatData(post.data)}`
-          : `Sermão pregado em ${formatData(post.data)}`}
-      </p>
-
-      {/* COMPARTILHAR */}
-      <div className="flex flex-col items-center gap-3">
-        <button
-          onClick={() => setCompartilharAberto(!compartilharAberto)}
-          className="px-4 py-2 text-sm rounded bg-white hover:bg-neutral-200 text-neutral-900 cursor-pointer transition font-semibold"
-        >
-          Compartilhar
-        </button>
-
-        {compartilharAberto && (
-          <div className="flex flex-wrap gap-2 justify-center">
-            <a href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-sm rounded bg-green-600 hover:bg-green-500 text-white cursor-pointer">
-              WhatsApp
-            </a>
-            <a href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white cursor-pointer">
-              Facebook
-            </a>
-            <a href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-sm rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-600 text-white cursor-pointer">
-              Threads
-            </a>
-            <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-sm rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-600 text-white cursor-pointer">
-              X (Twitter)
-            </a>
-            <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="px-3 py-1 text-sm rounded bg-blue-700 hover:bg-blue-600 text-white cursor-pointer">
-              LinkedIn
-            </a>
-            <a href={`mailto:?subject=${textoCompartilhar}&body=${encodeURIComponent(post.conteudo + "\n\n" + urlAtual)}`} className="px-3 py-1 text-sm rounded bg-red-600 hover:bg-red-500 text-white cursor-pointer">
-  Email
-</a>
-            <button onClick={copiarLink} className="px-3 py-1 text-sm rounded bg-neutral-600 hover:bg-neutral-500 text-white cursor-pointer">
-              {copiado ? "Link copiado!" : "Copiar link"}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* BOTÕES EDITAR/APAGAR */}
-      {isAutor && (
-        <div className="flex gap-2 justify-end">
-          <button onClick={() => router.push(`/editar/${postId}`)} className="px-3 py-1 text-sm rounded bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer">
-            Editar
-          </button>
-          <button onClick={handleDelete} className="px-3 py-1 text-sm rounded bg-red-600 hover:bg-red-500 text-white cursor-pointer">
-            Apagar
-          </button>
+        {/* TOPO: tipo do post */}
+        <div className="post-detail-top">
+          <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
+            {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+          </span>
+          {isAutor && (
+            <div className="post-detail-owner-btns">
+              <button onClick={() => router.push(`/editar/${postId}`)} className="post-btn-edit">
+                Editar
+              </button>
+              <button onClick={handleDelete} className="post-btn-delete">
+                Apagar
+              </button>
+            </div>
+          )}
         </div>
-      )}
-    </article>
+
+        {/* TÍTULO */}
+        <h1 className="post-detail-title">{post.titulo}</h1>
+
+        {/* META: autor, data */}
+        <div className="post-detail-meta">
+          <span
+            className="post-detail-autor"
+            onClick={() => { if (post.autorId) router.push(`/perfil/${post.autorId}`); }}
+          >
+            {nomeExibicao}
+          </span>
+          <span className="post-detail-sep">·</span>
+          <span>{formatData(post.data)}</span>
+          {post.igreja && (
+            <>
+              <span className="post-detail-sep">·</span>
+              <span>{post.igreja}</span>
+            </>
+          )}
+        </div>
+
+        {/* DIVISOR */}
+        <hr className="post-detail-divider" />
+
+        {/* CONTEÚDO */}
+        <div className="post-detail-content">
+          {post.conteudo}
+        </div>
+
+        {/* RODAPÉ DO SERMÃO */}
+        {post.tipo === "sermao" && (
+          <p className="post-detail-footer-text">
+            {post.igreja
+              ? `Sermão pregado na ${post.igreja} em ${formatData(post.data)}`
+              : `Sermão pregado em ${formatData(post.data)}`}
+          </p>
+        )}
+
+        {/* DIVISOR */}
+        <hr className="post-detail-divider" />
+
+        {/* COMPARTILHAR */}
+        <div className="post-detail-share">
+          <button
+            onClick={() => setCompartilharAberto(!compartilharAberto)}
+            className="post-btn-share"
+          >
+            🔗 Compartilhar
+          </button>
+
+          {compartilharAberto && (
+            <div className="post-share-options">
+              <a href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-whatsapp">
+                WhatsApp
+              </a>
+              <a href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-facebook">
+                Facebook
+              </a>
+              <a href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-threads">
+                Threads
+              </a>
+              <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-twitter">
+                X (Twitter)
+              </a>
+              <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-linkedin">
+                LinkedIn
+              </a>
+              <a href={`mailto:?subject=${textoCompartilhar}&body=${encodeURIComponent(post.conteudo + "\n\n" + urlAtual)}`} className="share-btn share-email">
+                Email
+              </a>
+              <button onClick={copiarLink} className="share-btn share-copy">
+                {copiado ? "✓ Copiado!" : "Copiar link"}
+              </button>
+            </div>
+          )}
+        </div>
+
+      </article>
+    </div>
   );
 }
