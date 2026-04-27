@@ -17,6 +17,7 @@ type User = {
   nome?: string;
   titulo?: string;
   bio?: string;
+  slug?: string;
 };
 
 function getInitials(name: string) {
@@ -24,11 +25,39 @@ function getInitials(name: string) {
   return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
+// ─── Resolve o uid a partir de um slug ou de um uid direto ───────────────────
+// Primeiro tenta buscar o documento do usuário pelo campo `slug`.
+// Se não achar (links antigos usam UID diretamente), busca pelo UID.
+async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: User } | null> {
+  // 1. Tenta por slug
+  const qSlug = query(
+    collection(db, "users"),
+    where("slug", "==", idOuSlug)
+  );
+  const snapSlug = await getDocs(qSlug);
+
+  if (!snapSlug.empty) {
+    const docSnap = snapSlug.docs[0];
+    return { uid: docSnap.id, userData: docSnap.data() as User };
+  }
+
+  // 2. Fallback: tenta por UID (para links antigos)
+  const docRef = doc(db, "users", idOuSlug);
+  const docSnap = await getDoc(docRef);
+
+  if (docSnap.exists()) {
+    return { uid: docSnap.id, userData: docSnap.data() as User };
+  }
+
+  return null;
+}
+
 export default function PerfilPublico() {
   const { id } = useParams();
   const router = useRouter();
 
   const [user, setUser] = useState<User | null>(null);
+  const [uid, setUid] = useState<string | null>(null);
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [copiado, setCopiado] = useState<string | null>(null);
@@ -37,14 +66,27 @@ export default function PerfilPublico() {
   useEffect(() => {
     async function carregar() {
       if (!id) return;
+
       try {
-        const userRef = doc(db, "users", id as string);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) setUser(userSnap.data() as User);
+        const resultado = await resolverUid(id as string);
+
+        if (!resultado) {
+          setLoading(false);
+          return;
+        }
+
+        setUser(resultado.userData);
+        setUid(resultado.uid);
+
+        // Se o link usa UID antigo mas o usuário já tem slug, redireciona silenciosamente
+        // para a URL amigável (substitui no histórico, não empilha).
+        if (resultado.userData.slug && resultado.userData.slug !== id) {
+          router.replace(`/perfil/${resultado.userData.slug}`);
+        }
 
         const q = query(
           collection(db, "posts"),
-          where("autorId", "==", id),
+          where("autorId", "==", resultado.uid),
           orderBy("data", "desc")
         );
         const snap = await getDocs(q);
@@ -54,8 +96,10 @@ export default function PerfilPublico() {
       } catch (err) {
         console.error(err);
       }
+
       setLoading(false);
     }
+
     carregar();
   }, [id]);
 
