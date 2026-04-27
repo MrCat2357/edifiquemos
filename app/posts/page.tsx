@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 function formatData(data: any) {
   if (!data) return new Date().toLocaleDateString("pt-BR");
@@ -13,26 +14,83 @@ function formatData(data: any) {
 }
 
 function buildFrase(post: any) {
-  const tipo = post.tipo;
   const igreja = post.igreja?.trim();
   const data = formatData(post.data);
   const autor = post.autorNome || "Autor";
-
-  if (tipo === "sermao") {
-    if (igreja && post.data) return `Sermão pregado na igreja ${igreja} em ${data}`;
-    if (igreja) return `Sermão pregado na igreja ${igreja}`;
-    if (post.data) return `Sermão pregado em ${data}`;
-    return `Sermão publicado em ${data}`;
+  if (post.tipo === "sermao") {
+    if (igreja && post.data) return `Pregado na ${igreja} · ${data}`;
+    if (igreja) return `Pregado na ${igreja}`;
+    if (post.data) return `Pregado em ${data}`;
+    return `Publicado em ${data}`;
   }
-
-  return `Artigo publicado por ${autor} em ${data}`;
+  return `Por ${autor} · ${data}`;
 }
+
+function getInitials(name: string) {
+  if (!name) return "??";
+  return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+}
+
+function PostCard({ post, index, onAuthorClick }: {
+  post: any;
+  index: number;
+  onAuthorClick: (e: React.MouseEvent, id: string) => void;
+}) {
+  const router = useRouter();
+  const [liked, setLiked] = useState(false);
+
+  const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
+
+  return (
+    <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
+      <div className="card-header-row">
+        <div className="author-avatar">{getInitials(post.autorNome)}</div>
+        <div className="author-col">
+          <span className="author-name-link" onClick={(e) => onAuthorClick(e, post.autorId)}>
+            {post.autorNome || "Autor"}
+          </span>
+          <span className="card-meta">{buildFrase(post)}</span>
+        </div>
+        <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
+          {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+        </span>
+      </div>
+
+      <div className="card-body-area" onClick={() => router.push(url)}>
+        <h2 className="card-title">{post.titulo}</h2>
+        {post.resumo && <p className="card-frase">{post.resumo}</p>}
+      </div>
+
+      <div className="card-footer-row">
+        <button
+          className={`action-btn ${liked ? "liked" : ""}`}
+          onClick={(e) => { e.stopPropagation(); setLiked((v) => !v); }}
+        >
+          {liked ? "❤️" : "🤍"} Amei
+        </button>
+        <button
+          className="action-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigator.clipboard?.writeText(window.location.origin + url);
+          }}
+        >
+          🔗 Compartilhar
+        </button>
+        <span className="read-link" onClick={() => router.push(url)}>
+          Ler completo →
+        </span>
+      </div>
+    </article>
+  );
+}
+
+type Filtro = "todos" | "sermao" | "artigo";
 
 export default function Posts() {
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filtro, setFiltro] = useState<"todos" | "sermao" | "artigo">("todos");
-
+  const [filtro, setFiltro] = useState<Filtro>("todos");
   const router = useRouter();
 
   useEffect(() => {
@@ -40,93 +98,94 @@ export default function Posts() {
       try {
         const q = query(collection(db, "posts"), orderBy("data", "desc"));
         const snapshot = await getDocs(q);
-
         const lista: any[] = [];
-        snapshot.forEach((doc) => {
-          lista.push({ id: doc.id, ...doc.data() });
-        });
-
+        snapshot.forEach((doc) => lista.push({ id: doc.id, ...doc.data() }));
         setPosts(lista);
       } catch (error) {
         console.error("Erro ao buscar posts:", error);
       }
-
       setLoading(false);
     }
-
     fetchPosts();
   }, []);
 
-  const postsFiltrados =
-    filtro === "todos" ? posts : posts.filter((p) => p.tipo === filtro);
+  const postsFiltrados = filtro === "todos" ? posts : posts.filter((p) => p.tipo === filtro);
 
-  if (loading) {
-    return <p className="p-4 text-neutral-400">Carregando posts...</p>;
+  function handleAuthorClick(e: React.MouseEvent, autorId: string) {
+    e.stopPropagation();
+    router.push(`/perfil/${autorId}`);
   }
 
   return (
-    <div className="max-w-xl mx-auto p-4 space-y-6">
+    <div className="feed-wrapper">
+      {/* Feed principal */}
+      <div>
+        <div className="feed-main-header">
+          <h1 className="feed-main-title">Publicações Recentes</h1>
+          <div className="feed-filters">
+            {(["todos", "sermao", "artigo"] as Filtro[]).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFiltro(f)}
+                className={`filter-btn ${filtro === f ? "active" : ""}`}
+              >
+                {f === "todos" ? "Todos" : f === "sermao" ? "Sermões" : "Artigos"}
+              </button>
+            ))}
+          </div>
+        </div>
 
-      <h1 className="text-2xl font-bold text-neutral-100">Conteúdos</h1>
-
-      {/* FILTRO */}
-      <div className="flex gap-2">
-        {["todos", "sermao", "artigo"].map((f) => (
-          <button
-            key={f}
-            onClick={() => setFiltro(f as any)}
-            className={`
-              px-3 py-1 rounded text-sm capitalize cursor-pointer transition
-              ${filtro === f
-                ? "bg-emerald-600 text-white"
-                : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
-              }
-            `}
-          >
-            {f === "todos" ? "Todos" : f}
-          </button>
-        ))}
+        {loading ? (
+          <div className="loading-state">
+            <div className="spinner" />
+            Carregando publicações...
+          </div>
+        ) : postsFiltrados.length === 0 ? (
+          <div className="empty-state">Nenhuma publicação encontrada.</div>
+        ) : (
+          <div className="posts-list">
+            {postsFiltrados.map((post, i) => (
+              <PostCard key={post.id} post={post} index={i} onAuthorClick={handleAuthorClick} />
+            ))}
+          </div>
+        )}
       </div>
 
-      {postsFiltrados.length === 0 && (
-        <p className="text-neutral-400">Nenhum post encontrado.</p>
-      )}
-
-      {postsFiltrados.map((post) => (
-        <div
-          key={post.id}
-          onClick={() => router.push(`/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`)} // ✅ URL BONITA
-          className="
-            bg-neutral-800 border border-neutral-700
-            p-5 rounded cursor-pointer transition space-y-2
-            hover:border-emerald-600
-            hover:shadow-[0_0_10px_rgba(16,185,129,0.15)]
-            hover:-translate-y-0.5
-          "
-        >
-          <h2 className="text-lg font-semibold text-emerald-300">
-            {post.titulo}
-          </h2>
-
-          <div className="text-sm text-neutral-400 flex flex-wrap gap-1 items-center">
-            <span
-              className="text-emerald-400 hover:underline cursor-pointer font-medium"
-              onClick={(e) => {
-                e.stopPropagation();
-                router.push(`/perfil/${post.autorId}`);
-              }}
-            >
-              {post.autorNome || "Autor"}
-            </span>
-            <span>•</span>
-            <span>{buildFrase(post)}</span>
-          </div>
-
-          <p className="text-sm text-emerald-400">
-            {post.tipo === "sermao" ? "Sermão" : "Artigo"}
-          </p>
+      {/* Sidebar */}
+      <aside className="feed-sidebar">
+        <div className="sidebar-card">
+          <h3 className="sidebar-title">🔥 Em Alta</h3>
+          <ul className="trending-list">
+            {posts.slice(0, 4).map((p) => (
+              <li key={p.id}>
+                <Link
+                  href={`/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`}
+                  className="trending-link"
+                >
+                  <span className="trending-text">{p.titulo}</span>
+                  <span className="trending-count">{p.tipo === "sermao" ? "🎤" : "📝"}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
         </div>
-      ))}
+
+        <div className="sidebar-card sidebar-cta">
+          <div style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>✍️</div>
+          <h3>Compartilhe sua fé</h3>
+          <p>Publique seu sermão ou reflexão e edifique a comunidade.</p>
+          <Link href="/criar-post" className="btn-cta">Publicar agora</Link>
+        </div>
+
+        <div className="sidebar-card">
+          <h3 className="sidebar-title">📖 Versículo do Dia</h3>
+          <blockquote className="verse-blockquote">
+            "Porque eu bem sei os pensamentos que tenho a vosso respeito,
+            diz o SENHOR; pensamentos de paz, e não de mal."
+          </blockquote>
+          <p className="verse-ref-text">— Jeremias 29:11</p>
+        </div>
+      </aside>
     </div>
   );
 }

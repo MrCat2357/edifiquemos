@@ -17,13 +17,11 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body className="bg-neutral-900 text-neutral-100 min-h-screen">
-
         <HeaderWrapper />
-
-        <main className="max-w-3xl mx-auto px-4 py-8">
+        {/* pt-[60px] compensa o header fixo */}
+        <main className="pt-[60px]">
           {children}
         </main>
-
       </body>
     </html>
   );
