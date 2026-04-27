@@ -18,8 +18,7 @@ export default function RootLayout({
     <html lang="pt-BR">
       <body className="bg-neutral-900 text-neutral-100 min-h-screen">
         <HeaderWrapper />
-        {/* pt-[60px] compensa o header fixo */}
-        <main className="pt-[60px]">
+        <main className="pt-[72px]">
           {children}
         </main>
       </body>
