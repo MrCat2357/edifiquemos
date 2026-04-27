@@ -19,13 +19,11 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-
   const [error, setError] = useState("");
   const [attempts, setAttempts] = useState(0);
   const [loading, setLoading] = useState(false);
   const [userNotFound, setUserNotFound] = useState(false);
 
-  // 🔐 LOGIN NORMAL
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
 
@@ -49,7 +47,6 @@ export default function LoginPage() {
       } else if (err.code === "auth/wrong-password") {
         const newAttempts = attempts + 1;
         setAttempts(newAttempts);
-
         if (newAttempts >= 3) {
           setError("Muitas tentativas. Tente novamente mais tarde.");
         } else {
@@ -65,7 +62,6 @@ export default function LoginPage() {
     setLoading(false);
   }
 
-  // 🔥 LOGIN COM GOOGLE
   async function handleGoogleLogin() {
     setLoading(true);
     setError("");
@@ -73,7 +69,6 @@ export default function LoginPage() {
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-
       const user = result.user;
 
       const userRef = doc(db, "users", user.uid);
@@ -98,114 +93,109 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-neutral-900 px-4">
-      <form
-        onSubmit={handleLogin}
-        className="bg-neutral-800 p-6 rounded-lg w-full max-w-sm space-y-5 border border-neutral-700"
-      >
-        <h1 className="text-2xl font-semibold text-center text-emerald-300">
-          Entrar
-        </h1>
+    <div className="auth-page">
+      <div className="auth-card">
 
-        {/* EMAIL */}
-        <input
-          type="email"
-          placeholder="Email"
-          className="w-full p-2 rounded bg-neutral-900 border border-neutral-700 text-neutral-100"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-
-        {/* SENHA */}
-        <div className="relative">
-          <input
-            type={showPassword ? "text" : "password"}
-            placeholder="Senha"
-            className="w-full p-2 pr-10 rounded bg-neutral-900 border border-neutral-700 text-neutral-100"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-
-          <button
-            type="button"
-            onClick={() => setShowPassword(!showPassword)}
-            className="absolute right-2 top-2 text-neutral-400"
-          >
-            {showPassword ? "🙈" : "👁"}
-          </button>
+        {/* LOGO */}
+        <div className="auth-logo">
+          <span className="auth-logo-dot" />
+          Voz da Fé
         </div>
 
-        {/* ERRO */}
-        {error && (
-          <div className="space-y-2 text-center">
-            <p className="text-red-400 text-sm">{error}</p>
+        <h1 className="auth-title">Entrar na sua conta</h1>
+        <p className="auth-subtitle">Bem-vindo de volta à comunidade</p>
 
-            {userNotFound && (
-              <Link
-                href={`/cadastro?email=${email}`}
-                className="text-sm text-blue-400 underline"
-              >
-                Criar conta
-              </Link>
-            )}
+        <form onSubmit={handleLogin} className="auth-form">
+
+          {/* EMAIL */}
+          <div className="auth-field">
+            <label className="auth-label">Email</label>
+            <input
+              type="email"
+              placeholder="seu@email.com"
+              className="auth-input"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
           </div>
-        )}
 
-        {/* BOTÃO LOGIN */}
-        <button
-          type="submit"
-          disabled={loading}
-          className="
-            w-full py-2 rounded text-white
-            bg-emerald-600
-            hover:bg-emerald-700
-            active:scale-95
-            transition
-            shadow-md
-            cursor-pointer
-            disabled:opacity-50
-          "
-        >
-          {loading ? "Entrando..." : "Entrar"}
-        </button>
+          {/* SENHA */}
+          <div className="auth-field">
+            <label className="auth-label">Senha</label>
+            <div className="auth-input-wrapper">
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Sua senha"
+                className="auth-input"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="auth-eye-btn"
+              >
+                {showPassword ? "🙈" : "👁"}
+              </button>
+            </div>
+          </div>
 
-        {/* 🔥 GOOGLE (AGORA PADRÃO VISUAL) */}
-        <button
-          type="button"
-          onClick={handleGoogleLogin}
-          disabled={loading}
-          className="
-            w-full py-2 rounded text-white
-            bg-emerald-600
-            hover:bg-emerald-700
-            active:scale-95
-            transition
-            shadow-md
-            cursor-pointer
-            border border-emerald-400/30
-            disabled:opacity-50
-          "
-        >
-          Entrar com Google
-        </button>
+          {/* ERRO */}
+          {error && (
+            <div className="auth-error">
+              <p>{error}</p>
+              {userNotFound && (
+                <Link href={`/cadastro?email=${email}`} className="auth-error-link">
+                  Criar conta agora →
+                </Link>
+              )}
+            </div>
+          )}
+
+          {/* BOTÃO LOGIN */}
+          <button type="submit" disabled={loading} className="auth-btn-primary">
+            {loading ? "Entrando..." : "Entrar"}
+          </button>
+
+          {/* DIVISOR */}
+          <div className="auth-divider">
+            <span />
+            <p>ou continue com</p>
+            <span />
+          </div>
+
+          {/* GOOGLE */}
+          <button
+            type="button"
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="auth-btn-google"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+            </svg>
+            Entrar com Google
+          </button>
+
+        </form>
 
         {/* LINKS */}
-        <div className="flex justify-between text-sm">
-          <Link
-            href="/esqueci-senha"
-            className="text-blue-400 hover:text-blue-300 underline"
-          >
+        <div className="auth-links">
+          <Link href="/esqueci-senha" className="auth-link">
             Esqueci a senha
           </Link>
-
-          <Link
-            href="/cadastro"
-            className="text-blue-400 hover:text-blue-300 underline"
-          >
+          <span className="auth-link-sep">·</span>
+          <Link href="/cadastro" className="auth-link">
             Criar conta
           </Link>
         </div>
-      </form>
+
+      </div>
     </div>
   );
 }
