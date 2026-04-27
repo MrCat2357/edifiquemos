@@ -2,17 +2,73 @@
 
 import { useEffect, useState } from "react";
 import { db } from "@/lib/firebase";
-import { collection, query, where, getDocs, deleteDoc, doc } from "firebase/firestore";
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  deleteDoc,
+  doc,
+  getDoc,
+} from "firebase/firestore";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
 
-type AutorType = { nome?: string; titulo?: string };
+type AutorType = { nome?: string; titulo?: string; fotoUrl?: string | null };
 
 function formatData(data: any) {
   if (!data) return new Date().toLocaleDateString("pt-BR");
   if (data?.toDate) return data.toDate().toLocaleDateString("pt-BR");
   if (typeof data === "string") return data;
   return new Date(data).toLocaleDateString("pt-BR");
+}
+
+function getInitials(name: string) {
+  if (!name) return "?";
+  return name
+    .split(" ")
+    .slice(0, 2)
+    .map((w) => w[0])
+    .join("")
+    .toUpperCase();
+}
+
+function AuthorAvatar({ src, name, size = 40 }: { src?: string | null; name: string; size?: number }) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: "50%",
+          objectFit: "cover",
+          flexShrink: 0,
+        }}
+      />
+    );
+  }
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
+        color: "#fff",
+        fontSize: Math.round(size * 0.36) + "px",
+        fontWeight: 700,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        userSelect: "none",
+      }}
+    >
+      {getInitials(name)}
+    </div>
+  );
 }
 
 export default function PostSermaoPage() {
@@ -45,10 +101,12 @@ export default function PostSermaoPage() {
         const data = docSnap.data();
         setPost(data);
 
+        // Busca dados atualizados do autor incluindo fotoUrl
         if (data.autorId) {
-          const userQ = query(collection(db, "users"), where("__name__", "==", data.autorId));
-          const userSnap = await getDocs(userQ);
-          if (!userSnap.empty) setAutor(userSnap.docs[0].data() as AutorType);
+          const autorSnap = await getDoc(doc(db, "users", data.autorId));
+          if (autorSnap.exists()) {
+            setAutor(autorSnap.data() as AutorType);
+          }
         }
       } catch (err) {
         console.error(err);
@@ -75,42 +133,53 @@ export default function PostSermaoPage() {
     setTimeout(() => setCopiado(false), 2000);
   }
 
-  if (loading) return (
-    <div className="post-detail-loading">
-      <div className="spinner" />
-      Carregando...
-    </div>
-  );
+  if (loading)
+    return (
+      <div className="post-detail-loading">
+        <div className="spinner" />
+        Carregando...
+      </div>
+    );
 
-  if (!post) return (
-    <div className="post-detail-notfound">
-      Post não encontrado.
-    </div>
-  );
+  if (!post)
+    return <div className="post-detail-notfound">Post não encontrado.</div>;
 
   const nomeExibicao =
     autor?.titulo && autor?.nome
       ? `${autor.titulo} ${autor.nome}`
       : autor?.nome || post.autorNome || "Autor";
 
+  // Foto: prioriza o doc do autor (sempre atualizado), fallback para o campo do post
+  const fotoAutor = autor?.fotoUrl ?? post.autorFoto ?? null;
+
   const isAutor = user?.uid === post.autorId;
 
-  const urlAtual = typeof window !== "undefined" ? window.location.href : "";
-  const textoCompartilhar = encodeURIComponent(`${post.titulo} - ${nomeExibicao}`);
+  const urlAtual =
+    typeof window !== "undefined" ? window.location.href : "";
+  const textoCompartilhar = encodeURIComponent(
+    `${post.titulo} - ${nomeExibicao}`
+  );
   const urlEncoded = encodeURIComponent(urlAtual);
 
   return (
     <div className="post-detail-wrapper">
       <article className="post-detail-card">
 
-        {/* TOPO: tipo do post */}
+        {/* TOPO: tipo + botões do dono */}
         <div className="post-detail-top">
-          <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
+          <span
+            className={`cat-badge ${
+              post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"
+            }`}
+          >
             {post.tipo === "sermao" ? "Sermão" : "Artigo"}
           </span>
           {isAutor && (
             <div className="post-detail-owner-btns">
-              <button onClick={() => router.push(`/editar/${postId}`)} className="post-btn-edit">
+              <button
+                onClick={() => router.push(`/editar/${postId}`)}
+                className="post-btn-edit"
+              >
                 Editar
               </button>
               <button onClick={handleDelete} className="post-btn-delete">
@@ -123,11 +192,14 @@ export default function PostSermaoPage() {
         {/* TÍTULO */}
         <h1 className="post-detail-title">{post.titulo}</h1>
 
-        {/* META: autor, data */}
+        {/* META: avatar + autor + data */}
         <div className="post-detail-meta">
+          <AuthorAvatar src={fotoAutor} name={nomeExibicao} size={32} />
           <span
             className="post-detail-autor"
-            onClick={() => { if (post.autorId) router.push(`/perfil/${post.autorId}`); }}
+            onClick={() => {
+              if (post.autorId) router.push(`/perfil/${post.autorId}`);
+            }}
           >
             {nomeExibicao}
           </span>
@@ -145,9 +217,7 @@ export default function PostSermaoPage() {
         <hr className="post-detail-divider" />
 
         {/* CONTEÚDO */}
-        <div className="post-detail-content">
-          {post.conteudo}
-        </div>
+        <div className="post-detail-content">{post.conteudo}</div>
 
         {/* RODAPÉ DO SERMÃO */}
         {post.tipo === "sermao" && (
@@ -172,22 +242,52 @@ export default function PostSermaoPage() {
 
           {compartilharAberto && (
             <div className="post-share-options">
-              <a href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-whatsapp">
+              <a
+                href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="share-btn share-whatsapp"
+              >
                 WhatsApp
               </a>
-              <a href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-facebook">
+              <a
+                href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="share-btn share-facebook"
+              >
                 Facebook
               </a>
-              <a href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-threads">
+              <a
+                href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="share-btn share-threads"
+              >
                 Threads
               </a>
-              <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-twitter">
+              <a
+                href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="share-btn share-twitter"
+              >
                 X (Twitter)
               </a>
-              <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-linkedin">
+              <a
+                href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="share-btn share-linkedin"
+              >
                 LinkedIn
               </a>
-              <a href={`mailto:?subject=${textoCompartilhar}&body=${encodeURIComponent(post.conteudo + "\n\n" + urlAtual)}`} className="share-btn share-email">
+              <a
+                href={`mailto:?subject=${textoCompartilhar}&body=${encodeURIComponent(
+                  post.conteudo + "\n\n" + urlAtual
+                )}`}
+                className="share-btn share-email"
+              >
                 Email
               </a>
               <button onClick={copiarLink} className="share-btn share-copy">
@@ -196,7 +296,6 @@ export default function PostSermaoPage() {
             </div>
           )}
         </div>
-
       </article>
     </div>
   );
