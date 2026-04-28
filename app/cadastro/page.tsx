@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import {
   createUserWithEmailAndPassword,
   updateProfile,
@@ -33,7 +33,8 @@ async function gerarSlugUnico(base: string, uidAtual: string): Promise<string> {
   }
 }
 
-export default function Cadastro() {
+// ✅ Componente interno que usa useSearchParams
+function CadastroForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -59,7 +60,6 @@ export default function Cadastro() {
     setLoading(true);
 
     try {
-      // ── Caminho normal ───────────────────────────────────────────────────
       const userCredential = await createUserWithEmailAndPassword(auth, email, senha);
       const user = userCredential.user;
 
@@ -90,15 +90,9 @@ export default function Cadastro() {
       }
 
     } catch (err: any) {
-
       if (err.code === "auth/email-already-in-use") {
-        // ── O email já existe no Auth ────────────────────────────────────
-        // Tentamos logar com a senha fornecida para distinguir dois casos:
-        // A) Conta normal duplicada → senha correta → orienta a fazer login
-        // B) Conta Google órfã     → senha errada  → explica o que fazer
         try {
           await signInWithEmailAndPassword(auth, email, senha);
-          // Se chegou aqui, a senha está correta: é conta duplicada normal
           await auth.signOut();
           setError("Este email já tem uma conta. Use o login para entrar.");
           setLinkParaLogin(true);
@@ -107,8 +101,6 @@ export default function Cadastro() {
             innerErr.code === "auth/wrong-password" ||
             innerErr.code === "auth/invalid-credential"
           ) {
-            // Senha não bate → provavelmente é conta Google órfã
-            // Verifica se existe doc no Firestore para confirmar
             const qEmail = query(
               collection(db, "users"),
               where("email", "==", email)
@@ -116,14 +108,12 @@ export default function Cadastro() {
             const snapEmail = await getDocs(qEmail);
 
             if (snapEmail.empty) {
-              // Conta Google órfã sem doc: orienta o usuário
               setError(
                 "Este email foi usado anteriormente com o Google. " +
                 "Faça login com o Google — o cadastro por lá não foi concluído, " +
                 "mas você poderá completar seu perfil após entrar."
               );
             } else {
-              // Tem doc, mas senha errada → conta normal com senha diferente
               setError("Email já cadastrado. Tente outra senha ou use 'Esqueci a senha'.");
               setLinkParaLogin(true);
             }
@@ -146,7 +136,6 @@ export default function Cadastro() {
     <div className="auth-page">
       <div className="auth-card">
 
-        {/* LOGO */}
         <div className="auth-logo">
           <span className="auth-logo-dot" />
           Voz da Fé
@@ -157,7 +146,6 @@ export default function Cadastro() {
 
         <form onSubmit={handleCadastro} className="auth-form">
 
-          {/* TÍTULO OPCIONAL */}
           <div className="auth-field">
             <label className="auth-label">
               Título <span className="auth-label-opt">(opcional)</span>
@@ -179,7 +167,6 @@ export default function Cadastro() {
             </datalist>
           </div>
 
-          {/* NOME */}
           <div className="auth-field">
             <label className="auth-label">Nome</label>
             <input
@@ -192,7 +179,6 @@ export default function Cadastro() {
             />
           </div>
 
-          {/* EMAIL */}
           <div className="auth-field">
             <label className="auth-label">Email</label>
             <input
@@ -205,7 +191,6 @@ export default function Cadastro() {
             />
           </div>
 
-          {/* SENHA */}
           <div className="auth-field">
             <label className="auth-label">Senha</label>
             <div className="auth-input-wrapper">
@@ -227,7 +212,6 @@ export default function Cadastro() {
             </div>
           </div>
 
-          {/* TERMOS */}
           <label className="auth-terms">
             <input
               type="checkbox"
@@ -243,7 +227,6 @@ export default function Cadastro() {
             </span>
           </label>
 
-          {/* ERRO */}
           {error && (
             <div className="auth-error">
               <p>{error}</p>
@@ -255,7 +238,6 @@ export default function Cadastro() {
             </div>
           )}
 
-          {/* BOTÃO */}
           <button
             type="submit"
             disabled={loading}
@@ -265,7 +247,6 @@ export default function Cadastro() {
           </button>
         </form>
 
-        {/* LINK LOGIN */}
         <div className="auth-links">
           <span style={{ color: "var(--text-3)", fontSize: "0.85rem" }}>
             Já tem uma conta?
@@ -277,5 +258,14 @@ export default function Cadastro() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ✅ Page exporta com Suspense envolvendo o componente
+export default function Cadastro() {
+  return (
+    <Suspense fallback={<div className="auth-page"><div className="auth-card">Carregando...</div></div>}>
+      <CadastroForm />
+    </Suspense>
   );
 }
