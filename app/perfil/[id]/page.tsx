@@ -86,6 +86,98 @@ async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: U
   return null;
 }
 
+/* ── Navegação entre posts do mesmo autor ── */
+
+function PostNavigation({
+  posts,
+  postAtualId,
+}: {
+  posts: any[];
+  postAtualId: string;
+}) {
+  const router = useRouter();
+  const idx = posts.findIndex((p) => p.id === postAtualId);
+  if (idx === -1 || posts.length < 2) return null;
+
+  // lista está em desc (mais recente primeiro)
+  // idx+1 = mais antigo (publicado antes), idx-1 = mais recente (publicado depois)
+  const anterior = idx + 1 < posts.length ? posts[idx + 1] : null;
+  const proximo  = idx - 1 >= 0           ? posts[idx - 1] : null;
+
+  function navUrl(p: any) {
+    return `/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`;
+  }
+
+  return (
+    <nav
+      style={{
+        display: "grid",
+        gridTemplateColumns: anterior && proximo ? "1fr 1fr" : anterior ? "1fr auto" : "auto 1fr",
+        gap: "0.75rem",
+        marginTop: "1rem",
+      }}
+    >
+      {anterior ? (
+        <button
+          onClick={() => router.push(navUrl(anterior))}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-start",
+            gap: "0.2rem",
+            padding: "0.75rem 1rem",
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border-light)",
+            borderRadius: "var(--radius-lg)",
+            cursor: "pointer",
+            textAlign: "left",
+            transition: "border-color 0.15s",
+            minWidth: 0,
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--emerald-dim)")}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border-light)")}
+        >
+          <span style={{ fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8 }}>
+            {anterior.tipo === "sermao" ? "Sermão" : "Artigo"}
+          </span>
+          <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-1)", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", wordBreak: "break-word" }}>
+            {anterior.titulo}
+          </span>
+        </button>
+      ) : <span />}
+
+      {proximo ? (
+        <button
+          onClick={() => router.push(navUrl(proximo))}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: "0.2rem",
+            padding: "0.75rem 1rem",
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border-light)",
+            borderRadius: "var(--radius-lg)",
+            cursor: "pointer",
+            textAlign: "right",
+            transition: "border-color 0.15s",
+            minWidth: 0,
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--emerald-dim)")}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border-light)")}
+        >
+          <span style={{ fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8 }}>
+            {proximo.tipo === "sermao" ? "Sermão" : "Artigo"}
+          </span>
+          <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-1)", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", wordBreak: "break-word" }}>
+            {proximo.titulo}
+          </span>
+        </button>
+      ) : <span />}
+    </nav>
+  );
+}
+
 export default function PerfilPublico() {
   const { id } = useParams();
   const router = useRouter();
@@ -96,6 +188,8 @@ export default function PerfilPublico() {
   const [loading, setLoading] = useState(true);
   const [copiado, setCopiado] = useState<string | null>(null);
   const [compartilharAberto, setCompartilharAberto] = useState<string | null>(null);
+  // ID do post cujos cards de nav estão expandidos
+  const [navAberta, setNavAberta] = useState<string | null>(null);
 
   useEffect(() => {
     async function carregar() {
@@ -183,6 +277,7 @@ export default function PerfilPublico() {
             const textoCompartilhar = encodeURIComponent(`${post.titulo} - ${nomeExibicao}`);
             const urlEncoded = encodeURIComponent(urlPost);
             const aberto = compartilharAberto === post.id;
+            const navAbertaEste = navAberta === post.id;
 
             return (
               <div key={post.id} className="post-card">
@@ -193,7 +288,7 @@ export default function PerfilPublico() {
                     <span className="card-meta">
                       {post.data?.toDate
                         ? post.data.toDate().toLocaleDateString("pt-BR")
-                        : ""}
+                        : typeof post.data === "string" ? post.data : ""}
                       {post.igreja ? ` · ${post.igreja}` : ""}
                     </span>
                   </div>
@@ -210,9 +305,7 @@ export default function PerfilPublico() {
                   className="card-body-area"
                   onClick={() =>
                     router.push(
-                      `/posts/${
-                        post.tipo === "sermao" ? "sermoes" : "artigos"
-                      }/${post.slug}`
+                      `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`
                     )
                   }
                   style={{ cursor: "pointer" }}
@@ -222,21 +315,29 @@ export default function PerfilPublico() {
                 </div>
 
                 <div className="card-footer-row">
+                  {/* Botão: ver outras publicações deste autor (nav sequencial) */}
+                  {posts.length > 1 && (
+                    <button
+                      className="action-btn"
+                      onClick={() => setNavAberta(navAbertaEste ? null : post.id)}
+                      title="Ver publicações relacionadas deste autor"
+                    >
+                      {navAbertaEste ? "Fechar" : "Mais deste autor"}
+                    </button>
+                  )}
+
                   <button
                     className="action-btn"
-                    onClick={() =>
-                      setCompartilharAberto(aberto ? null : post.id)
-                    }
+                    onClick={() => setCompartilharAberto(aberto ? null : post.id)}
                   >
                     🔗 Compartilhar
                   </button>
+
                   <span
                     className="read-link"
                     onClick={() =>
                       router.push(
-                        `/posts/${
-                          post.tipo === "sermao" ? "sermoes" : "artigos"
-                        }/${post.slug}`
+                        `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`
                       )
                     }
                   >
@@ -244,6 +345,14 @@ export default function PerfilPublico() {
                   </span>
                 </div>
 
+                {/* Navegação sequencial entre posts do autor */}
+                {navAbertaEste && (
+                  <div style={{ marginTop: "0.75rem" }}>
+                    <PostNavigation posts={posts} postAtualId={post.id} />
+                  </div>
+                )}
+
+                {/* Opções de compartilhamento */}
                 {aberto && (
                   <div className="perfil-share-options">
                     <a
@@ -287,11 +396,7 @@ export default function PerfilPublico() {
                       LinkedIn
                     </a>
                     <a
-                      href={`mailto:?subject=${encodeURIComponent(
-                        post.titulo
-                      )}&body=${encodeURIComponent(
-                        post.conteudo + "\n\n" + urlPost
-                      )}`}
+                      href={`mailto:?subject=${encodeURIComponent(post.titulo)}&body=${encodeURIComponent(post.conteudo + "\n\n" + urlPost)}`}
                       className="share-btn share-email"
                     >
                       Email
