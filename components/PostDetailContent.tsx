@@ -419,8 +419,27 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   }, [detectarSelecao]);
 
   const handleTouchEnd = useCallback(() => {
-    // delay maior no mobile para o menu nativo do browser aparecer primeiro
-    setTimeout(detectarSelecao, 300);
+    detectarSelecao();
+  }, [detectarSelecao]);
+
+  // No mobile, selectionchange dispara quando o usuário solta o handle de seleção
+  // — é mais confiável que touchend para detectar o momento certo
+  useEffect(() => {
+    const isMobile = window.matchMedia("(pointer: coarse)").matches;
+    if (!isMobile) return;
+
+    let timer: ReturnType<typeof setTimeout>;
+    function onSelectionChange() {
+      clearTimeout(timer);
+      // Pequeno debounce: aguarda o usuário parar de arrastar o handle
+      timer = setTimeout(detectarSelecao, 400);
+    }
+
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("selectionchange", onSelectionChange);
+    };
   }, [detectarSelecao]);
 
   useEffect(() => {
