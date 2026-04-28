@@ -183,6 +183,7 @@ function ShareDropdown({
 function SelectionPopup({
   trechoSelecionado,
   posicao,
+  isMobile,
   nomeAutor,
   tituloPost,
   urlAtual,
@@ -190,7 +191,8 @@ function SelectionPopup({
   onToast,
 }: {
   trechoSelecionado: string;
-  posicao: { x: number; y: number }; // coordenadas de VIEWPORT (fixed)
+  posicao: { x: number; top: number; bottom: number };
+  isMobile: boolean;
   nomeAutor: string;
   tituloPost: string;
   urlAtual: string;
@@ -222,20 +224,36 @@ function SelectionPopup({
 
   const POPUP_W = 260;
   const POPUP_H = 44;
+  const MARGIN = 8;
 
-  // posicao.y já é viewport (rect.top sem scrollY) — popup sobe POPUP_H + 10px acima
-  const left = Math.max(8, Math.min(posicao.x - POPUP_W / 2, window.innerWidth - POPUP_W - 8));
-  const top = Math.max(8, posicao.y - POPUP_H - 10);
+  const left = Math.max(MARGIN, Math.min(posicao.x - POPUP_W / 2, window.innerWidth - POPUP_W - MARGIN));
+
+  // Mobile: abre ABAIXO da seleção (menu nativo fica em cima)
+  // Desktop: abre ACIMA da seleção
+  const openBelow = isMobile;
+  const top = openBelow
+    ? Math.min(posicao.bottom + 10, window.innerHeight - POPUP_H - MARGIN)
+    : Math.max(MARGIN, posicao.top - POPUP_H - 10);
 
   useEffect(() => {
-    function handler(e: MouseEvent) {
+    function handler(e: MouseEvent | TouchEvent) {
       if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
         onFechar();
       }
     }
-    const t = setTimeout(() => document.addEventListener("mousedown", handler), 120);
-    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
+    const t = setTimeout(() => {
+      document.addEventListener("mousedown", handler);
+      document.addEventListener("touchstart", handler);
+    }, 150);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("touchstart", handler);
+    };
   }, [onFechar]);
+
+  // Seta aponta para baixo quando popup está acima, para cima quando está abaixo
+  const arrowDown = !openBelow;
 
   return (
     <div
@@ -257,19 +275,38 @@ function SelectionPopup({
         whiteSpace: "nowrap",
       }}
     >
-      {/* Seta para baixo */}
-      <div style={{
-        position: "absolute", bottom: -6, left: "50%",
-        transform: "translateX(-50%)", width: 0, height: 0,
-        borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
-        borderTop: "6px solid var(--border-light)",
-      }} />
-      <div style={{
-        position: "absolute", bottom: -5, left: "50%",
-        transform: "translateX(-50%)", width: 0, height: 0,
-        borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
-        borderTop: "6px solid var(--bg-elevated)",
-      }} />
+      {/* Seta decorativa */}
+      {arrowDown ? (
+        <>
+          <div style={{
+            position: "absolute", bottom: -6, left: "50%",
+            transform: "translateX(-50%)", width: 0, height: 0,
+            borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
+            borderTop: "6px solid var(--border-light)",
+          }} />
+          <div style={{
+            position: "absolute", bottom: -5, left: "50%",
+            transform: "translateX(-50%)", width: 0, height: 0,
+            borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
+            borderTop: "6px solid var(--bg-elevated)",
+          }} />
+        </>
+      ) : (
+        <>
+          <div style={{
+            position: "absolute", top: -6, left: "50%",
+            transform: "translateX(-50%)", width: 0, height: 0,
+            borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
+            borderBottom: "6px solid var(--border-light)",
+          }} />
+          <div style={{
+            position: "absolute", top: -5, left: "50%",
+            transform: "translateX(-50%)", width: 0, height: 0,
+            borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
+            borderBottom: "6px solid var(--bg-elevated)",
+          }} />
+        </>
+      )}
 
       <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 500 }}>
         Compartilhar trecho:
@@ -281,7 +318,7 @@ function SelectionPopup({
         rel="noopener noreferrer"
         onClick={onFechar}
         style={{
-          display: "inline-flex", alignItems: "center", gap: 4,
+          display: "inline-flex", alignItems: "center",
           background: "#16a34a", color: "#fff",
           fontSize: "0.72rem", fontWeight: 600,
           padding: "4px 10px", borderRadius: "var(--radius-full)",
@@ -296,7 +333,7 @@ function SelectionPopup({
       <button
         onClick={handleCopiar}
         style={{
-          display: "inline-flex", alignItems: "center", gap: 4,
+          display: "inline-flex", alignItems: "center",
           background: copiado ? "var(--emerald-dim)" : "var(--bg-card)",
           color: copiado ? "var(--emerald)" : "var(--text-2)",
           border: "1px solid var(--border-light)",
@@ -346,10 +383,11 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
   const [selecao, setSelecao] = useState<{
     trecho: string;
-    posicao: { x: number; y: number };
+    posicao: { x: number; top: number; bottom: number };
+    isMobile: boolean;
   } | null>(null);
 
-  const handleMouseUp = useCallback(() => {
+  const detectarSelecao = useCallback(() => {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) { setSelecao(null); return; }
 
@@ -363,19 +401,27 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     }
 
     const rect = range.getBoundingClientRect();
+    const mobile = window.matchMedia("(pointer: coarse)").matches;
+
     setSelecao({
       trecho: trecho.slice(0, 500),
       posicao: {
         x: rect.left + rect.width / 2,
-        // ✅ rect.top já é relativo à viewport — não somar scrollY com position:fixed
-        y: rect.top,
+        top: rect.top,       // topo da seleção (viewport)
+        bottom: rect.bottom, // base da seleção (viewport)
       },
+      isMobile: mobile,
     });
   }, []);
 
+  const handleMouseUp = useCallback(() => {
+    detectarSelecao();
+  }, [detectarSelecao]);
+
   const handleTouchEnd = useCallback(() => {
-    setTimeout(handleMouseUp, 100);
-  }, [handleMouseUp]);
+    // delay maior no mobile para o menu nativo do browser aparecer primeiro
+    setTimeout(detectarSelecao, 300);
+  }, [detectarSelecao]);
 
   useEffect(() => {
     if (!compartilharAberto) return;
@@ -494,6 +540,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         <SelectionPopup
           trechoSelecionado={selecao.trecho}
           posicao={selecao.posicao}
+          isMobile={selecao.isMobile}
           nomeAutor={nomeExibicao}
           tituloPost={post.titulo}
           urlAtual={urlAtual}
