@@ -80,7 +80,7 @@ export default function CriarPost() {
         conteudo: conteudo.trim(),
         tipo,
         igreja: igreja.trim() || "",
-        data: data || new Date(),
+        data: data.trim() || "",   // ✅ salva como string livre
         autorId: user.uid,
         autorNome,
         autorFoto: autorFoto ?? null,
@@ -236,12 +236,13 @@ export default function CriarPost() {
               <label className="auth-label">
                 Data <span className="auth-label-opt">(opcional)</span>
               </label>
+              {/* ✅ type="text" — aceita qualquer formato livre */}
               <input
-                type="date"
+                type="text"
+                placeholder="Ex: 2025, Século XVI…"
                 value={data}
                 onChange={(e) => setData(e.target.value)}
                 className="auth-input"
-                style={{ colorScheme: "dark" }}
               />
             </div>
           </div>

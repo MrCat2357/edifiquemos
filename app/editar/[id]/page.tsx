@@ -15,7 +15,7 @@ export default function EditarPost() {
   const [tipo, setTipo] = useState("sermao");
   const [igreja, setIgreja] = useState("");
   const [data, setData] = useState("");
-  const [slug, setSlug] = useState(""); // ✅ GUARDA O SLUG
+  const [slug, setSlug] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -24,7 +24,6 @@ export default function EditarPost() {
   useEffect(() => {
     async function fetchPost() {
       if (!id) return;
-
       try {
         const ref = doc(db, "posts", id);
         const snap = await getDoc(ref);
@@ -34,24 +33,34 @@ export default function EditarPost() {
           return;
         }
 
-        const data = snap.data();
+        const postData = snap.data();
 
-        if (auth.currentUser?.uid !== data.autorId) {
+        if (auth.currentUser?.uid !== postData.autorId) {
           setError("Você não tem permissão para editar este post.");
           return;
         }
 
-        setTitulo(data.titulo || "");
-        setConteudo(data.conteudo || "");
-        setTipo(data.tipo || "sermao");
-        setIgreja(data.igreja || "");
-        setSlug(data.slug || ""); // ✅ SALVA O SLUG
+        setTitulo(postData.titulo || "");
+        setConteudo(postData.conteudo || "");
+        setTipo(postData.tipo || "sermao");
+        setIgreja(postData.igreja || "");
+        setSlug(postData.slug || "");
 
-        if (data.data?.toDate) {
-          const d = data.data.toDate();
-          setData(d.toISOString().split("T")[0]);
+        // ✅ lê data como string — compatível com o novo formato livre
+        // mas também suporta posts antigos que tinham Timestamp
+        if (typeof postData.data === "string") {
+          setData(postData.data);
+        } else if (postData.data?.toDate) {
+          // posts antigos salvos como Timestamp — converte para string legível
+          const d = postData.data.toDate();
+          setData(
+            d.toLocaleDateString("pt-BR", {
+              day: "2-digit",
+              month: "long",
+              year: "numeric",
+            })
+          );
         }
-
       } catch (err) {
         console.error(err);
         setError("Erro ao carregar post.");
@@ -82,10 +91,9 @@ export default function EditarPost() {
         conteudo,
         tipo,
         igreja,
-        data: data ? new Date(data) : new Date(),
+        data: data.trim() || "",  // ✅ salva como string livre
       });
 
-      // ✅ REDIRECIONA PARA URL BONITA
       router.push(`/posts/${tipo === "sermao" ? "sermoes" : "artigos"}/${slug}`);
     } catch (err) {
       console.error(err);
@@ -95,66 +103,111 @@ export default function EditarPost() {
     setSaving(false);
   }
 
-  if (loading) return <p className="p-4 text-neutral-400">Carregando...</p>;
-  if (error) return <p className="p-4 text-red-400">{error}</p>;
+  if (loading) return (
+    <div className="post-detail-loading">
+      <div className="spinner" />
+      <span>Carregando...</span>
+    </div>
+  );
+
+  if (error) return (
+    <div className="post-detail-notfound">{error}</div>
+  );
 
   return (
-    <div className="max-w-xl mx-auto p-6 space-y-6">
+    <div className="post-detail-wrapper" style={{ maxWidth: 640 }}>
+      <div className="post-detail-card">
 
-      <h1 className="text-2xl font-bold text-neutral-100">Editar Post</h1>
+        <h1 className="post-detail-title" style={{ fontSize: "1.6rem" }}>
+          Editar Post
+        </h1>
 
-      <form onSubmit={handleUpdate} className="space-y-4">
+        <hr className="post-detail-divider" />
 
-        <select
-          value={tipo}
-          onChange={(e) => setTipo(e.target.value)}
-          className="w-full bg-neutral-800 border border-neutral-700 text-neutral-100 p-2 rounded"
-        >
-          <option value="sermao">Sermão</option>
-          <option value="artigo">Artigo</option>
-        </select>
+        <form onSubmit={handleUpdate} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
 
-        <input
-          className="w-full bg-neutral-800 border border-neutral-700 text-neutral-100 p-2 rounded"
-          placeholder="Título"
-          value={titulo}
-          onChange={(e) => setTitulo(e.target.value)}
-        />
+          {/* Tipo */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+            <label className="auth-label">Tipo</label>
+            <select
+              value={tipo}
+              onChange={(e) => setTipo(e.target.value)}
+              className="auth-input"
+            >
+              <option value="sermao">Sermão</option>
+              <option value="artigo">Artigo</option>
+            </select>
+          </div>
 
-        <textarea
-          className="w-full bg-neutral-800 border border-neutral-700 text-neutral-100 p-2 rounded h-40"
-          placeholder="Conteúdo..."
-          value={conteudo}
-          onChange={(e) => setConteudo(e.target.value)}
-        />
+          {/* Título */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+            <label className="auth-label">Título</label>
+            <input
+              className="auth-input"
+              placeholder="Título"
+              value={titulo}
+              onChange={(e) => setTitulo(e.target.value)}
+            />
+          </div>
 
-        <input
-          className="w-full bg-neutral-800 border border-neutral-700 text-neutral-100 p-2 rounded"
-          placeholder="Igreja (opcional)"
-          value={igreja}
-          onChange={(e) => setIgreja(e.target.value)}
-        />
+          {/* Conteúdo */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+            <label className="auth-label">Conteúdo</label>
+            <textarea
+              className="auth-input"
+              placeholder="Conteúdo..."
+              value={conteudo}
+              onChange={(e) => setConteudo(e.target.value)}
+              style={{ height: 180, resize: "vertical" }}
+            />
+          </div>
 
-        <input
-          type="date"
-          value={data}
-          onChange={(e) => setData(e.target.value)}
-          className="w-full bg-neutral-800 border border-neutral-700 text-neutral-100 p-2 rounded"
-        />
+          {/* Igreja */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+            <label className="auth-label">
+              Igreja <span className="auth-label-opt">(opcional)</span>
+            </label>
+            <input
+              className="auth-input"
+              placeholder="Igreja"
+              value={igreja}
+              onChange={(e) => setIgreja(e.target.value)}
+            />
+          </div>
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="
-            w-full bg-emerald-600 hover:bg-emerald-700
-            text-white p-2 rounded transition
-            cursor-pointer active:scale-95 disabled:opacity-50
-          "
-        >
-          {saving ? "Salvando..." : "Salvar alterações"}
-        </button>
+          {/* Data */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+            <label className="auth-label">
+              Data <span className="auth-label-opt">(opcional)</span>
+            </label>
+            {/* ✅ type="text" — aceita qualquer formato livre */}
+            <input
+              type="text"
+              placeholder="Ex: 2025, Século XVI, 15 de maio de 2022…"
+              value={data}
+              onChange={(e) => setData(e.target.value)}
+              className="auth-input"
+            />
+          </div>
 
-      </form>
+          {/* Erro */}
+          {error && (
+            <div className="auth-error">
+              <p>{error}</p>
+            </div>
+          )}
+
+          {/* Submit */}
+          <button
+            type="submit"
+            disabled={saving}
+            className="auth-btn-primary"
+          >
+            {saving ? "Salvando..." : "Salvar alterações"}
+          </button>
+
+        </form>
+      </div>
     </div>
   );
 }
