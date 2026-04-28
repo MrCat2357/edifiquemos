@@ -220,7 +220,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const shareButtonRef = useRef<HTMLButtonElement>(null!);
   const shareDropdownRef = useRef<HTMLDivElement>(null!);
 
-  // Listener no pai — só ativo quando o dropdown está aberto
   useEffect(() => {
     if (!compartilharAberto) return;
     function handler(e: MouseEvent) {
@@ -387,73 +386,65 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         <hr className="post-detail-divider" />
 
-        <div style={{
-  display: "flex",
-  alignItems: "center",
-  flexWrap: "wrap",
-  gap: "0.5rem",
-}}>
+        {/* ── Barra de ações ── */}
+        <div className="post-detail-actions">
 
-  {/* ❤️ Amei */}
-  <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
-    <button
-      onClick={handleLike} disabled={loadingLike}
-      className={`action-btn ${liked ? "liked" : ""}`}
-      style={{ fontSize: "0.9rem", padding: "7px 10px" }}
-      title={user ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
-    >
-      {liked ? "❤️" : "🤍"} Amei
-    </button>
-    {likeCount > 0 && (
-      <button
-        onClick={() => setLikesModalAberto(true)}
-        title="Ver quem curtiu"
-        style={{
-          background: "none", border: "none", cursor: "pointer",
-          fontSize: "0.78rem", fontWeight: 700, color: "var(--emerald)",
-          padding: "4px 6px", borderRadius: "var(--radius-sm)", transition: "background 0.15s",
-        }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-elevated)")}
-        onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-      >
-        {likeCount}
-      </button>
-    )}
-  </div>
+          {/* ❤️ Amei */}
+          <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+            <button
+              onClick={handleLike} disabled={loadingLike}
+              className={`action-btn ${liked ? "liked" : ""}`}
+              style={{ fontSize: "0.9rem", padding: "7px 10px" }}
+              title={user ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
+            >
+              {liked ? "❤️" : "🤍"} Amei
+            </button>
+            {likeCount > 0 && (
+              <button
+                onClick={() => setLikesModalAberto(true)}
+                title="Ver quem curtiu"
+                style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  fontSize: "0.78rem", fontWeight: 700, color: "var(--emerald)",
+                  padding: "4px 6px", borderRadius: "var(--radius-sm)", transition: "background 0.15s",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-elevated)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+              >
+                {likeCount}
+              </button>
+            )}
+          </div>
 
-  {/* 🔗 Compartilhar + ⬇️ PDF — agrupados para não quebrarem separados */}
-  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+          {/* 🔗 Compartilhar */}
+          <button
+            ref={shareButtonRef}
+            onClick={() => setCompartilharAberto((v) => !v)}
+            className="post-btn-share"
+          >
+            🔗 Compartilhar
+          </button>
 
-    <button
-      ref={shareButtonRef}
-      onClick={() => setCompartilharAberto((v) => !v)}
-      className="post-btn-share"
-    >
-      🔗 Compartilhar
-    </button>
+          {/* ⬇️ Salvar PDF */}
+          <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+            <button
+              onClick={handleDownloadPdf} disabled={gerandoPdf}
+              className="post-btn-share"
+              style={{ opacity: gerandoPdf ? 0.6 : 1 }}
+              title="Baixar como PDF"
+            >
+              {gerandoPdf ? "⏳ Gerando..." : "⬇️ Salvar PDF"}
+            </button>
+            {downloadCount > 0 && (
+              <span style={{
+                fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)", padding: "4px 4px",
+              }} title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
+                {downloadCount}
+              </span>
+            )}
+          </div>
 
-    <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
-      <button
-        onClick={handleDownloadPdf} disabled={gerandoPdf}
-        className="post-btn-share"
-        style={{ opacity: gerandoPdf ? 0.6 : 1 }}
-        title="Baixar como PDF"
-      >
-        {gerandoPdf ? "⏳ Gerando..." : "⬇️ Salvar PDF"}
-      </button>
-      {downloadCount > 0 && (
-        <span style={{
-          fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)",
-          padding: "4px 6px",
-        }} title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
-          {downloadCount}
-        </span>
-      )}
-    </div>
-
-  </div>
-
-</div>
+        </div>
       </article>
     </>
   );
