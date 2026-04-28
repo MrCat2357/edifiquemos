@@ -1,75 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { db } from "@/lib/firebase";
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  deleteDoc,
-  doc,
-  getDoc,
-} from "firebase/firestore";
+import { db, auth } from "@/lib/firebase";
+import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
+import PostDetailContent, { formatData, AuthorAvatar } from "@/components/PostDetailContent";
 
 type AutorType = { nome?: string; titulo?: string; fotoUrl?: string | null };
-
-function formatData(data: any) {
-  if (!data) return new Date().toLocaleDateString("pt-BR");
-  if (data?.toDate) return data.toDate().toLocaleDateString("pt-BR");
-  if (typeof data === "string") return data;
-  return new Date(data).toLocaleDateString("pt-BR");
-}
-
-function getInitials(name: string) {
-  if (!name) return "?";
-  return name
-    .split(" ")
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase();
-}
-
-function AuthorAvatar({ src, name, size = 40 }: { src?: string | null; name: string; size?: number }) {
-  if (src) {
-    return (
-      <img
-        src={src}
-        alt={name}
-        style={{
-          width: size,
-          height: size,
-          borderRadius: "50%",
-          objectFit: "cover",
-          flexShrink: 0,
-        }}
-      />
-    );
-  }
-  return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        background: "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
-        color: "#fff",
-        fontSize: Math.round(size * 0.36) + "px",
-        fontWeight: 700,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        userSelect: "none",
-      }}
-    >
-      {getInitials(name)}
-    </div>
-  );
-}
 
 export default function PostSermaoPage() {
   const { slug } = useParams();
@@ -77,11 +15,9 @@ export default function PostSermaoPage() {
   const { user } = useAuth();
 
   const [post, setPost] = useState<any>(null);
-  const [postId, setPostId] = useState<string>("");
+  const [postId, setPostId] = useState("");
   const [autor, setAutor] = useState<AutorType | null>(null);
   const [loading, setLoading] = useState(true);
-  const [copiado, setCopiado] = useState(false);
-  const [compartilharAberto, setCompartilharAberto] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -89,214 +25,29 @@ export default function PostSermaoPage() {
       try {
         const q = query(collection(db, "posts"), where("slug", "==", slug));
         const snap = await getDocs(q);
-
-        if (snap.empty) {
-          setPost(null);
-          setLoading(false);
-          return;
-        }
+        if (snap.empty) { setPost(null); setLoading(false); return; }
 
         const docSnap = snap.docs[0];
         setPostId(docSnap.id);
         const data = docSnap.data();
         setPost(data);
 
-        // Busca dados atualizados do autor incluindo fotoUrl
         if (data.autorId) {
           const autorSnap = await getDoc(doc(db, "users", data.autorId));
-          if (autorSnap.exists()) {
-            setAutor(autorSnap.data() as AutorType);
-          }
+          if (autorSnap.exists()) setAutor(autorSnap.data() as AutorType);
         }
-      } catch (err) {
-        console.error(err);
-      }
+      } catch (err) { console.error(err); }
       setLoading(false);
     }
     load();
   }, [slug]);
 
-  async function handleDelete() {
-    if (!confirm("Tem certeza que deseja apagar este post?")) return;
-    try {
-      await deleteDoc(doc(db, "posts", postId));
-      router.push("/posts");
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao apagar o post.");
-    }
-  }
-
-  async function copiarLink() {
-    await navigator.clipboard.writeText(window.location.href);
-    setCopiado(true);
-    setTimeout(() => setCopiado(false), 2000);
-  }
-
-  if (loading)
-    return (
-      <div className="post-detail-loading">
-        <div className="spinner" />
-        Carregando...
-      </div>
-    );
-
-  if (!post)
-    return <div className="post-detail-notfound">Post não encontrado.</div>;
-
-  const nomeExibicao =
-    autor?.titulo && autor?.nome
-      ? `${autor.titulo} ${autor.nome}`
-      : autor?.nome || post.autorNome || "Autor";
-
-  // Foto: prioriza o doc do autor (sempre atualizado), fallback para o campo do post
-  const fotoAutor = autor?.fotoUrl ?? post.autorFoto ?? null;
-
-  const isAutor = user?.uid === post.autorId;
-
-  const urlAtual =
-    typeof window !== "undefined" ? window.location.href : "";
-  const textoCompartilhar = encodeURIComponent(
-    `${post.titulo} - ${nomeExibicao}`
-  );
-  const urlEncoded = encodeURIComponent(urlAtual);
+  if (loading) return <div className="post-detail-loading"><div className="spinner" />Carregando...</div>;
+  if (!post) return <div className="post-detail-notfound">Post não encontrado.</div>;
 
   return (
     <div className="post-detail-wrapper">
-      <article className="post-detail-card">
-
-        {/* TOPO: tipo + botões do dono */}
-        <div className="post-detail-top">
-          <span
-            className={`cat-badge ${
-              post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"
-            }`}
-          >
-            {post.tipo === "sermao" ? "Sermão" : "Artigo"}
-          </span>
-          {isAutor && (
-            <div className="post-detail-owner-btns">
-              <button
-                onClick={() => router.push(`/editar/${postId}`)}
-                className="post-btn-edit"
-              >
-                Editar
-              </button>
-              <button onClick={handleDelete} className="post-btn-delete">
-                Apagar
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* TÍTULO */}
-        <h1 className="post-detail-title">{post.titulo}</h1>
-
-        {/* META: avatar + autor + data */}
-        <div className="post-detail-meta">
-          <AuthorAvatar src={fotoAutor} name={nomeExibicao} size={32} />
-          <span
-            className="post-detail-autor"
-            onClick={() => {
-              if (post.autorId) router.push(`/perfil/${post.autorId}`);
-            }}
-          >
-            {nomeExibicao}
-          </span>
-          <span className="post-detail-sep">·</span>
-          <span>{formatData(post.data)}</span>
-          {post.igreja && (
-            <>
-              <span className="post-detail-sep">·</span>
-              <span>{post.igreja}</span>
-            </>
-          )}
-        </div>
-
-        {/* DIVISOR */}
-        <hr className="post-detail-divider" />
-
-        {/* CONTEÚDO */}
-        <div className="post-detail-content">{post.conteudo}</div>
-
-        {/* RODAPÉ DO SERMÃO */}
-        {post.tipo === "sermao" && (
-          <p className="post-detail-footer-text">
-            {post.igreja
-              ? `Sermão pregado na ${post.igreja} em ${formatData(post.data)}`
-              : `Sermão pregado em ${formatData(post.data)}`}
-          </p>
-        )}
-
-        {/* DIVISOR */}
-        <hr className="post-detail-divider" />
-
-        {/* COMPARTILHAR */}
-        <div className="post-detail-share">
-          <button
-            onClick={() => setCompartilharAberto(!compartilharAberto)}
-            className="post-btn-share"
-          >
-            🔗 Compartilhar
-          </button>
-
-          {compartilharAberto && (
-            <div className="post-share-options">
-              <a
-                href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="share-btn share-whatsapp"
-              >
-                WhatsApp
-              </a>
-              <a
-                href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="share-btn share-facebook"
-              >
-                Facebook
-              </a>
-              <a
-                href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="share-btn share-threads"
-              >
-                Threads
-              </a>
-              <a
-                href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="share-btn share-twitter"
-              >
-                X (Twitter)
-              </a>
-              <a
-                href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="share-btn share-linkedin"
-              >
-                LinkedIn
-              </a>
-              <a
-                href={`mailto:?subject=${textoCompartilhar}&body=${encodeURIComponent(
-                  post.conteudo + "\n\n" + urlAtual
-                )}`}
-                className="share-btn share-email"
-              >
-                Email
-              </a>
-              <button onClick={copiarLink} className="share-btn share-copy">
-                {copiado ? "✓ Copiado!" : "Copiar link"}
-              </button>
-            </div>
-          )}
-        </div>
-      </article>
+      <PostDetailContent post={post} postId={postId} autor={autor} />
     </div>
   );
 }

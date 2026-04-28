@@ -43,7 +43,7 @@ export default function HomePage() {
           )}
         </div>
 
-         {/* STATS DESATIVADOS TEMPORARIAMENTE — descomentar quando os números forem reais*/
+         {/* STATS DESATIVADOS TEMPORARIAMENTE — descomentar quando os números forem reais
         <div className="hero-stats">
           <div className="stat">
             <span className="stat-number">+240</span>
@@ -60,7 +60,7 @@ export default function HomePage() {
             <span className="stat-label">Leitores</span>
           </div>
         </div>
-        }
+        */}
       </div>
     </section>
   );
