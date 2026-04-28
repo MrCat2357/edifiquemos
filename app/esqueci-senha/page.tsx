@@ -4,6 +4,7 @@ import { useState, Suspense } from "react";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 
 function EsqueciSenhaForm() {
   const searchParams = useSearchParams();
@@ -32,7 +33,7 @@ function EsqueciSenhaForm() {
       } else if (error.code === "auth/invalid-email") {
         setErro("Email inválido.");
       } else {
-        setErro("Erro ao enviar email.");
+        setErro("Erro ao enviar email. Tente novamente.");
       }
     }
 
@@ -40,36 +41,79 @@ function EsqueciSenhaForm() {
   }
 
   return (
-    <form onSubmit={handleReset} className="flex flex-col gap-3 w-80">
+    <div className="auth-card">
 
-      <h1 className="text-xl font-bold">Recuperar senha</h1>
+      {/* Logo */}
+      <div className="auth-logo">
+        <span className="auth-logo-dot" />
+        Voz da Fé
+      </div>
 
-      <input
-        type="email"
-        placeholder="Digite seu email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        className="border p-2"
-      />
+      <h1 className="auth-title">Recuperar senha</h1>
+      <p className="auth-subtitle">
+        Informe seu e-mail e enviaremos um link para redefinir sua senha.
+      </p>
 
-      <button
-        disabled={loading}
-        className="bg-blue-500 text-white p-2 rounded"
-      >
-        {loading ? "Enviando..." : "Enviar email"}
-      </button>
+      <form onSubmit={handleReset} className="auth-form">
 
-      {mensagem && <p className="text-green-600">{mensagem}</p>}
-      {erro && <p className="text-red-600">{erro}</p>}
+        <div className="auth-field">
+          <label className="auth-label">E-mail</label>
+          <input
+            type="email"
+            placeholder="seu@email.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="auth-input"
+          />
+        </div>
 
-    </form>
+        {/* Mensagem de sucesso */}
+        {mensagem && (
+          <div style={{
+            background: "rgba(16,185,129,0.08)",
+            border: "1px solid rgba(16,185,129,0.2)",
+            borderRadius: "var(--radius-sm)",
+            padding: "0.625rem 0.875rem",
+          }}>
+            <p style={{ fontSize: "0.82rem", color: "var(--emerald)" }}>{mensagem}</p>
+          </div>
+        )}
+
+        {/* Erro */}
+        {erro && (
+          <div className="auth-error">
+            <p>{erro}</p>
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="auth-btn-primary"
+        >
+          {loading ? "Enviando..." : "Enviar email de recuperação"}
+        </button>
+
+      </form>
+
+      <div className="auth-links">
+        <Link href="/login" className="auth-link">← Voltar para o login</Link>
+      </div>
+
+    </div>
   );
 }
 
 export default function EsqueciSenha() {
   return (
-    <div className="flex flex-col items-center justify-center h-screen">
-      <Suspense fallback={<p className="text-neutral-400">Carregando...</p>}>
+    <div className="auth-page">
+      <Suspense fallback={
+        <div className="loading-state">
+          <div className="spinner" />
+          <span>Carregando...</span>
+        </div>
+      }>
         <EsqueciSenhaForm />
       </Suspense>
     </div>
