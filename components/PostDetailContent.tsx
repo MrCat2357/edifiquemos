@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { db, auth } from "@/lib/firebase";
 import {
   doc, updateDoc, arrayUnion, arrayRemove,
@@ -157,13 +157,9 @@ function ShareDropdown({
       ref={dropdownRef}
       onClick={(e) => e.stopPropagation()}
       style={{
-        position: "fixed",
-        top: pos.top,
-        left: pos.left,
-        background: "var(--bg-elevated)",
-        border: "1px solid var(--border-light)",
-        borderRadius: "var(--radius-lg)",
-        padding: "0.625rem",
+        position: "fixed", top: pos.top, left: pos.left,
+        background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
+        borderRadius: "var(--radius-lg)", padding: "0.625rem",
         display: "flex", flexWrap: "wrap", gap: "0.375rem",
         width: 268, zIndex: 9999,
         boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
@@ -174,15 +170,142 @@ function ShareDropdown({
       <a href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-threads" onClick={onClose}>Threads</a>
       <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-twitter" onClick={onClose}>X (Twitter)</a>
       <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-linkedin" onClick={onClose}>LinkedIn</a>
-      <a
-        href={`https://mail.google.com/mail/?view=cm&su=${textoCompartilhar}&body=${emailBody}`}
-        className="share-btn share-email"
-        onClick={onClose}
-      >
-        Email
-      </a>
+      <a href={`https://mail.google.com/mail/?view=cm&su=${textoCompartilhar}&body=${emailBody}`} className="share-btn share-email" onClick={onClose}>Email</a>
       <button onClick={onCopiar} className="share-btn share-copy">
         {copiado ? "✓ Copiado!" : "Copiar link"}
+      </button>
+    </div>
+  );
+}
+
+/* ── SelectionPopup ── */
+
+function SelectionPopup({
+  trechoSelecionado,
+  posicao,
+  nomeAutor,
+  tituloPost,
+  urlAtual,
+  onFechar,
+  onToast,
+}: {
+  trechoSelecionado: string;
+  posicao: { x: number; y: number }; // coordenadas de VIEWPORT (fixed)
+  nomeAutor: string;
+  tituloPost: string;
+  urlAtual: string;
+  onFechar: () => void;
+  onToast: (msg: string) => void;
+}) {
+  const popupRef = useRef<HTMLDivElement>(null);
+  const [copiado, setCopiado] = useState(false);
+
+  const mensagem =
+    `Li essa passagem e me lembrei de você:\n\n` +
+    `"${trechoSelecionado}"\n\n` +
+    `— ${nomeAutor}, em "${tituloPost}"\n\n` +
+    `Leia a versão completa:\n` +
+    `${urlAtual}`;
+
+  const mensagemEncoded = encodeURIComponent(mensagem);
+
+  async function handleCopiar() {
+    try {
+      await navigator.clipboard.writeText(mensagem);
+      setCopiado(true);
+      onToast("Trecho copiado! 📋");
+      setTimeout(() => { setCopiado(false); onFechar(); }, 1800);
+    } catch {
+      onToast("Não foi possível copiar.");
+    }
+  }
+
+  const POPUP_W = 260;
+  const POPUP_H = 44;
+
+  // posicao.y já é viewport (rect.top sem scrollY) — popup sobe POPUP_H + 10px acima
+  const left = Math.max(8, Math.min(posicao.x - POPUP_W / 2, window.innerWidth - POPUP_W - 8));
+  const top = Math.max(8, posicao.y - POPUP_H - 10);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
+        onFechar();
+      }
+    }
+    const t = setTimeout(() => document.addEventListener("mousedown", handler), 120);
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); };
+  }, [onFechar]);
+
+  return (
+    <div
+      ref={popupRef}
+      style={{
+        position: "fixed",
+        top,
+        left,
+        zIndex: 9990,
+        background: "var(--bg-elevated)",
+        border: "1px solid var(--border-light)",
+        borderRadius: "var(--radius-full)",
+        padding: "6px 10px",
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        boxShadow: "0 6px 24px rgba(0,0,0,0.5)",
+        animation: "fadeUp 0.15s ease both",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {/* Seta para baixo */}
+      <div style={{
+        position: "absolute", bottom: -6, left: "50%",
+        transform: "translateX(-50%)", width: 0, height: 0,
+        borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
+        borderTop: "6px solid var(--border-light)",
+      }} />
+      <div style={{
+        position: "absolute", bottom: -5, left: "50%",
+        transform: "translateX(-50%)", width: 0, height: 0,
+        borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
+        borderTop: "6px solid var(--bg-elevated)",
+      }} />
+
+      <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 500 }}>
+        Compartilhar trecho:
+      </span>
+
+      <a
+        href={`https://wa.me/?text=${mensagemEncoded}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={onFechar}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 4,
+          background: "#16a34a", color: "#fff",
+          fontSize: "0.72rem", fontWeight: 600,
+          padding: "4px 10px", borderRadius: "var(--radius-full)",
+          textDecoration: "none", transition: "background 0.15s",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "#15803d")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "#16a34a")}
+      >
+        WhatsApp
+      </a>
+
+      <button
+        onClick={handleCopiar}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 4,
+          background: copiado ? "var(--emerald-dim)" : "var(--bg-card)",
+          color: copiado ? "var(--emerald)" : "var(--text-2)",
+          border: "1px solid var(--border-light)",
+          fontSize: "0.72rem", fontWeight: 600,
+          padding: "4px 10px", borderRadius: "var(--radius-full)",
+          cursor: "pointer", transition: "all 0.15s",
+        }}
+      >
+        {copiado ? "✓ Copiado!" : "Copiar"}
       </button>
     </div>
   );
@@ -199,6 +322,7 @@ export type PostDetailProps = {
 export default function PostDetailContent({ post, postId, autor }: PostDetailProps) {
   const router = useRouter();
   const { user } = useAuth();
+  const conteudoRef = useRef<HTMLDivElement>(null);
 
   const [liked, setLiked] = useState<boolean>(() => {
     const uid = auth.currentUser?.uid;
@@ -219,6 +343,39 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shareButtonRef = useRef<HTMLButtonElement>(null!);
   const shareDropdownRef = useRef<HTMLDivElement>(null!);
+
+  const [selecao, setSelecao] = useState<{
+    trecho: string;
+    posicao: { x: number; y: number };
+  } | null>(null);
+
+  const handleMouseUp = useCallback(() => {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) { setSelecao(null); return; }
+
+    const trecho = selection.toString().trim();
+    if (trecho.length < 10) { setSelecao(null); return; }
+
+    const range = selection.getRangeAt(0);
+    if (!conteudoRef.current?.contains(range.commonAncestorContainer)) {
+      setSelecao(null);
+      return;
+    }
+
+    const rect = range.getBoundingClientRect();
+    setSelecao({
+      trecho: trecho.slice(0, 500),
+      posicao: {
+        x: rect.left + rect.width / 2,
+        // ✅ rect.top já é relativo à viewport — não somar scrollY com position:fixed
+        y: rect.top,
+      },
+    });
+  }, []);
+
+  const handleTouchEnd = useCallback(() => {
+    setTimeout(handleMouseUp, 100);
+  }, [handleMouseUp]);
 
   useEffect(() => {
     if (!compartilharAberto) return;
@@ -285,13 +442,9 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     showToast("Gerando PDF...");
     try {
       await gerarPDF({
-        titulo: post.titulo,
-        nomeAutor: nomeExibicao,
-        fotoAutor,
-        dataPost: formatData(post.data),
-        igreja: post.igreja || "",
-        conteudo: post.conteudo,
-        tipo: post.tipo,
+        titulo: post.titulo, nomeAutor: nomeExibicao, fotoAutor,
+        dataPost: formatData(post.data), igreja: post.igreja || "",
+        conteudo: post.conteudo, tipo: post.tipo,
         onDownload: async () => {
           try {
             await updateDoc(doc(db, "posts", postId), { downloads: increment(1) });
@@ -299,10 +452,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           } catch { }
         },
       });
-    } catch (err) {
-      console.error(err);
-      showToast("Erro ao gerar PDF.");
-    }
+    } catch (err) { console.error(err); showToast("Erro ao gerar PDF."); }
     setGerandoPdf(false);
   }
 
@@ -332,15 +482,23 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
       {compartilharAberto && (
         <ShareDropdown
-          anchorRef={shareButtonRef}
-          dropdownRef={shareDropdownRef}
-          urlAtual={urlAtual}
-          textoCompartilhar={textoCompartilhar}
-          urlEncoded={urlEncoded}
-          conteudo={post.conteudo}
-          copiado={copiado}
-          onCopiar={copiarLink}
+          anchorRef={shareButtonRef} dropdownRef={shareDropdownRef}
+          urlAtual={urlAtual} textoCompartilhar={textoCompartilhar}
+          urlEncoded={urlEncoded} conteudo={post.conteudo}
+          copiado={copiado} onCopiar={copiarLink}
           onClose={() => setCompartilharAberto(false)}
+        />
+      )}
+
+      {selecao && (
+        <SelectionPopup
+          trechoSelecionado={selecao.trecho}
+          posicao={selecao.posicao}
+          nomeAutor={nomeExibicao}
+          tituloPost={post.titulo}
+          urlAtual={urlAtual}
+          onFechar={() => setSelecao(null)}
+          onToast={showToast}
         />
       )}
 
@@ -370,7 +528,14 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         <hr className="post-detail-divider" />
 
-        <div className="post-detail-content">{post.conteudo}</div>
+        <div
+          ref={conteudoRef}
+          className="post-detail-content"
+          onMouseUp={handleMouseUp}
+          onTouchEnd={handleTouchEnd}
+        >
+          {post.conteudo}
+        </div>
 
         {post.tipo === "sermao" ? (
           <p className="post-detail-footer-text">
