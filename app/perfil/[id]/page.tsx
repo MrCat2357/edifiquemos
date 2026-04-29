@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { db } from "@/lib/firebase";
+import { useEffect, useRef, useState } from "react";
+import { auth, db } from "@/lib/firebase";
 import {
   doc,
   getDoc,
@@ -10,8 +10,13 @@ import {
   where,
   getDocs,
   orderBy,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
+  increment,
 } from "firebase/firestore";
 import { useParams, useRouter } from "next/navigation";
+import { gerarPDF } from "@/lib/gerarPDF";
 
 type User = {
   nome?: string;
@@ -23,53 +28,84 @@ type User = {
 
 function getInitials(name: string) {
   if (!name) return "?";
-  return name
-    .split(" ")
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase();
+  return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
 function Avatar({ src, name, size = 64 }: { src?: string | null; name: string; size?: number }) {
   if (src) {
     return (
-      <img
-        src={src}
-        alt={name}
-        style={{
-          width: size,
-          height: size,
-          borderRadius: "50%",
-          objectFit: "cover",
-          flexShrink: 0,
-          boxShadow: "0 0 0 3px var(--emerald-dim)",
-        }}
-      />
+      <img src={src} alt={name} style={{
+        width: size, height: size, borderRadius: "50%", objectFit: "cover",
+        flexShrink: 0, boxShadow: size >= 56 ? "0 0 0 3px var(--emerald-dim)" : "none",
+      }} />
     );
   }
   return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        background: "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
-        color: "#fff",
-        fontSize: Math.round(size * 0.36) + "px",
-        fontWeight: 700,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        userSelect: "none",
-        boxShadow: "0 0 0 3px var(--emerald-dim)",
-      }}
-    >
+    <div style={{
+      width: size, height: size, borderRadius: "50%",
+      background: "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
+      color: "#fff", fontSize: Math.round(size * 0.36) + "px", fontWeight: 700,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      flexShrink: 0, userSelect: "none",
+      boxShadow: size >= 56 ? "0 0 0 3px var(--emerald-dim)" : "none",
+    }}>
       {getInitials(name)}
     </div>
   );
 }
+
+/* ── SVG Icons ───────────────────────────────────────── */
+
+function IconHeart({ size = 13, filled = false }: { size?: number; filled?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path
+        d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.567 3.067 2 5 2C6.105 2 7.093 2.535 7.75 3.366L8 3.7L8.25 3.366C8.907 2.535 9.895 2 11 2C12.933 2 14.5 3.567 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z"
+        stroke="currentColor" strokeWidth="1.4"
+        fill={filled ? "currentColor" : "none"}
+        strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconShare({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <circle cx="11" cy="3.5" r="1.8" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="5" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="11" cy="12.5" r="1.8" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M6.7 7.1l2.7-2.7M6.7 8.9l2.7 2.7"
+        stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconEye({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M1.5 8C3 4.5 5.3 3 8 3s5 1.5 6.5 5C13 11.5 10.7 13 8 13S3 11.5 1.5 8Z"
+        stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function IconDownload({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M8 2v7M8 9l-2.5-2.5M8 9l2.5-2.5"
+        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 13h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/* ── resolverUid ─────────────────────────────────────── */
 
 async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: User } | null> {
   const qSlug = query(collection(db, "users"), where("slug", "==", idOuSlug));
@@ -80,103 +116,314 @@ async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: U
   }
   const docRef = doc(db, "users", idOuSlug);
   const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) {
-    return { uid: docSnap.id, userData: docSnap.data() as User };
-  }
+  if (docSnap.exists()) return { uid: docSnap.id, userData: docSnap.data() as User };
   return null;
 }
 
-/* ── Navegação entre posts do mesmo autor ── */
+/* ── ShareMiniDropdown ───────────────────────────────── */
 
-function PostNavigation({
-  posts,
-  postAtualId,
+function ShareMiniDropdown({
+  url, titulo, autorNome, onClose, anchorRef,
 }: {
-  posts: any[];
-  postAtualId: string;
+  url: string; titulo: string; autorNome: string;
+  onClose: () => void; anchorRef: React.RefObject<HTMLButtonElement>;
 }) {
-  const router = useRouter();
-  const idx = posts.findIndex((p) => p.id === postAtualId);
-  if (idx === -1 || posts.length < 2) return null;
+  const dropRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [copiado, setCopiado] = useState(false);
 
-  // lista está em desc (mais recente primeiro)
-  // idx+1 = mais antigo (publicado antes), idx-1 = mais recente (publicado depois)
-  const anterior = idx + 1 < posts.length ? posts[idx + 1] : null;
-  const proximo  = idx - 1 >= 0           ? posts[idx - 1] : null;
+  const texto = encodeURIComponent(`${titulo} - ${autorNome}`);
+  const urlEnc = encodeURIComponent(url);
 
-  function navUrl(p: any) {
-    return `/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`;
+  useEffect(() => {
+    if (!anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < 140;
+    setPos({
+      top: openUp ? rect.top - 130 : rect.bottom + 6,
+      left: Math.min(rect.left, window.innerWidth - 250),
+    });
+  }, []);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (dropRef.current && !dropRef.current.contains(e.target as Node) &&
+        anchorRef.current && !anchorRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    // Defer by one tick so the click that opened the dropdown
+    // doesn't immediately trigger onClose
+    const timer = setTimeout(() => {
+      document.addEventListener("mousedown", handler);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", handler);
+    };
+  }, [onClose]);
+
+  async function copiar() {
+    await navigator.clipboard.writeText(url);
+    setCopiado(true);
+    setTimeout(onClose, 1500);
   }
 
   return (
-    <nav
-      style={{
-        display: "grid",
-        gridTemplateColumns: anterior && proximo ? "1fr 1fr" : anterior ? "1fr auto" : "auto 1fr",
-        gap: "0.75rem",
-        marginTop: "1rem",
-      }}
-    >
-      {anterior ? (
-        <button
-          onClick={() => router.push(navUrl(anterior))}
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-start",
-            gap: "0.2rem",
-            padding: "0.75rem 1rem",
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--border-light)",
-            borderRadius: "var(--radius-lg)",
-            cursor: "pointer",
-            textAlign: "left",
-            transition: "border-color 0.15s",
-            minWidth: 0,
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--emerald-dim)")}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border-light)")}
-        >
-          <span style={{ fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8 }}>
-            {anterior.tipo === "sermao" ? "Sermão" : "Artigo"}
-          </span>
-          <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-1)", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", wordBreak: "break-word" }}>
-            {anterior.titulo}
-          </span>
-        </button>
-      ) : <span />}
-
-      {proximo ? (
-        <button
-          onClick={() => router.push(navUrl(proximo))}
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-end",
-            gap: "0.2rem",
-            padding: "0.75rem 1rem",
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--border-light)",
-            borderRadius: "var(--radius-lg)",
-            cursor: "pointer",
-            textAlign: "right",
-            transition: "border-color 0.15s",
-            minWidth: 0,
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--emerald-dim)")}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border-light)")}
-        >
-          <span style={{ fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8 }}>
-            {proximo.tipo === "sermao" ? "Sermão" : "Artigo"}
-          </span>
-          <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "var(--text-1)", lineHeight: 1.3, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", wordBreak: "break-word" }}>
-            {proximo.titulo}
-          </span>
-        </button>
-      ) : <span />}
-    </nav>
+    <div ref={dropRef} onClick={(e) => e.stopPropagation()} style={{
+      position: "fixed", top: pos.top, left: pos.left,
+      background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
+      borderRadius: "var(--radius-lg)", padding: "0.5rem",
+      display: "flex", flexWrap: "wrap", gap: "0.375rem",
+      width: 244, zIndex: 9999, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+    }}>
+      <a href={`https://wa.me/?text=${texto}%20${urlEnc}`} target="_blank"
+        rel="noopener noreferrer" className="share-btn share-whatsapp" onClick={onClose}>
+        WhatsApp
+      </a>
+      <a href={`https://www.facebook.com/sharer/sharer.php?u=${urlEnc}`} target="_blank"
+        rel="noopener noreferrer" className="share-btn share-facebook" onClick={onClose}>
+        Facebook
+      </a>
+      <a href={`https://twitter.com/intent/tweet?text=${texto}&url=${urlEnc}`} target="_blank"
+        rel="noopener noreferrer" className="share-btn share-twitter" onClick={onClose}>
+        X (Twitter)
+      </a>
+      <button onClick={copiar} className="share-btn share-copy">
+        {copiado ? "✓ Copiado!" : "Copiar link"}
+      </button>
+    </div>
   );
 }
+
+/* ── Toast ───────────────────────────────────────────── */
+
+function Toast({ msg, visible }: { msg: string; visible: boolean }) {
+  return (
+    <div style={{
+      position: "fixed", bottom: "1.5rem", left: "50%",
+      transform: `translateX(-50%) translateY(${visible ? 0 : "12px"})`,
+      background: "var(--bg-elevated)", border: "1px solid var(--emerald-dim)",
+      color: "var(--emerald)", fontSize: "0.82rem", fontWeight: 600,
+      padding: "8px 20px", borderRadius: "var(--radius-full)",
+      boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+      opacity: visible ? 1 : 0, transition: "all 0.25s ease",
+      pointerEvents: "none", zIndex: 999,
+    }}>
+      {msg}
+    </div>
+  );
+}
+
+/* ── PostCardPerfil ──────────────────────────────────── */
+
+function PostCardPerfil({
+  post, index, user, nomeExibicao, autorUid, onToast,
+}: {
+  post: any; index: number; user: User; nomeExibicao: string;
+  autorUid: string; onToast: (msg: string) => void;
+}) {
+  const router = useRouter();
+  const currentUid = auth.currentUser?.uid;
+
+  const [liked, setLiked] = useState<boolean>(() =>
+    currentUid ? (post.likedBy ?? []).includes(currentUid) : false
+  );
+  const [likeCount, setLikeCount] = useState<number>(post.likes ?? 0);
+  const [loadingLike, setLoadingLike] = useState(false);
+  const [gerandoPdf, setGerandoPdf] = useState(false);
+  const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
+  const [compartilharAberto, setCompartilharAberto] = useState(false);
+  const shareRef = useRef<HTMLButtonElement>(null!);
+
+  const viewCount: number = post.visualizacoes ?? 0;
+
+  // URL do post com autorId como query param para filtrar navegação
+  const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}?autorId=${autorUid}`;
+  const fullUrl = typeof window !== "undefined"
+    ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`
+    : `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
+
+  function buildFrase() {
+    const data = post.data?.toDate
+      ? post.data.toDate().toLocaleDateString("pt-BR")
+      : typeof post.data === "string" ? post.data : "";
+    if (post.tipo === "sermao") {
+      if (post.igreja && data) return `Pregado na ${post.igreja} · ${data}`;
+      if (post.igreja) return `Pregado na ${post.igreja}`;
+      if (data) return `Pregado em ${data}`;
+      return "";
+    }
+    return `Por ${nomeExibicao}${data ? ` · ${data}` : ""}`;
+  }
+
+  async function handleLike(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!currentUid) { onToast("Faça login para curtir"); return; }
+    if (loadingLike) return;
+    setLoadingLike(true);
+    try {
+      const ref = doc(db, "posts", post.id);
+      if (liked) {
+        await updateDoc(ref, { likes: increment(-1), likedBy: arrayRemove(currentUid) });
+        setLiked(false); setLikeCount((n) => Math.max(0, n - 1));
+      } else {
+        await updateDoc(ref, { likes: increment(1), likedBy: arrayUnion(currentUid) });
+        setLiked(true); setLikeCount((n) => n + 1);
+      }
+    } catch (err) { console.error(err); }
+    setLoadingLike(false);
+  }
+
+  async function handleDownloadPdf(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (gerandoPdf) return;
+    setGerandoPdf(true);
+    onToast("Gerando PDF...");
+    try {
+      await gerarPDF({
+        titulo: post.titulo,
+        nomeAutor: nomeExibicao,
+        fotoAutor: user.fotoUrl ?? null,
+        dataPost: post.data?.toDate ? post.data.toDate().toLocaleDateString("pt-BR") : "",
+        igreja: post.igreja || "",
+        conteudo: post.conteudo || "Acesse o link para ler o conteúdo completo:\n" + fullUrl,
+        tipo: post.tipo,
+        onDownload: async () => {
+          try {
+            await updateDoc(doc(db, "posts", post.id), { downloads: increment(1) });
+            setDownloadCount((n) => n + 1);
+          } catch {}
+        },
+      });
+    } catch (err) {
+      console.error(err);
+      onToast("Erro ao gerar PDF.");
+    }
+    setGerandoPdf(false);
+  }
+
+  return (
+    <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
+      {/* Cabeçalho — clicar fora do nome vai para o post */}
+      <div
+        className="card-header-row"
+        onClick={() => router.push(postPath)}
+        style={{ cursor: "pointer" }}
+      >
+        <Avatar src={user.fotoUrl} name={nomeExibicao} size={36} />
+        <div
+          className="author-col"
+          style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}
+        >
+          {/* O nome NÃO navega — já estamos no perfil do autor */}
+          <span
+            className="author-name-link"
+            onClick={(e) => e.stopPropagation()}
+            style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", cursor: "default" }}
+          >
+            {nomeExibicao}
+          </span>
+          <span className="card-meta">{buildFrase()}</span>
+        </div>
+        <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
+          {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+        </span>
+      </div>
+
+      {/* Corpo */}
+      <div className="card-body-area" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
+        <h2 className="card-title">{post.titulo}</h2>
+        {post.resumo && <p className="card-frase">{post.resumo}</p>}
+      </div>
+
+      {/* Rodapé */}
+      <div className="card-footer-row">
+        {/* Amei */}
+        <button
+          className={`action-btn ${liked ? "liked" : ""}`}
+          onClick={handleLike}
+          disabled={loadingLike}
+          title={currentUid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
+          style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
+        >
+          <IconHeart size={13} filled={liked} />
+          Amei
+          {likeCount > 0 && (
+            <span style={{ marginLeft: 1, fontSize: "0.72rem", color: "var(--text-3)" }}>
+              {likeCount}
+            </span>
+          )}
+        </button>
+
+        {/* Compartilhar */}
+        <div style={{ position: "relative" }}>
+          <button
+            ref={shareRef}
+            className="action-btn"
+            onClick={(e) => { e.stopPropagation(); setCompartilharAberto((v) => !v); }}
+            title="Compartilhar"
+            style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
+          >
+            <IconShare size={13} />
+            Compartilhar
+          </button>
+          {compartilharAberto && (
+            <ShareMiniDropdown
+              url={fullUrl}
+              titulo={post.titulo}
+              autorNome={nomeExibicao}
+              onClose={() => setCompartilharAberto(false)}
+              anchorRef={shareRef}
+            />
+          )}
+        </div>
+
+        {/* PDF */}
+        <button
+          className="action-btn"
+          onClick={handleDownloadPdf}
+          disabled={gerandoPdf}
+          title="Baixar como PDF"
+          style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "5px" }}
+        >
+          {gerandoPdf ? (
+            <><span className="btn-spinner" />PDF</>
+          ) : (
+            <><IconDownload size={13} />PDF</>
+          )}
+          {downloadCount > 0 && (
+            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}
+              title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
+              {downloadCount}
+            </span>
+          )}
+        </button>
+
+        {/* Visualizações */}
+        {viewCount > 0 && (
+          <span
+            style={{
+              display: "inline-flex", alignItems: "center", gap: "4px",
+              fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)",
+            }}
+            title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}
+          >
+            <IconEye size={13} />
+            {viewCount}
+          </span>
+        )}
+
+        <span className="read-link" onClick={() => router.push(postPath)}>
+          Ler completo →
+        </span>
+      </div>
+    </article>
+  );
+}
+
+/* ── PerfilPublico ───────────────────────────────────── */
 
 export default function PerfilPublico() {
   const { id } = useParams();
@@ -186,10 +433,16 @@ export default function PerfilPublico() {
   const [uid, setUid] = useState<string | null>(null);
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [copiado, setCopiado] = useState<string | null>(null);
-  const [compartilharAberto, setCompartilharAberto] = useState<string | null>(null);
-  // ID do post cujos cards de nav estão expandidos
-  const [navAberta, setNavAberta] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState("");
+  const [toastVisible, setToastVisible] = useState(false);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showToast(msg: string) {
+    setToastMsg(msg);
+    setToastVisible(true);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastVisible(false), 2200);
+  }
 
   useEffect(() => {
     async function carregar() {
@@ -214,21 +467,14 @@ export default function PerfilPublico() {
         const lista: any[] = [];
         snap.forEach((d) => lista.push({ id: d.id, ...d.data() }));
         setPosts(lista);
-      } catch (err) {
-        console.error(err);
-      }
+      } catch (err) { console.error(err); }
       setLoading(false);
     }
     carregar();
   }, [id]);
 
   if (loading)
-    return (
-      <div className="post-detail-loading">
-        <div className="spinner" />
-        Carregando perfil...
-      </div>
-    );
+    return <div className="post-detail-loading"><div className="spinner" />Carregando perfil...</div>;
 
   if (!user)
     return <div className="post-detail-notfound">Usuário não encontrado.</div>;
@@ -238,186 +484,51 @@ export default function PerfilPublico() {
       ? `${user.titulo} ${user.nome}`
       : user.nome || "Usuário";
 
-  function getUrlPost(post: any) {
-    const tipo = post.tipo === "sermao" ? "sermoes" : "artigos";
-    return `${window.location.origin}/posts/${tipo}/${post.slug}`;
-  }
-
   return (
-    <div className="perfil-wrapper">
+    <>
+      <Toast msg={toastMsg} visible={toastVisible} />
 
-      {/* CARD DO PERFIL */}
-      <div className="perfil-card">
-        <Avatar src={user.fotoUrl} name={nomeExibicao} size={64} />
-        <div className="perfil-info">
-          <h1 className="perfil-nome">{nomeExibicao}</h1>
-          {user.bio ? (
-            <p className="perfil-bio">{user.bio}</p>
-          ) : (
-            <p className="perfil-bio-vazia">Sem descrição.</p>
+      <div className="perfil-wrapper">
+        {/* Card do perfil */}
+        <div className="perfil-card">
+          <Avatar src={user.fotoUrl} name={nomeExibicao} size={64} />
+          <div className="perfil-info">
+            <h1 className="perfil-nome">{nomeExibicao}</h1>
+            {user.bio ? (
+              <p className="perfil-bio">{user.bio}</p>
+            ) : (
+              <p className="perfil-bio-vazia">Sem descrição.</p>
+            )}
+            <div className="perfil-stat">
+              <span className="perfil-stat-num">{posts.length}</span>
+              <span className="perfil-stat-label">publicações</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Publicações */}
+        <div className="perfil-posts-section">
+          <h2 className="perfil-posts-title">Publicações</h2>
+
+          {posts.length === 0 && (
+            <div className="empty-state">Nenhuma publicação ainda.</div>
           )}
-          <div className="perfil-stat">
-            <span className="perfil-stat-num">{posts.length}</span>
-            <span className="perfil-stat-label">publicações</span>
+
+          <div className="posts-list">
+            {posts.map((post, i) => (
+              <PostCardPerfil
+                key={post.id}
+                post={post}
+                index={i}
+                user={user}
+                nomeExibicao={nomeExibicao}
+                autorUid={uid!}
+                onToast={showToast}
+              />
+            ))}
           </div>
         </div>
       </div>
-
-      {/* PUBLICAÇÕES */}
-      <div className="perfil-posts-section">
-        <h2 className="perfil-posts-title">Publicações</h2>
-
-        {posts.length === 0 && (
-          <div className="empty-state">Nenhuma publicação ainda.</div>
-        )}
-
-        <div className="posts-list">
-          {posts.map((post) => {
-            const urlPost = getUrlPost(post);
-            const textoCompartilhar = encodeURIComponent(`${post.titulo} - ${nomeExibicao}`);
-            const urlEncoded = encodeURIComponent(urlPost);
-            const aberto = compartilharAberto === post.id;
-            const navAbertaEste = navAberta === post.id;
-
-            return (
-              <div key={post.id} className="post-card">
-                <div className="card-header-row">
-                  <Avatar src={user.fotoUrl} name={nomeExibicao} size={36} />
-                  <div className="author-col">
-                    <span className="author-name-link">{nomeExibicao}</span>
-                    <span className="card-meta">
-                      {post.data?.toDate
-                        ? post.data.toDate().toLocaleDateString("pt-BR")
-                        : typeof post.data === "string" ? post.data : ""}
-                      {post.igreja ? ` · ${post.igreja}` : ""}
-                    </span>
-                  </div>
-                  <span
-                    className={`cat-badge ${
-                      post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"
-                    }`}
-                  >
-                    {post.tipo === "sermao" ? "Sermão" : "Artigo"}
-                  </span>
-                </div>
-
-                <div
-                  className="card-body-area"
-                  onClick={() =>
-                    router.push(
-                      `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`
-                    )
-                  }
-                  style={{ cursor: "pointer" }}
-                >
-                  <h3 className="card-title">{post.titulo}</h3>
-                  {post.resumo && <p className="card-frase">{post.resumo}</p>}
-                </div>
-
-                <div className="card-footer-row">
-                  {/* Botão: ver outras publicações deste autor (nav sequencial) */}
-                  {posts.length > 1 && (
-                    <button
-                      className="action-btn"
-                      onClick={() => setNavAberta(navAbertaEste ? null : post.id)}
-                      title="Ver publicações relacionadas deste autor"
-                    >
-                      {navAbertaEste ? "Fechar" : "Mais deste autor"}
-                    </button>
-                  )}
-
-                  <button
-                    className="action-btn"
-                    onClick={() => setCompartilharAberto(aberto ? null : post.id)}
-                  >
-                    🔗 Compartilhar
-                  </button>
-
-                  <span
-                    className="read-link"
-                    onClick={() =>
-                      router.push(
-                        `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`
-                      )
-                    }
-                  >
-                    Ler completo →
-                  </span>
-                </div>
-
-                {/* Navegação sequencial entre posts do autor */}
-                {navAbertaEste && (
-                  <div style={{ marginTop: "0.75rem" }}>
-                    <PostNavigation posts={posts} postAtualId={post.id} />
-                  </div>
-                )}
-
-                {/* Opções de compartilhamento */}
-                {aberto && (
-                  <div className="perfil-share-options">
-                    <a
-                      href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="share-btn share-whatsapp"
-                    >
-                      WhatsApp
-                    </a>
-                    <a
-                      href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="share-btn share-facebook"
-                    >
-                      Facebook
-                    </a>
-                    <a
-                      href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="share-btn share-threads"
-                    >
-                      Threads
-                    </a>
-                    <a
-                      href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="share-btn share-twitter"
-                    >
-                      X (Twitter)
-                    </a>
-                    <a
-                      href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="share-btn share-linkedin"
-                    >
-                      LinkedIn
-                    </a>
-                    <a
-                      href={`mailto:?subject=${encodeURIComponent(post.titulo)}&body=${encodeURIComponent(post.conteudo + "\n\n" + urlPost)}`}
-                      className="share-btn share-email"
-                    >
-                      Email
-                    </a>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(urlPost);
-                        setCopiado(post.id);
-                        setTimeout(() => setCopiado(null), 2000);
-                      }}
-                      className="share-btn share-copy"
-                    >
-                      {copiado === post.id ? "✓ Copiado!" : "Copiar link"}
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
+    </>
   );
 }
