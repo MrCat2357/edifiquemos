@@ -18,7 +18,7 @@ export default function RootLayout({
     <html lang="pt-BR">
       <body className="bg-neutral-900 text-neutral-100 min-h-screen">
         <HeaderWrapper />
-        <main className="pt-[72px]">
+        <main className="pt-[72px] w-full min-w-0 overflow-x-hidden">
           {children}
         </main>
       </body>
