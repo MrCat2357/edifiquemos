@@ -741,14 +741,22 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [viewCount, setViewCount] = useState<number>(post.visualizacoes ?? 0);
 
   useEffect(() => {
-    // Incrementa visualização no Firestore uma vez por montagem do componente.
-    // Em produção, considere usar sessionStorage para evitar contar recargas.
+    // Só incrementa se o usuário estiver autenticado (evita erro de permissão)
+    // e apenas uma vez por sessão por post (evita contar recargas)
     async function registrarVisualizacao() {
+      const uid = auth.currentUser?.uid;
+      if (!uid) return; // usuário não logado: não tenta escrever no Firestore
+
+      const sessionKey = `viewed_${postId}`;
+      if (sessionStorage.getItem(sessionKey)) return; // já contou nesta sessão
+
       try {
         const ref = doc(db, "posts", postId);
         await updateDoc(ref, { visualizacoes: increment(1) });
+        sessionStorage.setItem(sessionKey, "1");
         setViewCount((n) => n + 1);
       } catch (err) {
+        // silencia: não exibe erro para o usuário por falha em contagem
         console.error("Erro ao registrar visualização:", err);
       }
     }

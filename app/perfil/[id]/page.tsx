@@ -70,19 +70,6 @@ function IconHeart({ size = 13, filled = false }: { size?: number; filled?: bool
   );
 }
 
-function IconShare({ size = 13 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
-      <circle cx="11" cy="3.5" r="1.8" stroke="currentColor" strokeWidth="1.3" />
-      <circle cx="5" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.3" />
-      <circle cx="11" cy="12.5" r="1.8" stroke="currentColor" strokeWidth="1.3" />
-      <path d="M6.7 7.1l2.7-2.7M6.7 8.9l2.7 2.7"
-        stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function IconEye({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
@@ -118,83 +105,6 @@ async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: U
   const docSnap = await getDoc(docRef);
   if (docSnap.exists()) return { uid: docSnap.id, userData: docSnap.data() as User };
   return null;
-}
-
-/* ── ShareMiniDropdown ───────────────────────────────── */
-
-function ShareMiniDropdown({
-  url, titulo, autorNome, onClose, anchorRef,
-}: {
-  url: string; titulo: string; autorNome: string;
-  onClose: () => void; anchorRef: React.RefObject<HTMLButtonElement>;
-}) {
-  const dropRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-  const [copiado, setCopiado] = useState(false);
-
-  const texto = encodeURIComponent(`${titulo} - ${autorNome}`);
-  const urlEnc = encodeURIComponent(url);
-
-  useEffect(() => {
-    if (!anchorRef.current) return;
-    const rect = anchorRef.current.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
-    const openUp = spaceBelow < 140;
-    setPos({
-      top: openUp ? rect.top - 130 : rect.bottom + 6,
-      left: Math.min(rect.left, window.innerWidth - 250),
-    });
-  }, []);
-
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node) &&
-        anchorRef.current && !anchorRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    // Defer by one tick so the click that opened the dropdown
-    // doesn't immediately trigger onClose
-    const timer = setTimeout(() => {
-      document.addEventListener("mousedown", handler);
-    }, 0);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("mousedown", handler);
-    };
-  }, [onClose]);
-
-  async function copiar() {
-    await navigator.clipboard.writeText(url);
-    setCopiado(true);
-    setTimeout(onClose, 1500);
-  }
-
-  return (
-    <div ref={dropRef} onClick={(e) => e.stopPropagation()} style={{
-      position: "fixed", top: pos.top, left: pos.left,
-      background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
-      borderRadius: "var(--radius-lg)", padding: "0.5rem",
-      display: "flex", flexWrap: "wrap", gap: "0.375rem",
-      width: 244, zIndex: 9999, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
-    }}>
-      <a href={`https://wa.me/?text=${texto}%20${urlEnc}`} target="_blank"
-        rel="noopener noreferrer" className="share-btn share-whatsapp" onClick={onClose}>
-        WhatsApp
-      </a>
-      <a href={`https://www.facebook.com/sharer/sharer.php?u=${urlEnc}`} target="_blank"
-        rel="noopener noreferrer" className="share-btn share-facebook" onClick={onClose}>
-        Facebook
-      </a>
-      <a href={`https://twitter.com/intent/tweet?text=${texto}&url=${urlEnc}`} target="_blank"
-        rel="noopener noreferrer" className="share-btn share-twitter" onClick={onClose}>
-        X (Twitter)
-      </a>
-      <button onClick={copiar} className="share-btn share-copy">
-        {copiado ? "✓ Copiado!" : "Copiar link"}
-      </button>
-    </div>
-  );
 }
 
 /* ── Toast ───────────────────────────────────────────── */
@@ -234,12 +144,10 @@ function PostCardPerfil({
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
-  const [compartilharAberto, setCompartilharAberto] = useState(false);
-  const shareRef = useRef<HTMLButtonElement>(null!);
+
 
   const viewCount: number = post.visualizacoes ?? 0;
 
-  // URL do post com autorId como query param para filtrar navegação
   const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}?autorId=${autorUid}`;
   const fullUrl = typeof window !== "undefined"
     ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`
@@ -306,7 +214,7 @@ function PostCardPerfil({
 
   return (
     <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
-      {/* Cabeçalho — clicar fora do nome vai para o post */}
+      {/* Cabeçalho */}
       <div
         className="card-header-row"
         onClick={() => router.push(postPath)}
@@ -317,7 +225,6 @@ function PostCardPerfil({
           className="author-col"
           style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}
         >
-          {/* O nome NÃO navega — já estamos no perfil do autor */}
           <span
             className="author-name-link"
             onClick={(e) => e.stopPropagation()}
@@ -339,83 +246,61 @@ function PostCardPerfil({
       </div>
 
       {/* Rodapé */}
-      <div className="card-footer-row">
-        {/* Amei */}
-        <button
-          className={`action-btn ${liked ? "liked" : ""}`}
-          onClick={handleLike}
-          disabled={loadingLike}
-          title={currentUid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
-          style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
-        >
-          <IconHeart size={13} filled={liked} />
-          Amei
-          {likeCount > 0 && (
-            <span style={{ marginLeft: 1, fontSize: "0.72rem", color: "var(--text-3)" }}>
-              {likeCount}
-            </span>
-          )}
-        </button>
-
-        {/* Compartilhar */}
-        <div style={{ position: "relative" }}>
+      <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }}>
+        {/* Grupo esquerdo: Amei · PDF · olhinho — espaçamento uniforme */}
+        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          {/* Amei */}
           <button
-            ref={shareRef}
-            className="action-btn"
-            onClick={(e) => { e.stopPropagation(); setCompartilharAberto((v) => !v); }}
-            title="Compartilhar"
-            style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
+            className={`action-btn ${liked ? "liked" : ""}`}
+            onClick={handleLike}
+            disabled={loadingLike}
+            title={currentUid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
+            style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
           >
-            <IconShare size={13} />
-            Compartilhar
+            <IconHeart size={13} filled={liked} />
+            Amei
+            {likeCount > 0 && (
+              <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>
+                {likeCount}
+              </span>
+            )}
           </button>
-          {compartilharAberto && (
-            <ShareMiniDropdown
-              url={fullUrl}
-              titulo={post.titulo}
-              autorNome={nomeExibicao}
-              onClose={() => setCompartilharAberto(false)}
-              anchorRef={shareRef}
-            />
+
+          {/* PDF */}
+          <button
+            className="action-btn"
+            onClick={handleDownloadPdf}
+            disabled={gerandoPdf}
+            title="Baixar como PDF"
+            style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
+          >
+            {gerandoPdf ? (
+              <><span className="btn-spinner" />PDF</>
+            ) : (
+              <><IconDownload size={13} />PDF</>
+            )}
+            {downloadCount > 0 && (
+              <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}
+                title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
+                {downloadCount}
+              </span>
+            )}
+          </button>
+
+          {/* Visualizações */}
+          {viewCount > 0 && (
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}
+              title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}
+            >
+              <IconEye size={13} />
+              {viewCount}
+            </span>
           )}
         </div>
 
-        {/* PDF */}
-        <button
-          className="action-btn"
-          onClick={handleDownloadPdf}
-          disabled={gerandoPdf}
-          title="Baixar como PDF"
-          style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "5px" }}
-        >
-          {gerandoPdf ? (
-            <><span className="btn-spinner" />PDF</>
-          ) : (
-            <><IconDownload size={13} />PDF</>
-          )}
-          {downloadCount > 0 && (
-            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}
-              title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
-              {downloadCount}
-            </span>
-          )}
-        </button>
-
-        {/* Visualizações */}
-        {viewCount > 0 && (
-          <span
-            style={{
-              display: "inline-flex", alignItems: "center", gap: "4px",
-              fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)",
-            }}
-            title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}
-          >
-            <IconEye size={13} />
-            {viewCount}
-          </span>
-        )}
-
-        <span className="read-link" onClick={() => router.push(postPath)}>
+        {/* Ler completo → empurrado para a direita */}
+        <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
           Ler completo →
         </span>
       </div>
