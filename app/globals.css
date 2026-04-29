@@ -1234,7 +1234,32 @@ a { color: inherit; text-decoration: none; }
   .stat-number { font-size: 1.1rem; }
 
   /* Feed */
-  .feed-wrapper { padding: 1rem 0.75rem; }
+  .feed-wrapper {
+    padding: 1rem 0.75rem;
+    /* FIX: impede que o wrapper engula o overflow-x dos filhos */
+    overflow: hidden;
+  }
+
+  /* FIX PRINCIPAL: o container direto do feed-main-header precisa de
+     min-width: 0 para que o filho com overflow-x: auto possa rolar
+     em vez de ser comprimido/cortado pelo flexbox pai               */
+  .feed-wrapper > div {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .feed-main-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  /* Garante largura total para a linha de filtros poder rolar */
+  .feed-filter-row {
+    width: 100%;
+    min-width: 0;
+  }
+
   .feed-main-title { font-size: 1rem; }
 
   /* Mantém os filtros visíveis e adiciona o toggle "Em alta" */
