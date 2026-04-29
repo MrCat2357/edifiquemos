@@ -330,11 +330,10 @@ export default function Posts() {
       )}
 
       <div className="feed-wrapper">
-        <div>
-          {/*
-            feed-main-header agora é sempre flex-column no mobile
-            via globals.css — título em cima, filtros embaixo
-          */}
+        {/* ↓ FIX: min-width: 0 é obrigatório em grid items que contêm
+            filhos com overflow-x: auto. Sem isso o grid item expande
+            além da célula e o scroll nunca ativa.                      */}
+        <div style={{ minWidth: 0 }}>
           <div className="feed-main-header">
             <h1 className="feed-main-title">Publicações Recentes</h1>
 
