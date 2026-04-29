@@ -964,6 +964,93 @@ a { color: inherit; text-decoration: none; }
 .auth-link-sep { color: var(--border-light); font-size: 0.82rem; }
 
 /* ============================================================
+   SELECTION SHARE MENU
+   ============================================================ */
+
+.selection-share-menu {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 210px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--emerald-dim);
+  animation: menuPop 0.15s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes menuPop {
+  from { opacity: 0; transform: scale(0.92) translateY(4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.selection-share-menu-title {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.5rem 0.375rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.125rem;
+}
+
+.selection-share-menu-quote {
+  font-size: 0.75rem;
+  color: var(--text-2);
+  font-style: italic;
+  padding: 0.25rem 0.5rem;
+  border-left: 2px solid var(--emerald-dim);
+  margin: 0 0.125rem 0.25rem;
+  line-height: 1.4;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selection-share-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+  text-decoration: none;
+}
+
+.selection-share-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-1);
+}
+
+.selection-share-btn-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.selection-share-btn-icon.whatsapp { background: #16a34a; color: #fff; }
+.selection-share-btn-icon.copy     { background: var(--border-light); color: var(--text-1); }
+
+/* ============================================================
    RESPONSIVO — TABLET (820px)
    ============================================================ */
 
@@ -1120,14 +1207,15 @@ a { color: inherit; text-decoration: none; }
 
   .mobile-nav-cta:hover { background: var(--emerald-dark); }
 
-  /* Hero */
+  /* ── Hero mobile: centralizado sem espaço sobrando ── */
   .hero {
     min-height: 100svh;
-    align-items: flex-start;
-    padding-top: calc(var(--header-h) + 1.5rem);
+    align-items: center;
+    padding-top: var(--header-h);
+    padding-bottom: 2rem;
   }
 
-  .hero-content { padding: 1rem 1.25rem 2rem; max-width: 100%; }
+  .hero-content { padding: 1rem 1.25rem 1.5rem; max-width: 100%; }
   .hero-eyebrow { font-size: 0.65rem; padding: 4px 10px; margin-bottom: 1.25rem; }
   .hero-title { font-size: clamp(1.7rem, 8vw, 2.4rem); margin-bottom: 1.25rem; }
   .hero-verse { font-size: 0.88rem; padding: 0.875rem 1rem; margin-bottom: 1.75rem; }
@@ -1136,7 +1224,7 @@ a { color: inherit; text-decoration: none; }
     flex-direction: column;
     align-items: stretch;
     gap: 0.625rem;
-    margin-bottom: 2rem;
+    margin-bottom: 1.5rem;
   }
 
   .btn-hero-primary,
@@ -1148,7 +1236,17 @@ a { color: inherit; text-decoration: none; }
   /* Feed */
   .feed-wrapper { padding: 1rem 0.75rem; }
   .feed-main-title { font-size: 1rem; }
-  .feed-filters { display: none; }
+
+  /* Mantém os filtros visíveis e adiciona o toggle "Em alta" */
+  .feed-filters { display: flex; }
+
+  .sidebar-toggle-btn {
+    display: inline-flex !important;
+    min-height: 36px;
+    font-size: 0.78rem;
+    padding: 5px 12px;
+  }
+
   .card-header-row { padding: 0.875rem 1rem 0.4rem; }
   .card-body-area  { padding: 0.2rem 1rem 0.75rem; }
   .card-footer-row { padding: 0.4rem 1rem; }
