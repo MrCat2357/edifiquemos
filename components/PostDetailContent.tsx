@@ -5,8 +5,9 @@ import { db, auth } from "@/lib/firebase";
 import {
   doc, updateDoc, arrayUnion, arrayRemove,
   increment, getDoc, deleteDoc,
+  collection, query, orderBy, getDocs, where,
 } from "firebase/firestore";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
 
@@ -24,26 +25,358 @@ export function getInitials(name: string) {
   return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
-export function AuthorAvatar({ src, name, size = 40 }: { src?: string | null; name: string; size?: number }) {
+export function AuthorAvatar({
+  src,
+  name,
+  size = 40,
+}: {
+  src?: string | null;
+  name: string;
+  size?: number;
+}) {
   if (src)
-    return <img src={src} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
+    return (
+      <img
+        src={src}
+        alt={name}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: "50%",
+          objectFit: "cover",
+          flexShrink: 0,
+        }}
+      />
+    );
   return (
-    <div style={{
-      width: size, height: size, borderRadius: "50%",
-      background: "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
-      color: "#fff", fontSize: Math.round(size * 0.36) + "px",
-      fontWeight: 700, display: "flex", alignItems: "center",
-      justifyContent: "center", flexShrink: 0, userSelect: "none",
-    }}>
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        background: "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
+        color: "#fff",
+        fontSize: Math.round(size * 0.36) + "px",
+        fontWeight: 700,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        userSelect: "none",
+      }}
+    >
       {getInitials(name)}
     </div>
   );
 }
 
+/* ── SVG Icons ───────────────────────────────────────── */
+
+function IconDownload({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M8 2v7M8 9l-2.5-2.5M8 9l2.5-2.5"
+        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 13h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconHeart({ size = 14, filled = false }: { size?: number; filled?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path
+        d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.567 3.067 2 5 2C6.105 2 7.093 2.535 7.75 3.366L8 3.7L8.25 3.366C8.907 2.535 9.895 2 11 2C12.933 2 14.5 3.567 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z"
+        stroke="currentColor" strokeWidth="1.4"
+        fill={filled ? "currentColor" : "none"}
+        strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconShare({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M11 1.5a2 2 0 1 1 .001 3.999A2 2 0 0 1 11 1.5ZM5 7a2 2 0 1 1 .001 3.999A2 2 0 0 1 5 7Zm6 3.5a2 2 0 1 1 .001 3.999A2 2 0 0 1 11 10.5Z"
+        stroke="currentColor" strokeWidth="1.4" />
+      <path d="M7 8.5l-1.5-.9M7 7.5L5.5 8.4M7 8.5l4-2.5M7 7.5l4 2.5"
+        stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconEye({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M1.5 8C3 4.5 5.3 3 8 3s5 1.5 6.5 5C13 11.5 10.7 13 8 13S3 11.5 1.5 8Z"
+        stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function IconArrowLeft({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M7.5 2L3.5 6l4 4" stroke="currentColor" strokeWidth="1.4"
+        strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconArrowRight({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M4.5 2L8.5 6l-4 4" stroke="currentColor" strokeWidth="1.4"
+        strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/* ── Navegação entre posts ───────────────────────────── */
+
+type PostNav = {
+  id: string;
+  titulo: string;
+  slug?: string;
+  tipo: string;
+  autorId?: string;
+  autorNome?: string;
+};
+
+type PostNavAutor = { nome: string; fotoUrl: string | null };
+
+function PostNavigation({ postId }: { postId: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const autorId = searchParams.get("autorId");
+
+  const [prev, setPrev] = useState<PostNav | null>(null);
+  const [next, setNext] = useState<PostNav | null>(null);
+  const [prevAutor, setPrevAutor] = useState<PostNavAutor | null>(null);
+  const [nextAutor, setNextAutor] = useState<PostNavAutor | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchNav() {
+      try {
+        // Se vier do perfil de um autor, filtra só posts desse autor
+        const q = autorId
+          ? query(collection(db, "posts"), where("autorId", "==", autorId), orderBy("data", "desc"))
+          : query(collection(db, "posts"), orderBy("data", "desc"));
+
+        const snap = await getDocs(q);
+        const all: PostNav[] = snap.docs.map((d) => ({
+          id: d.id,
+          titulo: d.data().titulo || "Sem título",
+          slug: d.data().slug,
+          tipo: d.data().tipo,
+          autorId: d.data().autorId,
+          autorNome: d.data().autorNome,
+        }));
+        const idx = all.findIndex((p) => p.id === postId);
+        if (idx === -1) { setLoading(false); return; }
+
+        const p = idx + 1 < all.length ? all[idx + 1] : null;
+        const n = idx - 1 >= 0 ? all[idx - 1] : null;
+        setPrev(p);
+        setNext(n);
+
+        // Busca dados de autor dos posts adjacentes em paralelo
+        async function fetchAutorData(post: PostNav): Promise<PostNavAutor> {
+          if (!post.autorId) return { nome: post.autorNome || "Autor", fotoUrl: null };
+          try {
+            const snap = await getDoc(doc(db, "users", post.autorId));
+            if (snap.exists()) {
+              const d = snap.data();
+              const nome =
+                d.titulo && d.nome
+                  ? `${d.titulo.trim()} ${d.nome.trim()}`
+                  : d.nome?.trim() || post.autorNome || "Autor";
+              return { nome, fotoUrl: d.fotoUrl ?? null };
+            }
+          } catch {}
+          return { nome: post.autorNome || "Autor", fotoUrl: null };
+        }
+
+        const [pa, na] = await Promise.all([
+          p ? fetchAutorData(p) : Promise.resolve(null),
+          n ? fetchAutorData(n) : Promise.resolve(null),
+        ]);
+        setPrevAutor(pa);
+        setNextAutor(na);
+      } catch (err) {
+        console.error(err);
+      }
+      setLoading(false);
+    }
+    fetchNav();
+  }, [postId, autorId]);
+
+  function navUrl(p: PostNav) {
+    const base = p.slug
+      ? `/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`
+      : `/posts/${p.id}`;
+    // Preserva o autorId na navegação para manter o filtro
+    return autorId ? `${base}?autorId=${autorId}` : base;
+  }
+
+  if (loading || (!prev && !next)) return null;
+
+  const cardBase: React.CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.5rem",
+    padding: "0.875rem 1rem",
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-light)",
+    borderRadius: "var(--radius-lg)",
+    cursor: "pointer",
+    transition: "border-color 0.15s, background 0.15s",
+    minWidth: 0,
+  };
+
+  return (
+    <nav
+      className="post-nav"
+      aria-label="Navegação entre publicações"
+      style={{
+        display: "grid",
+        gridTemplateColumns: prev && next ? "1fr 1fr" : prev ? "1fr auto" : "auto 1fr",
+        gap: "0.75rem",
+        marginTop: "2rem",
+      }}
+    >
+      {/* ← Anterior */}
+      {prev ? (
+        <button
+          onClick={() => router.push(navUrl(prev))}
+          className="post-nav-btn post-nav-btn--prev"
+          aria-label={`Publicação anterior: ${prev.titulo}`}
+          style={{ ...cardBase, alignItems: "flex-start", textAlign: "left" }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = "var(--emerald-dim)";
+            e.currentTarget.style.background = "var(--bg-card)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = "var(--border-light)";
+            e.currentTarget.style.background = "var(--bg-elevated)";
+          }}
+        >
+          {/* Label com seta */}
+          <span style={{
+            display: "flex", alignItems: "center", gap: "4px",
+            fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.08em",
+            textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8,
+          }}>
+            <IconArrowLeft size={12} />
+            {prev.tipo === "sermao" ? "Sermão anterior" : "Artigo anterior"}
+          </span>
+
+          {/* Título */}
+          <span style={{
+            fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
+            lineHeight: 1.3, overflow: "hidden",
+            display: "-webkit-box", WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical", wordBreak: "break-word",
+          }}>
+            {prev.titulo}
+          </span>
+
+          {/* Autor */}
+          {prevAutor && (
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+              <AuthorAvatar src={prevAutor.fotoUrl} name={prevAutor.nome} size={22} />
+              <span style={{
+                fontSize: "0.72rem", color: "var(--text-3)",
+                fontStyle: "italic", overflow: "hidden",
+                textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {prevAutor.nome}
+              </span>
+            </div>
+          )}
+        </button>
+      ) : (
+        <span />
+      )}
+
+      {/* → Próximo */}
+      {next ? (
+        <button
+          onClick={() => router.push(navUrl(next))}
+          className="post-nav-btn post-nav-btn--next"
+          aria-label={`Próxima publicação: ${next.titulo}`}
+          style={{ ...cardBase, alignItems: "flex-end", textAlign: "right" }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = "var(--emerald-dim)";
+            e.currentTarget.style.background = "var(--bg-card)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = "var(--border-light)";
+            e.currentTarget.style.background = "var(--bg-elevated)";
+          }}
+        >
+          {/* Label com seta */}
+          <span style={{
+            display: "flex", alignItems: "center", gap: "4px",
+            fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.08em",
+            textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8,
+          }}>
+            {next.tipo === "sermao" ? "Próximo sermão" : "Próximo artigo"}
+            <IconArrowRight size={12} />
+          </span>
+
+          {/* Título */}
+          <span style={{
+            fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
+            lineHeight: 1.3, overflow: "hidden",
+            display: "-webkit-box", WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical", wordBreak: "break-word",
+          }}>
+            {next.titulo}
+          </span>
+
+          {/* Autor */}
+          {nextAutor && (
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+              <span style={{
+                fontSize: "0.72rem", color: "var(--text-3)",
+                fontStyle: "italic", overflow: "hidden",
+                textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {nextAutor.nome}
+              </span>
+              <AuthorAvatar src={nextAutor.fotoUrl} name={nextAutor.nome} size={22} />
+            </div>
+          )}
+        </button>
+      ) : (
+        <span />
+      )}
+    </nav>
+  );
+}
+
 /* ── Modal: quem curtiu ──────────────────────────────── */
 
-function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => void }) {
-  const [pessoas, setPessoas] = useState<{ uid: string; nome: string; foto: string | null }[]>([]);
+function LikesModal({
+  likedBy,
+  onClose,
+}: {
+  likedBy: string[];
+  onClose: () => void;
+}) {
+  const [pessoas, setPessoas] = useState<
+    { uid: string; nome: string; foto: string | null }[]
+  >([]);
   const [loadingModal, setLoadingModal] = useState(true);
 
   useEffect(() => {
@@ -57,11 +390,14 @@ function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => vo
               const d = snap.data();
               resultado.push({
                 uid,
-                nome: d.titulo && d.nome ? `${d.titulo.trim()} ${d.nome.trim()}` : d.nome?.trim() || "Usuário",
+                nome:
+                  d.titulo && d.nome
+                    ? `${d.titulo.trim()} ${d.nome.trim()}`
+                    : d.nome?.trim() || "Usuário",
                 foto: d.fotoUrl ?? null,
               });
             }
-          } catch { }
+          } catch {}
         })
       );
       resultado.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
@@ -72,32 +408,44 @@ function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => vo
   }, [likedBy]);
 
   return (
-    <div onClick={onClose} style={{
-      position: "fixed", inset: 0, zIndex: 1000,
-      background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem",
-    }}>
-      <div onClick={(e) => e.stopPropagation()} style={{
-        background: "var(--bg-card)", border: "1px solid var(--border-light)",
-        borderRadius: "var(--radius-lg)", padding: "1.5rem",
-        width: "100%", maxWidth: 360, maxHeight: "70vh",
-        display: "flex", flexDirection: "column", gap: "1rem",
-        boxShadow: "0 16px 60px rgba(0,0,0,0.5)",
-      }}>
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--bg-card)", border: "1px solid var(--border-light)",
+          borderRadius: "var(--radius-lg)", padding: "1.5rem",
+          width: "100%", maxWidth: 360, maxHeight: "70vh",
+          display: "flex", flexDirection: "column", gap: "1rem",
+          boxShadow: "0 16px 60px rgba(0,0,0,0.5)",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text-1)" }}>
-            ❤️ Amaram este conteúdo
+          <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text-1)", display: "flex", alignItems: "center", gap: "6px" }}>
+            <IconHeart size={15} filled />
+            Amaram este conteúdo
             {likedBy.length > 0 && (
-              <span style={{ marginLeft: 6, fontSize: "0.8rem", color: "var(--text-3)", fontWeight: 400 }}>
+              <span style={{ fontSize: "0.8rem", color: "var(--text-3)", fontWeight: 400 }}>
                 ({likedBy.length}{likedBy.length > 50 ? ", mostrando 50" : ""})
               </span>
             )}
           </h3>
-          <button onClick={onClose} style={{
-            background: "none", border: "none", cursor: "pointer",
-            color: "var(--text-3)", fontSize: "1.2rem", lineHeight: 1,
-            padding: "2px 6px", borderRadius: "var(--radius-sm)",
-          }}>×</button>
+          <button
+            onClick={onClose}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: "var(--text-3)", fontSize: "1.2rem", lineHeight: 1,
+              padding: "2px 6px", borderRadius: "var(--radius-sm)",
+            }}
+          >
+            ×
+          </button>
         </div>
         <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {loadingModal ? (
@@ -108,23 +456,37 @@ function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => vo
             <p style={{ color: "var(--text-3)", fontSize: "0.85rem", textAlign: "center", padding: "1.5rem 0" }}>
               Nenhum usuário encontrado.
             </p>
-          ) : pessoas.map((p) => (
-            <div key={p.uid} style={{ display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.375rem 0.5rem", borderRadius: "var(--radius-sm)" }}>
-              <AuthorAvatar src={p.foto} name={p.nome} size={32} />
-              <span style={{ fontSize: "0.875rem", color: "var(--text-1)", fontWeight: 500 }}>{p.nome}</span>
-            </div>
-          ))}
+          ) : (
+            pessoas.map((p) => (
+              <div key={p.uid} style={{
+                display: "flex", alignItems: "center", gap: "0.625rem",
+                padding: "0.375rem 0.5rem", borderRadius: "var(--radius-sm)",
+              }}>
+                <AuthorAvatar src={p.foto} name={p.nome} size={32} />
+                <span style={{ fontSize: "0.875rem", color: "var(--text-1)", fontWeight: 500 }}>
+                  {p.nome}
+                </span>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-/* ── ShareDropdown ── */
+/* ── ShareDropdown ───────────────────────────────────── */
 
 function ShareDropdown({
-  anchorRef, dropdownRef, urlAtual, textoCompartilhar, urlEncoded,
-  conteudo, copiado, onCopiar, onClose,
+  anchorRef,
+  dropdownRef,
+  urlAtual,
+  textoCompartilhar,
+  urlEncoded,
+  conteudo,
+  copiado,
+  onCopiar,
+  onClose,
 }: {
   anchorRef: React.RefObject<HTMLButtonElement>;
   dropdownRef: React.RefObject<HTMLDivElement>;
@@ -150,7 +512,9 @@ function ShareDropdown({
     });
   }, []);
 
-  const emailBody = encodeURIComponent(`${conteudo.slice(0, 300)}...\n\nLer completo: ${urlAtual}`);
+  const emailBody = encodeURIComponent(
+    `${conteudo.slice(0, 300)}...\n\nLer completo: ${urlAtual}`
+  );
 
   return (
     <div
@@ -161,16 +525,26 @@ function ShareDropdown({
         background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
         borderRadius: "var(--radius-lg)", padding: "0.625rem",
         display: "flex", flexWrap: "wrap", gap: "0.375rem",
-        width: 268, zIndex: 9999,
-        boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+        width: 268, zIndex: 9999, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
       }}
     >
-      <a href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-whatsapp" onClick={onClose}>WhatsApp</a>
-      <a href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-facebook" onClick={onClose}>Facebook</a>
-      <a href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-threads" onClick={onClose}>Threads</a>
-      <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-twitter" onClick={onClose}>X (Twitter)</a>
-      <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-linkedin" onClick={onClose}>LinkedIn</a>
-      <a href={`https://mail.google.com/mail/?view=cm&su=${textoCompartilhar}&body=${emailBody}`} className="share-btn share-email" onClick={onClose}>Email</a>
+      <a href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`}
+        target="_blank" rel="noopener noreferrer"
+        className="share-btn share-whatsapp" onClick={onClose}>WhatsApp</a>
+      <a href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`}
+        target="_blank" rel="noopener noreferrer"
+        className="share-btn share-facebook" onClick={onClose}>Facebook</a>
+      <a href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`}
+        target="_blank" rel="noopener noreferrer"
+        className="share-btn share-threads" onClick={onClose}>Threads</a>
+      <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`}
+        target="_blank" rel="noopener noreferrer"
+        className="share-btn share-twitter" onClick={onClose}>X (Twitter)</a>
+      <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`}
+        target="_blank" rel="noopener noreferrer"
+        className="share-btn share-linkedin" onClick={onClose}>LinkedIn</a>
+      <a href={`https://mail.google.com/mail/?view=cm&su=${textoCompartilhar}&body=${emailBody}`}
+        className="share-btn share-email" onClick={onClose}>Email</a>
       <button onClick={onCopiar} className="share-btn share-copy">
         {copiado ? "✓ Copiado!" : "Copiar link"}
       </button>
@@ -178,7 +552,7 @@ function ShareDropdown({
   );
 }
 
-/* ── SelectionPopup ── */
+/* ── SelectionPopup ──────────────────────────────────── */
 
 function SelectionPopup({
   trechoSelecionado,
@@ -215,7 +589,7 @@ function SelectionPopup({
     try {
       await navigator.clipboard.writeText(mensagem);
       setCopiado(true);
-      onToast("Trecho copiado! 📋");
+      onToast("Trecho copiado!");
       setTimeout(() => { setCopiado(false); onFechar(); }, 1800);
     } catch {
       onToast("Não foi possível copiar.");
@@ -226,10 +600,10 @@ function SelectionPopup({
   const POPUP_H = 44;
   const MARGIN = 8;
 
-  const left = Math.max(MARGIN, Math.min(posicao.x - POPUP_W / 2, window.innerWidth - POPUP_W - MARGIN));
-
-  // Mobile: abre ABAIXO da seleção (menu nativo fica em cima)
-  // Desktop: abre ACIMA da seleção
+  const left = Math.max(
+    MARGIN,
+    Math.min(posicao.x - POPUP_W / 2, window.innerWidth - POPUP_W - MARGIN)
+  );
   const openBelow = isMobile;
   const top = openBelow
     ? Math.min(posicao.bottom + 10, window.innerHeight - POPUP_H - MARGIN)
@@ -252,41 +626,31 @@ function SelectionPopup({
     };
   }, [onFechar]);
 
-  // Seta aponta para baixo quando popup está acima, para cima quando está abaixo
   const arrowDown = !openBelow;
 
   return (
     <div
       ref={popupRef}
       style={{
-        position: "fixed",
-        top,
-        left,
-        zIndex: 9990,
-        background: "var(--bg-elevated)",
-        border: "1px solid var(--border-light)",
-        borderRadius: "var(--radius-full)",
-        padding: "6px 10px",
-        display: "flex",
-        alignItems: "center",
-        gap: "6px",
+        position: "fixed", top, left, zIndex: 9990,
+        background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
+        borderRadius: "var(--radius-full)", padding: "6px 10px",
+        display: "flex", alignItems: "center", gap: "6px",
         boxShadow: "0 6px 24px rgba(0,0,0,0.5)",
-        animation: "fadeUp 0.15s ease both",
-        whiteSpace: "nowrap",
+        animation: "fadeUp 0.15s ease both", whiteSpace: "nowrap",
       }}
     >
-      {/* Seta decorativa */}
       {arrowDown ? (
         <>
           <div style={{
-            position: "absolute", bottom: -6, left: "50%",
-            transform: "translateX(-50%)", width: 0, height: 0,
+            position: "absolute", bottom: -6, left: "50%", transform: "translateX(-50%)",
+            width: 0, height: 0,
             borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
             borderTop: "6px solid var(--border-light)",
           }} />
           <div style={{
-            position: "absolute", bottom: -5, left: "50%",
-            transform: "translateX(-50%)", width: 0, height: 0,
+            position: "absolute", bottom: -5, left: "50%", transform: "translateX(-50%)",
+            width: 0, height: 0,
             borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
             borderTop: "6px solid var(--bg-elevated)",
           }} />
@@ -294,14 +658,14 @@ function SelectionPopup({
       ) : (
         <>
           <div style={{
-            position: "absolute", top: -6, left: "50%",
-            transform: "translateX(-50%)", width: 0, height: 0,
+            position: "absolute", top: -6, left: "50%", transform: "translateX(-50%)",
+            width: 0, height: 0,
             borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
             borderBottom: "6px solid var(--border-light)",
           }} />
           <div style={{
-            position: "absolute", top: -5, left: "50%",
-            transform: "translateX(-50%)", width: 0, height: 0,
+            position: "absolute", top: -5, left: "50%", transform: "translateX(-50%)",
+            width: 0, height: 0,
             borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
             borderBottom: "6px solid var(--bg-elevated)",
           }} />
@@ -314,9 +678,7 @@ function SelectionPopup({
 
       <a
         href={`https://wa.me/?text=${mensagemEncoded}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={onFechar}
+        target="_blank" rel="noopener noreferrer" onClick={onFechar}
         style={{
           display: "inline-flex", alignItems: "center",
           background: "#16a34a", color: "#fff",
@@ -375,6 +737,33 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
 
+  // ── Visualizações ──────────────────────────────────────
+  const [viewCount, setViewCount] = useState<number>(post.visualizacoes ?? 0);
+
+  useEffect(() => {
+    // Só incrementa se o usuário estiver autenticado (evita erro de permissão)
+    // e apenas uma vez por sessão por post (evita contar recargas)
+    async function registrarVisualizacao() {
+      const uid = auth.currentUser?.uid;
+      if (!uid) return; // usuário não logado: não tenta escrever no Firestore
+
+      const sessionKey = `viewed_${postId}`;
+      if (sessionStorage.getItem(sessionKey)) return; // já contou nesta sessão
+
+      try {
+        const ref = doc(db, "posts", postId);
+        await updateDoc(ref, { visualizacoes: increment(1) });
+        sessionStorage.setItem(sessionKey, "1");
+        setViewCount((n) => n + 1);
+      } catch (err) {
+        // silencia: não exibe erro para o usuário por falha em contagem
+        console.error("Erro ao registrar visualização:", err);
+      }
+    }
+    if (postId) registrarVisualizacao();
+  }, [postId]);
+  // ──────────────────────────────────────────────────────
+
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -390,56 +779,34 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const detectarSelecao = useCallback(() => {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) { setSelecao(null); return; }
-
     const trecho = selection.toString().trim();
     if (trecho.length < 10) { setSelecao(null); return; }
-
     const range = selection.getRangeAt(0);
     if (!conteudoRef.current?.contains(range.commonAncestorContainer)) {
-      setSelecao(null);
-      return;
+      setSelecao(null); return;
     }
-
     const rect = range.getBoundingClientRect();
     const mobile = window.matchMedia("(pointer: coarse)").matches;
-
     setSelecao({
       trecho: trecho.slice(0, 500),
-      posicao: {
-        x: rect.left + rect.width / 2,
-        top: rect.top,       // topo da seleção (viewport)
-        bottom: rect.bottom, // base da seleção (viewport)
-      },
+      posicao: { x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom },
       isMobile: mobile,
     });
   }, []);
 
-  const handleMouseUp = useCallback(() => {
-    detectarSelecao();
-  }, [detectarSelecao]);
+  const handleMouseUp = useCallback(() => { detectarSelecao(); }, [detectarSelecao]);
+  const handleTouchEnd = useCallback(() => { detectarSelecao(); }, [detectarSelecao]);
 
-  const handleTouchEnd = useCallback(() => {
-    detectarSelecao();
-  }, [detectarSelecao]);
-
-  // No mobile, selectionchange dispara quando o usuário solta o handle de seleção
-  // — é mais confiável que touchend para detectar o momento certo
   useEffect(() => {
     const isMobile = window.matchMedia("(pointer: coarse)").matches;
     if (!isMobile) return;
-
     let timer: ReturnType<typeof setTimeout>;
     function onSelectionChange() {
       clearTimeout(timer);
-      // Pequeno debounce: aguarda o usuário parar de arrastar o handle
       timer = setTimeout(detectarSelecao, 400);
     }
-
     document.addEventListener("selectionchange", onSelectionChange);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("selectionchange", onSelectionChange);
-    };
+    return () => { clearTimeout(timer); document.removeEventListener("selectionchange", onSelectionChange); };
   }, [detectarSelecao]);
 
   useEffect(() => {
@@ -476,18 +843,20 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
   async function handleLike() {
     const uid = auth.currentUser?.uid;
-    if (!uid) { showToast("Faça login para curtir ❤️"); return; }
+    if (!uid) { showToast("Faça login para curtir"); return; }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
       const ref = doc(db, "posts", postId);
       if (liked) {
         await updateDoc(ref, { likes: increment(-1), likedBy: arrayRemove(uid) });
-        setLiked(false); setLikeCount((n) => Math.max(0, n - 1));
+        setLiked(false);
+        setLikeCount((n) => Math.max(0, n - 1));
         setLikedBy((arr) => arr.filter((id) => id !== uid));
       } else {
         await updateDoc(ref, { likes: increment(1), likedBy: arrayUnion(uid) });
-        setLiked(true); setLikeCount((n) => n + 1);
+        setLiked(true);
+        setLikeCount((n) => n + 1);
         setLikedBy((arr) => [...arr, uid]);
       }
     } catch (err) { console.error(err); }
@@ -497,7 +866,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   async function copiarLink() {
     await navigator.clipboard.writeText(urlAtual);
     setCopiado(true);
-    showToast("Link copiado! 🔗");
+    showToast("Link copiado!");
     setTimeout(() => setCopiado(false), 2000);
   }
 
@@ -507,17 +876,24 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     showToast("Gerando PDF...");
     try {
       await gerarPDF({
-        titulo: post.titulo, nomeAutor: nomeExibicao, fotoAutor,
-        dataPost: formatData(post.data), igreja: post.igreja || "",
-        conteudo: post.conteudo, tipo: post.tipo,
+        titulo: post.titulo,
+        nomeAutor: nomeExibicao,
+        fotoAutor,
+        dataPost: formatData(post.data),
+        igreja: post.igreja || "",
+        conteudo: post.conteudo,
+        tipo: post.tipo,
         onDownload: async () => {
           try {
             await updateDoc(doc(db, "posts", postId), { downloads: increment(1) });
             setDownloadCount((n) => n + 1);
-          } catch { }
+          } catch {}
         },
       });
-    } catch (err) { console.error(err); showToast("Erro ao gerar PDF."); }
+    } catch (err) {
+      console.error(err);
+      showToast("Erro ao gerar PDF.");
+    }
     setGerandoPdf(false);
   }
 
@@ -526,31 +902,59 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     try {
       await deleteDoc(doc(db, "posts", postId));
       router.push("/posts");
-    } catch (err) { console.error(err); alert("Erro ao apagar o post."); }
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao apagar o post.");
+    }
   }
+
+  /* ── Estilo compartilhado dos botões de ação ── */
+  const actionBtnStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+  };
+
+  /* ── Estilo do contador lateral ── */
+  const counterStyle: React.CSSProperties = {
+    fontSize: "0.72rem",
+    fontWeight: 700,
+    color: "var(--text-3)",
+    padding: "4px 4px",
+  };
 
   return (
     <>
       {/* Toast */}
-      <div style={{
-        position: "fixed", bottom: "1.5rem", left: "50%",
-        transform: `translateX(-50%) translateY(${toastVisible ? 0 : "12px"})`,
-        background: "var(--bg-elevated)", border: "1px solid var(--emerald-dim)",
-        color: "var(--emerald)", fontSize: "0.82rem", fontWeight: 600,
-        padding: "8px 20px", borderRadius: "var(--radius-full)",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
-        opacity: toastVisible ? 1 : 0, transition: "all 0.25s ease",
-        pointerEvents: "none", zIndex: 998,
-      }}>{toastMsg}</div>
+      <div
+        style={{
+          position: "fixed", bottom: "1.5rem", left: "50%",
+          transform: `translateX(-50%) translateY(${toastVisible ? 0 : "12px"})`,
+          background: "var(--bg-elevated)", border: "1px solid var(--emerald-dim)",
+          color: "var(--emerald)", fontSize: "0.82rem", fontWeight: 600,
+          padding: "8px 20px", borderRadius: "var(--radius-full)",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+          opacity: toastVisible ? 1 : 0, transition: "all 0.25s ease",
+          pointerEvents: "none", zIndex: 998,
+        }}
+      >
+        {toastMsg}
+      </div>
 
-      {likesModalAberto && <LikesModal likedBy={likedBy} onClose={() => setLikesModalAberto(false)} />}
+      {likesModalAberto && (
+        <LikesModal likedBy={likedBy} onClose={() => setLikesModalAberto(false)} />
+      )}
 
       {compartilharAberto && (
         <ShareDropdown
-          anchorRef={shareButtonRef} dropdownRef={shareDropdownRef}
-          urlAtual={urlAtual} textoCompartilhar={textoCompartilhar}
-          urlEncoded={urlEncoded} conteudo={post.conteudo}
-          copiado={copiado} onCopiar={copiarLink}
+          anchorRef={shareButtonRef}
+          dropdownRef={shareDropdownRef}
+          urlAtual={urlAtual}
+          textoCompartilhar={textoCompartilhar}
+          urlEncoded={urlEncoded}
+          conteudo={post.conteudo}
+          copiado={copiado}
+          onCopiar={copiarLink}
           onClose={() => setCompartilharAberto(false)}
         />
       )}
@@ -569,31 +973,52 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       )}
 
       <article className="post-detail-card">
+        {/* Topo: badge + botões de autor */}
         <div className="post-detail-top">
           <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
             {post.tipo === "sermao" ? "Sermão" : "Artigo"}
           </span>
           {isAutor && (
             <div className="post-detail-owner-btns">
-              <button onClick={() => router.push(`/editar/${postId}`)} className="post-btn-edit">Editar</button>
-              <button onClick={handleDelete} className="post-btn-delete">Apagar</button>
+              <button onClick={() => router.push(`/editar/${postId}`)} className="post-btn-edit">
+                Editar
+              </button>
+              <button onClick={handleDelete} className="post-btn-delete">
+                Apagar
+              </button>
             </div>
           )}
         </div>
 
+        {/* Título */}
         <h1 className="post-detail-title">{post.titulo}</h1>
 
+        {/* Meta */}
         <div className="post-detail-meta">
           <AuthorAvatar src={fotoAutor} name={nomeExibicao} size={32} />
-          <span className="post-detail-autor" onClick={() => { if (post.autorId) router.push(`/perfil/${post.autorId}`); }}>
+          <span
+            className="post-detail-autor"
+            onClick={() => { if (post.autorId) router.push(`/perfil/${post.autorId}`); }}
+          >
             {nomeExibicao}
           </span>
-          {formatData(post.data) && <><span className="post-detail-sep">·</span><span>{formatData(post.data)}</span></>}
-          {post.igreja && <><span className="post-detail-sep">·</span><span>{post.igreja}</span></>}
+          {formatData(post.data) && (
+            <>
+              <span className="post-detail-sep">·</span>
+              <span>{formatData(post.data)}</span>
+            </>
+          )}
+          {post.igreja && (
+            <>
+              <span className="post-detail-sep">·</span>
+              <span>{post.igreja}</span>
+            </>
+          )}
         </div>
 
         <hr className="post-detail-divider" />
 
+        {/* Conteúdo */}
         <div
           ref={conteudoRef}
           className="post-detail-content"
@@ -603,15 +1028,19 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           {post.conteudo}
         </div>
 
+        {/* Rodapé do conteúdo */}
         {post.tipo === "sermao" ? (
           <p className="post-detail-footer-text">
             {post.igreja
               ? `Sermão pregado na ${post.igreja}${formatData(post.data) ? ` em ${formatData(post.data)}` : ""}`
-              : formatData(post.data) ? `Sermão pregado em ${formatData(post.data)}` : ""}
+              : formatData(post.data)
+              ? `Sermão pregado em ${formatData(post.data)}`
+              : ""}
           </p>
         ) : (
           <p className="post-detail-footer-text">
-            Artigo publicado por {nomeExibicao}{formatData(post.data) ? ` em ${formatData(post.data)}` : ""}
+            Artigo publicado por {nomeExibicao}
+            {formatData(post.data) ? ` em ${formatData(post.data)}` : ""}
           </p>
         )}
 
@@ -620,62 +1049,85 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         {/* ── Barra de ações ── */}
         <div className="post-detail-actions">
 
-          {/* ❤️ Amei */}
-          <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
-            <button
-              onClick={handleLike} disabled={loadingLike}
-              className={`action-btn ${liked ? "liked" : ""}`}
-              style={{ fontSize: "0.9rem", padding: "7px 10px" }}
-              title={user ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
-            >
-              {liked ? "❤️" : "🤍"} Amei
-            </button>
+          {/* Amei */}
+          <button
+            onClick={handleLike}
+            disabled={loadingLike}
+            className={`post-btn-share ${liked ? "liked" : ""}`}
+            style={{ opacity: loadingLike ? 0.6 : 1, ...actionBtnStyle }}
+            title={user ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
+          >
+            <IconHeart size={14} filled={liked} />
+            Amei
             {likeCount > 0 && (
-              <button
-                onClick={() => setLikesModalAberto(true)}
+              <span
+                onClick={(e) => { e.stopPropagation(); setLikesModalAberto(true); }}
                 title="Ver quem curtiu"
                 style={{
-                  background: "none", border: "none", cursor: "pointer",
-                  fontSize: "0.78rem", fontWeight: 700, color: "var(--emerald)",
-                  padding: "4px 6px", borderRadius: "var(--radius-sm)", transition: "background 0.15s",
+                  marginLeft: "2px",
+                  fontSize: "0.78rem", fontWeight: 700,
+                  color: liked ? "inherit" : "var(--emerald)",
+                  cursor: "pointer",
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-elevated)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
               >
                 {likeCount}
-              </button>
+              </span>
             )}
-          </div>
+          </button>
 
-          {/* 🔗 Compartilhar */}
+          {/* Compartilhar */}
           <button
             ref={shareButtonRef}
             onClick={() => setCompartilharAberto((v) => !v)}
             className="post-btn-share"
+            style={actionBtnStyle}
           >
-            🔗 Compartilhar
+            <IconShare size={14} />
+            Compartilhar
           </button>
 
-          {/* ⬇️ Salvar PDF */}
-          <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
-            <button
-              onClick={handleDownloadPdf} disabled={gerandoPdf}
-              className="post-btn-share"
-              style={{ opacity: gerandoPdf ? 0.6 : 1 }}
-              title="Baixar como PDF"
-            >
-              {gerandoPdf ? "⏳ Gerando..." : "⬇️ Salvar PDF"}
-            </button>
+          {/* Salvar PDF */}
+          <button
+            onClick={handleDownloadPdf}
+            disabled={gerandoPdf}
+            className="post-btn-share"
+            style={{ opacity: gerandoPdf ? 0.6 : 1, ...actionBtnStyle }}
+            title="Baixar como PDF"
+          >
+            {gerandoPdf ? (
+              <><span className="btn-spinner" />Gerando…</>
+            ) : (
+              <><IconDownload size={14} />Salvar PDF</>
+            )}
             {downloadCount > 0 && (
-              <span style={{
-                fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)", padding: "4px 4px",
-              }} title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
+              <span style={{ marginLeft: "2px", fontSize: "0.78rem", fontWeight: 700, color: "var(--text-3)" }}
+                title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
                 {downloadCount}
               </span>
             )}
+          </button>
+
+          {/* Visualizações — chip passivo */}
+          <div
+            style={{
+              display: "inline-flex", alignItems: "center", gap: "5px",
+              fontSize: "0.85rem", fontWeight: 500, color: "var(--text-3)",
+              padding: "7px 12px",
+              border: "1px solid transparent",
+              borderRadius: "var(--radius-full)",
+              userSelect: "none",
+              pointerEvents: "none",
+            }}
+            title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}
+          >
+            <IconEye size={14} />
+            <span>{viewCount}</span>
           </div>
 
         </div>
+
+        {/* ── Navegação entre posts ── */}
+        <PostNavigation postId={postId} />
       </article>
     </>
   );

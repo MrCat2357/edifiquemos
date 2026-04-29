@@ -3,14 +3,21 @@
 import { useEffect, useState, useRef } from "react";
 import { db, auth } from "@/lib/firebase";
 import {
-  collection, getDocs, query, orderBy,
-  doc, updateDoc, arrayUnion, arrayRemove, increment,
+  collection,
+  getDocs,
+  query,
+  orderBy,
+  doc,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
+  increment,
 } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { gerarPDF } from "@/lib/gerarPDF";
 
-/* ─── helpers ─────────────────────────────────────────────── */
+/* ─── helpers ─────────────────────────────────────────── */
 
 function formatData(data: any) {
   if (!data) return "";
@@ -37,6 +44,46 @@ function getInitials(name: string) {
   return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
+/* ─── SVG Icons ───────────────────────────────────────── */
+
+function IconDownload({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M8 2v7M8 9l-2.5-2.5M8 9l2.5-2.5"
+        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 13h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconHeart({ size = 13, filled = false }: { size?: number; filled?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path
+        d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.567 3.067 2 5 2C6.105 2 7.093 2.535 7.75 3.366L8 3.7L8.25 3.366C8.907 2.535 9.895 2 11 2C12.933 2 14.5 3.567 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z"
+        stroke="currentColor" strokeWidth="1.4"
+        fill={filled ? "currentColor" : "none"}
+        strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconEye({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M1.5 8C3 4.5 5.3 3 8 3s5 1.5 6.5 5C13 11.5 10.7 13 8 13S3 11.5 1.5 8Z"
+        stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+/* ─── Sub-componentes ─────────────────────────────────── */
+
 function AuthorAvatar({ src, name, size = 36 }: { src?: string | null; name: string; size?: number }) {
   const base: React.CSSProperties = { width: size, height: size, borderRadius: "50%", flexShrink: 0 };
   if (src) return <img src={src} alt={name} style={{ ...base, objectFit: "cover" }} />;
@@ -44,9 +91,8 @@ function AuthorAvatar({ src, name, size = 36 }: { src?: string | null; name: str
     <div style={{
       ...base,
       background: "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
-      color: "#fff", fontSize: Math.round(size * 0.36) + "px",
-      fontWeight: 700, display: "flex", alignItems: "center",
-      justifyContent: "center", userSelect: "none",
+      color: "#fff", fontSize: Math.round(size * 0.36) + "px", fontWeight: 700,
+      display: "flex", alignItems: "center", justifyContent: "center", userSelect: "none",
     }}>
       {getInitials(name)}
     </div>
@@ -64,42 +110,57 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
       boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
       opacity: visible ? 1 : 0, transition: "all 0.25s ease",
       pointerEvents: "none", zIndex: 999,
-    }}>{msg}</div>
+    }}>
+      {msg}
+    </div>
   );
 }
 
-/* ─── PostCard ─────────────────────────────────────────────── */
+/* ─── PostCard ─────────────────────────────────────────── */
 
-function PostCard({ post, index, onAuthorClick, onToast }: {
-  post: any; index: number;
+function PostCard({
+  post,
+  index,
+  onAuthorClick,
+  onToast,
+}: {
+  post: any;
+  index: number;
   onAuthorClick: (e: React.MouseEvent, id: string) => void;
   onToast: (msg: string) => void;
 }) {
   const router = useRouter();
   const uid = auth.currentUser?.uid;
 
-  const [liked, setLiked] = useState<boolean>(() => uid ? (post.likedBy ?? []).includes(uid) : false);
+  const [liked, setLiked] = useState<boolean>(() =>
+    uid ? (post.likedBy ?? []).includes(uid) : false
+  );
   const [likeCount, setLikeCount] = useState<number>(post.likes ?? 0);
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
+
+
+  const viewCount: number = post.visualizacoes ?? 0;
 
   const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
   const fullUrl = typeof window !== "undefined" ? window.location.origin + url : url;
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!uid) { onToast("Faça login para curtir ❤️"); return; }
+    if (!uid) { onToast("Faça login para curtir"); return; }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
       const ref = doc(db, "posts", post.id);
       if (liked) {
         await updateDoc(ref, { likes: increment(-1), likedBy: arrayRemove(uid) });
-        setLiked(false); setLikeCount((n) => Math.max(0, n - 1));
+        setLiked(false);
+        setLikeCount((n) => Math.max(0, n - 1));
       } else {
         await updateDoc(ref, { likes: increment(1), likedBy: arrayUnion(uid) });
-        setLiked(true); setLikeCount((n) => n + 1);
+        setLiked(true);
+        setLikeCount((n) => n + 1);
       }
     } catch (err) { console.error(err); }
     setLoadingLike(false);
@@ -123,7 +184,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
           try {
             await updateDoc(doc(db, "posts", post.id), { downloads: increment(1) });
             setDownloadCount((n) => n + 1);
-          } catch { }
+          } catch {}
         },
       });
     } catch (err) {
@@ -135,10 +196,14 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
 
   return (
     <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
-      <div className="card-header-row">
+      <div className="card-header-row" onClick={() => router.push(url)} style={{ cursor: "pointer" }}>
         <AuthorAvatar src={post.autorFoto} name={post.autorNome || "Autor"} size={36} />
-        <div className="author-col">
-          <span className="author-name-link" onClick={(e) => onAuthorClick(e, post.autorId)}>
+        <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+          <span
+            className="author-name-link"
+            onClick={(e) => { e.stopPropagation(); onAuthorClick(e, post.autorId); }}
+            style={{ display: "inline", width: "fit-content", alignSelf: "flex-start" }}
+          >
             {post.autorNome || "Autor"}
           </span>
           <span className="card-meta">{buildFrase(post)}</span>
@@ -153,38 +218,61 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
         {post.resumo && <p className="card-frase">{post.resumo}</p>}
       </div>
 
-      <div className="card-footer-row">
+      <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }}>
+        {/* Grupo esquerdo: Amei · PDF · olhinho — espaçamento uniforme */}
+        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+          {/* Amei */}
+          <button
+            className={`action-btn ${liked ? "liked" : ""}`}
+            onClick={handleLike}
+            disabled={loadingLike}
+            title={uid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
+            style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
+          >
+            <IconHeart size={13} filled={liked} />
+            Amei
+            {likeCount > 0 && (
+              <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>
+                {likeCount}
+              </span>
+            )}
+          </button>
 
-        {/* ❤️ Amei */}
-        <button
-          className={`action-btn ${liked ? "liked" : ""}`}
-          onClick={handleLike} disabled={loadingLike}
-          title={uid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
-        >
-          {liked ? "❤️" : "🤍"} Amei
-          {likeCount > 0 && <span style={{ marginLeft: 3, fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
-        </button>
-
-        {/* ⬇️ PDF + contador */}
-        <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+          {/* PDF */}
           <button
             className="action-btn"
             onClick={handleDownloadPdf}
             disabled={gerandoPdf}
             title="Baixar como PDF"
-            style={{ opacity: gerandoPdf ? 0.6 : 1 }}
+            style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
           >
-            {gerandoPdf ? "⏳..." : "⬇️ PDF"}
+            {gerandoPdf ? (
+              <><span className="btn-spinner" />PDF</>
+            ) : (
+              <><IconDownload size={13} />PDF</>
+            )}
+            {downloadCount > 0 && (
+              <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}
+                title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
+                {downloadCount}
+              </span>
+            )}
           </button>
-          {downloadCount > 0 && (
-            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)", padding: "0 4px" }}
-              title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
-              {downloadCount}
+
+          {/* Visualizações */}
+          {viewCount > 0 && (
+            <span
+              style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}
+              title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}
+            >
+              <IconEye size={13} />
+              {viewCount}
             </span>
           )}
         </div>
 
-        <span className="read-link" onClick={() => router.push(url)}>
+        {/* Ler completo → empurrado para a direita */}
+        <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(url)}>
           Ler completo →
         </span>
       </div>
@@ -192,7 +280,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   );
 }
 
-/* ─── Page ─────────────────────────────────────────────────── */
+/* ─── Page ─────────────────────────────────────────────── */
 
 type Filtro = "todos" | "sermao" | "artigo";
 
@@ -202,6 +290,7 @@ export default function Posts() {
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
+  const [sidebarAberta, setSidebarAberta] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const router = useRouter();
 
@@ -213,14 +302,17 @@ export default function Posts() {
         const lista: any[] = [];
         snapshot.forEach((d) => lista.push({ id: d.id, ...d.data() }));
         setPosts(lista);
-      } catch (error) { console.error("Erro ao buscar posts:", error); }
+      } catch (error) {
+        console.error("Erro ao buscar posts:", error);
+      }
       setLoading(false);
     }
     fetchPosts();
   }, []);
 
   function showToast(msg: string) {
-    setToastMsg(msg); setToastVisible(true);
+    setToastMsg(msg);
+    setToastVisible(true);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastVisible(false), 2200);
   }
@@ -235,16 +327,30 @@ export default function Posts() {
   return (
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
+
+      {sidebarAberta && (
+        <div onClick={() => setSidebarAberta(false)} style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 40,
+        }} />
+      )}
+
       <div className="feed-wrapper">
         <div>
           <div className="feed-main-header">
             <h1 className="feed-main-title">Publicações Recentes</h1>
-            <div className="feed-filters">
-              {(["todos", "sermao", "artigo"] as Filtro[]).map((f) => (
-                <button key={f} onClick={() => setFiltro(f)} className={`filter-btn ${filtro === f ? "active" : ""}`}>
-                  {f === "todos" ? "Todos" : f === "sermao" ? "Sermões" : "Artigos"}
-                </button>
-              ))}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+              <div className="feed-filters">
+                {(["todos", "sermao", "artigo"] as Filtro[]).map((f) => (
+                  <button key={f} onClick={() => setFiltro(f)}
+                    className={`filter-btn ${filtro === f ? "active" : ""}`}>
+                    {f === "todos" ? "Todos" : f === "sermao" ? "Sermões" : "Artigos"}
+                  </button>
+                ))}
+              </div>
+              <button className="sidebar-toggle-btn" onClick={() => setSidebarAberta(true)}
+                aria-label="Ver em alta e mais">
+                🔥 Em alta
+              </button>
             </div>
           </div>
 
@@ -255,19 +361,25 @@ export default function Posts() {
           ) : (
             <div className="posts-list">
               {postsFiltrados.map((post, i) => (
-                <PostCard key={post.id} post={post} index={i} onAuthorClick={handleAuthorClick} onToast={showToast} />
+                <PostCard key={post.id} post={post} index={i}
+                  onAuthorClick={handleAuthorClick} onToast={showToast} />
               ))}
             </div>
           )}
         </div>
 
-        <aside className="feed-sidebar">
+        {/* Sidebar */}
+        <aside className={`feed-sidebar${sidebarAberta ? " feed-sidebar--open" : ""}`}>
+          <button className="sidebar-close-btn" onClick={() => setSidebarAberta(false)}
+            aria-label="Fechar painel">×</button>
+
           <div className="sidebar-card">
             <h3 className="sidebar-title">🔥 Em Alta</h3>
             <ul className="trending-list">
               {posts.slice(0, 4).map((p) => (
                 <li key={p.id}>
-                  <Link href={`/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`} className="trending-link">
+                  <Link href={`/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`}
+                    className="trending-link" onClick={() => setSidebarAberta(false)}>
                     <span className="trending-text">{p.titulo}</span>
                     <span className="trending-count">{p.tipo === "sermao" ? "🎤" : "📝"}</span>
                   </Link>
@@ -280,7 +392,9 @@ export default function Posts() {
             <div style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>✍️</div>
             <h3>Compartilhe sua fé</h3>
             <p>Publique seu sermão ou reflexão e edifique a comunidade.</p>
-            <Link href="/criar-post" className="btn-cta">Publicar agora</Link>
+            <Link href="/criar-post" className="btn-cta" onClick={() => setSidebarAberta(false)}>
+              Publicar agora
+            </Link>
           </div>
 
           <div className="sidebar-card">
@@ -293,6 +407,69 @@ export default function Posts() {
           </div>
         </aside>
       </div>
+
+      <style>{`
+        .sidebar-toggle-btn {
+          display: none;
+          align-items: center;
+          gap: 5px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border-light);
+          color: var(--text-2);
+          font-size: 0.8rem;
+          font-weight: 600;
+          padding: 6px 12px;
+          border-radius: var(--radius-full);
+          cursor: pointer;
+          white-space: nowrap;
+        }
+        .sidebar-close-btn {
+          display: none;
+          position: absolute;
+          top: 1rem;
+          right: 1rem;
+          background: none;
+          border: none;
+          font-size: 1.5rem;
+          color: var(--text-3);
+          cursor: pointer;
+          line-height: 1;
+          padding: 4px 8px;
+          border-radius: var(--radius-sm);
+        }
+        @media (max-width: 768px) {
+          .sidebar-toggle-btn { display: inline-flex; }
+          .sidebar-close-btn { display: block; }
+          .feed-sidebar {
+            position: fixed !important;
+            top: 0; right: 0; bottom: 0;
+            width: min(85vw, 320px);
+            overflow-y: auto;
+            z-index: 50;
+            padding: 3.5rem 1rem 2rem;
+            transform: translateX(100%);
+            transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+            background: var(--bg-card);
+            border-left: 1px solid var(--border-light);
+            box-shadow: -8px 0 32px rgba(0,0,0,0.4);
+          }
+          .feed-sidebar--open { transform: translateX(0) !important; }
+          .post-card { padding: 1rem !important; }
+          @media (max-width: 360px) {
+            .card-footer-row { flex-wrap: wrap; gap: 0.5rem; }
+          }
+          .action-btn, .post-btn-share, .filter-btn {
+            min-height: 40px;
+            padding-top: 8px !important;
+            padding-bottom: 8px !important;
+          }
+          .feed-main-header { flex-direction: column !important; align-items: flex-start !important; gap: 0.75rem !important; }
+          .post-detail-title { font-size: clamp(1.3rem, 5vw, 2rem) !important; }
+          .post-detail-actions { flex-wrap: wrap; gap: 0.5rem; }
+          .post-nav { grid-template-columns: 1fr !important; }
+          .post-detail-meta { flex-wrap: wrap; }
+        }
+      `}</style>
     </>
   );
 }

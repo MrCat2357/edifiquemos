@@ -5,6 +5,7 @@ import { db, auth } from "@/lib/firebase";
 import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { gerarSlugUnico } from "@/lib/slug";
+import FileImportButton from "@/components/Button";
 
 async function getAutorInfo(uid: string): Promise<{ nome: string; foto: string | null }> {
   try {
@@ -80,7 +81,7 @@ export default function CriarPost() {
         conteudo: conteudo.trim(),
         tipo,
         igreja: igreja.trim() || "",
-        data: data.trim() || "",   // ✅ salva como string livre
+        data: data.trim() || "",
         autorId: user.uid,
         autorNome,
         autorFoto: autorFoto ?? null,
@@ -207,11 +208,31 @@ export default function CriarPost() {
             />
           </div>
 
-          {/* Conteúdo */}
+          {/* Conteúdo + botão importar */}
           <div className="auth-field">
-            <label className="auth-label">Conteúdo</label>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: "0.5rem",
+                marginBottom: "0.375rem",
+              }}
+            >
+              <label className="auth-label" style={{ margin: 0 }}>
+                Conteúdo
+              </label>
+              <FileImportButton
+                onImport={(texto) =>
+                  setConteudo((prev) =>
+                    prev.trim() ? prev + "\n\n" + texto : texto
+                  )
+                }
+              />
+            </div>
             <textarea
-              placeholder="Escreva seu sermão ou artigo aqui..."
+              placeholder="Escreva seu sermão ou artigo aqui, ou importe um arquivo acima..."
               value={conteudo}
               onChange={(e) => setConteudo(e.target.value)}
               className="auth-input"
@@ -236,7 +257,6 @@ export default function CriarPost() {
               <label className="auth-label">
                 Data <span className="auth-label-opt">(opcional)</span>
               </label>
-              {/* ✅ type="text" — aceita qualquer formato livre */}
               <input
                 type="text"
                 placeholder="Ex: 2025, Século XVI…"

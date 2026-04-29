@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { db, auth } from "@/lib/firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { useParams, useRouter } from "next/navigation";
+import FileImportButton from "@/components/Button";
 
 export default function EditarPost() {
   const params = useParams();
@@ -46,12 +47,9 @@ export default function EditarPost() {
         setIgreja(postData.igreja || "");
         setSlug(postData.slug || "");
 
-        // ✅ lê data como string — compatível com o novo formato livre
-        // mas também suporta posts antigos que tinham Timestamp
         if (typeof postData.data === "string") {
           setData(postData.data);
         } else if (postData.data?.toDate) {
-          // posts antigos salvos como Timestamp — converte para string legível
           const d = postData.data.toDate();
           setData(
             d.toLocaleDateString("pt-BR", {
@@ -85,13 +83,12 @@ export default function EditarPost() {
 
     try {
       const ref = doc(db, "posts", id);
-
       await updateDoc(ref, {
         titulo,
         conteudo,
         tipo,
         igreja,
-        data: data.trim() || "",  // ✅ salva como string livre
+        data: data.trim() || "",
       });
 
       router.push(`/posts/${tipo === "sermao" ? "sermoes" : "artigos"}/${slug}`);
@@ -150,12 +147,31 @@ export default function EditarPost() {
             />
           </div>
 
-          {/* Conteúdo */}
+          {/* Conteúdo + botão importar */}
           <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
-            <label className="auth-label">Conteúdo</label>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: "0.5rem",
+              }}
+            >
+              <label className="auth-label" style={{ margin: 0 }}>
+                Conteúdo
+              </label>
+              <FileImportButton
+                onImport={(texto) =>
+                  setConteudo((prev) =>
+                    prev.trim() ? prev + "\n\n" + texto : texto
+                  )
+                }
+              />
+            </div>
             <textarea
               className="auth-input"
-              placeholder="Conteúdo..."
+              placeholder="Conteúdo, ou importe um arquivo acima..."
               value={conteudo}
               onChange={(e) => setConteudo(e.target.value)}
               style={{ height: 180, resize: "vertical" }}
@@ -180,7 +196,6 @@ export default function EditarPost() {
             <label className="auth-label">
               Data <span className="auth-label-opt">(opcional)</span>
             </label>
-            {/* ✅ type="text" — aceita qualquer formato livre */}
             <input
               type="text"
               placeholder="Ex: 2025, Século XVI, 15 de maio de 2022…"
