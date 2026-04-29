@@ -42,7 +42,6 @@ function getInitials(name: string) {
     .toUpperCase();
 }
 
-// ─── Avatar sem dependência de classe CSS ────────────────────────────────────
 function Avatar({
   src,
   name,
@@ -83,7 +82,6 @@ function Avatar({
         ...base,
         background: "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
         color: "#fff",
-        // fonte proporcional ao tamanho, nunca maior que o container
         fontSize: Math.round(size * 0.36) + "px",
         fontWeight: 700,
         letterSpacing: "-0.01em",
@@ -95,7 +93,6 @@ function Avatar({
     </div>
   );
 }
-// ─────────────────────────────────────────────────────────────────────────────
 
 export default function Perfil() {
   const router = useRouter();
@@ -118,8 +115,6 @@ export default function Perfil() {
   const [rascFotoFile, setRascFotoFile] = useState<File | null>(null);
 
   const [posts, setPosts] = useState<any[]>([]);
-  const [copiado, setCopiado] = useState<string | null>(null);
-  const [compartilharAberto, setCompartilharAberto] = useState<string | null>(null);
 
   async function carregar() {
     const user = auth.currentUser;
@@ -223,11 +218,6 @@ export default function Perfil() {
       alert("Erro ao salvar perfil.");
     }
     setSalvando(false);
-  }
-
-  function getUrlPost(post: any) {
-    const tipo = post.tipo === "sermao" ? "sermoes" : "artigos";
-    return `${window.location.origin}/posts/${tipo}/${post.slug}`;
   }
 
   if (loading)
@@ -436,13 +426,6 @@ export default function Perfil() {
 
         <div className="posts-list">
           {posts.map((post) => {
-            const urlPost = getUrlPost(post);
-            const textoCompartilhar = encodeURIComponent(
-              `${post.titulo} - ${nomeExibicao}`
-            );
-            const urlEncoded = encodeURIComponent(urlPost);
-            const aberto = compartilharAberto === post.id;
-
             return (
               <div key={post.id} className="post-card">
                 <div className="card-header-row">
@@ -483,14 +466,6 @@ export default function Perfil() {
                 </div>
 
                 <div className="card-footer-row">
-                  <button
-                    className="action-btn"
-                    onClick={() =>
-                      setCompartilharAberto(aberto ? null : post.id)
-                    }
-                  >
-                    🔗 Compartilhar
-                  </button>
                   <span
                     className="read-link"
                     onClick={() =>
@@ -504,67 +479,6 @@ export default function Perfil() {
                     Ler completo →
                   </span>
                 </div>
-
-                {aberto && (
-                  <div className="perfil-share-options">
-                    <a
-                      href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="share-btn share-whatsapp"
-                    >
-                      WhatsApp
-                    </a>
-                    <a
-                      href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="share-btn share-facebook"
-                    >
-                      Facebook
-                    </a>
-                    <a
-                      href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="share-btn share-threads"
-                    >
-                      Threads
-                    </a>
-                    <a
-                      href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="share-btn share-twitter"
-                    >
-                      X (Twitter)
-                    </a>
-                    <a
-                      href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="share-btn share-linkedin"
-                    >
-                      LinkedIn
-                    </a>
-                    <a
-                      href={`mailto:?subject=${textoCompartilhar}&body=${urlEncoded}`}
-                      className="share-btn share-email"
-                    >
-                      Email
-                    </a>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(urlPost);
-                        setCopiado(post.id);
-                        setTimeout(() => setCopiado(null), 2000);
-                      }}
-                      className="share-btn share-copy"
-                    >
-                      {copiado === post.id ? "✓ Copiado!" : "Copiar link"}
-                    </button>
-                  </div>
-                )}
               </div>
             );
           })}
