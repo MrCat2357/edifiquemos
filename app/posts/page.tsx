@@ -322,41 +322,29 @@ export default function Posts() {
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
 
-      {/* Overlay do drawer mobile */}
       {sidebarAberta && (
         <div
           onClick={() => setSidebarAberta(false)}
-          style={{
-            position: "fixed", inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            zIndex: 998,
-          }}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 998 }}
         />
       )}
 
       <div className="feed-wrapper">
         <div>
+          {/*
+            feed-main-header agora é sempre flex-column no mobile
+            via globals.css — título em cima, filtros embaixo
+          */}
           <div className="feed-main-header">
             <h1 className="feed-main-title">Publicações Recentes</h1>
 
-            {/* Filtros + botão Em Alta — numa linha só, sem corte */}
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.375rem",
-              flexWrap: "nowrap",
-              overflowX: "auto",
-              WebkitOverflowScrolling: "touch",
-              scrollbarWidth: "none",
-              msOverflowStyle: "none",
-              paddingBottom: "2px",
-            }}>
+            {/* Linha com scroll horizontal: nunca corta os botões */}
+            <div className="feed-filter-row">
               {(["todos", "sermao", "artigo"] as Filtro[]).map((f) => (
                 <button
                   key={f}
                   onClick={() => setFiltro(f)}
                   className={`filter-btn${filtro === f ? " active" : ""}`}
-                  style={{ flexShrink: 0 }}
                 >
                   {f === "todos" ? "Todos" : f === "sermao" ? "Sermões" : "Artigos"}
                 </button>
@@ -365,21 +353,7 @@ export default function Posts() {
               <button
                 onClick={() => setSidebarAberta(true)}
                 aria-label="Ver em alta e mais"
-                style={{
-                  flexShrink: 0,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "5px",
-                  background: "var(--bg-elevated)",
-                  border: "1px solid var(--border-light)",
-                  color: "var(--text-2)",
-                  fontSize: "0.78rem",
-                  fontWeight: 600,
-                  padding: "5px 12px",
-                  borderRadius: "var(--radius-full)",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
+                className="emalta-btn"
               >
                 🔥 Em alta
               </button>
@@ -401,17 +375,10 @@ export default function Posts() {
         </div>
 
         {/* Sidebar — drawer no mobile, coluna fixa no desktop */}
-        <aside
-          className="feed-sidebar"
-          style={sidebarAberta ? undefined : undefined}
-          data-open={sidebarAberta ? "true" : "false"}
-        >
+        <aside className="feed-sidebar" data-open={sidebarAberta ? "true" : "false"}>
           <button
             onClick={() => setSidebarAberta(false)}
             aria-label="Fechar painel"
-            style={{
-              display: "none", // controlado pelo CSS abaixo
-            }}
             className="sidebar-close-btn"
           >×</button>
 
@@ -454,11 +421,47 @@ export default function Posts() {
       </div>
 
       <style>{`
-        /* Esconde a scrollbar horizontal dos filtros */
-        .feed-main-header > div::-webkit-scrollbar { display: none; }
+        /* Linha de filtros com scroll horizontal */
+        .feed-filter-row {
+          display: flex;
+          align-items: center;
+          gap: 0.375rem;
+          flex-wrap: nowrap;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+          padding-bottom: 2px;
+          width: 100%;
+        }
+        .feed-filter-row::-webkit-scrollbar { display: none; }
 
-        /* Botão fechar — só aparece no mobile */
+        /* Botão Em Alta */
+        .emalta-btn {
+          flex-shrink: 0;
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border-light);
+          color: var(--text-2);
+          font-size: 0.78rem;
+          font-weight: 600;
+          padding: 5px 12px;
+          border-radius: var(--radius-full);
+          cursor: pointer;
+          white-space: nowrap;
+          font-family: inherit;
+          transition: border-color 0.15s, color 0.15s;
+        }
+        .emalta-btn:hover {
+          border-color: var(--emerald);
+          color: var(--emerald);
+        }
+
+        /* Botão fechar sidebar */
         .sidebar-close-btn {
+          display: none;
           position: absolute;
           top: 1rem;
           right: 1rem;
@@ -473,8 +476,8 @@ export default function Posts() {
           z-index: 1;
         }
 
+        /* Sidebar vira drawer no mobile/tablet */
         @media (max-width: 820px) {
-          /* Sidebar vira drawer deslizante */
           .feed-sidebar {
             display: flex !important;
             flex-direction: column;
@@ -490,19 +493,11 @@ export default function Posts() {
             border-left: 1px solid var(--border-light);
             box-shadow: -8px 0 32px rgba(0,0,0,0.4);
           }
-
           .feed-sidebar[data-open="true"] {
             transform: translateX(0);
           }
-
           .sidebar-close-btn {
             display: block;
-          }
-
-          /* Cabeçalho vira coluna no mobile */
-          .feed-main-header {
-            flex-direction: column !important;
-            align-items: flex-start !important;
           }
         }
       `}</style>
