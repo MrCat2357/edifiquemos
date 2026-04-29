@@ -102,6 +102,7 @@ export default function Perfil() {
   const [titulo, setTitulo] = useState("");
   const [bio, setBio] = useState("");
   const [fotoUrl, setFotoUrl] = useState<string | null>(null);
+  const [uid, setUid] = useState<string | null>(null);
 
   const [editando, setEditando] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -119,6 +120,7 @@ export default function Perfil() {
   async function carregar() {
     const user = auth.currentUser;
     if (!user) return;
+    setUid(user.uid);
     try {
       const snap = await getDoc(doc(db, "users", user.uid));
       if (snap.exists()) {
@@ -218,6 +220,16 @@ export default function Perfil() {
       alert("Erro ao salvar perfil.");
     }
     setSalvando(false);
+  }
+
+  // Navega para o post passando o autorId como query param,
+  // igual ao que acontece ao visitar o perfil de outro usuário.
+  // Isso garante que as setas de anterior/próximo filtrem apenas
+  // os posts deste autor — mesmo quando o usuário visita o próprio perfil.
+  function navegarParaPost(post: any) {
+    const categoria = post.tipo === "sermao" ? "sermoes" : "artigos";
+    const autorParam = uid ? `?autorId=${uid}` : "";
+    router.push(`/posts/${categoria}/${post.slug}${autorParam}`);
   }
 
   if (loading)
@@ -450,13 +462,7 @@ export default function Perfil() {
 
                 <div
                   className="card-body-area"
-                  onClick={() =>
-                    router.push(
-                      `/posts/${
-                        post.tipo === "sermao" ? "sermoes" : "artigos"
-                      }/${post.slug}`
-                    )
-                  }
+                  onClick={() => navegarParaPost(post)}
                   style={{ cursor: "pointer" }}
                 >
                   <h3 className="card-title">{post.titulo}</h3>
@@ -468,13 +474,7 @@ export default function Perfil() {
                 <div className="card-footer-row">
                   <span
                     className="read-link"
-                    onClick={() =>
-                      router.push(
-                        `/posts/${
-                          post.tipo === "sermao" ? "sermoes" : "artigos"
-                        }/${post.slug}`
-                      )
-                    }
+                    onClick={() => navegarParaPost(post)}
                   >
                     Ler completo →
                   </span>
