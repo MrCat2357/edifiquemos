@@ -41,80 +41,72 @@ function buildFrase(post: any) {
 
 function getInitials(name: string) {
   if (!name) return "?";
-  return name
-    .split(" ")
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase();
+  return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
-/* ─── SVG Icons nativos ───────────────────────────────── */
+/* ─── SVG Icons ───────────────────────────────────────── */
 
 function IconDownload({ size = 13 }: { size?: number }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      style={{ flexShrink: 0 }}
-    >
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M8 2v7M8 9l-2.5-2.5M8 9l2.5-2.5"
+        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 13h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconHeart({ size = 13, filled = false }: { size?: number; filled?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
       <path
-        d="M8 2v7M8 9l-2.5-2.5M8 9l2.5-2.5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.567 3.067 2 5 2C6.105 2 7.093 2.535 7.75 3.366L8 3.7L8.25 3.366C8.907 2.535 9.895 2 11 2C12.933 2 14.5 3.567 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z"
+        stroke="currentColor" strokeWidth="1.4"
+        fill={filled ? "currentColor" : "none"}
+        strokeLinecap="round" strokeLinejoin="round"
       />
-      <path
-        d="M3 13h10"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
+    </svg>
+  );
+}
+
+function IconShare({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <circle cx="11" cy="3.5" r="1.8" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="5" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="11" cy="12.5" r="1.8" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M6.7 7.1l2.7-2.7M6.7 8.9l2.7 2.7"
+        stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconEye({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M1.5 8C3 4.5 5.3 3 8 3s5 1.5 6.5 5C13 11.5 10.7 13 8 13S3 11.5 1.5 8Z"
+        stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.3" />
     </svg>
   );
 }
 
 /* ─── Sub-componentes ─────────────────────────────────── */
 
-function AuthorAvatar({
-  src,
-  name,
-  size = 36,
-}: {
-  src?: string | null;
-  name: string;
-  size?: number;
-}) {
-  const base: React.CSSProperties = {
-    width: size,
-    height: size,
-    borderRadius: "50%",
-    flexShrink: 0,
-  };
-  if (src)
-    return (
-      <img src={src} alt={name} style={{ ...base, objectFit: "cover" }} />
-    );
+function AuthorAvatar({ src, name, size = 36 }: { src?: string | null; name: string; size?: number }) {
+  const base: React.CSSProperties = { width: size, height: size, borderRadius: "50%", flexShrink: 0 };
+  if (src) return <img src={src} alt={name} style={{ ...base, objectFit: "cover" }} />;
   return (
-    <div
-      style={{
-        ...base,
-        background:
-          "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
-        color: "#fff",
-        fontSize: Math.round(size * 0.36) + "px",
-        fontWeight: 700,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        userSelect: "none",
-      }}
-    >
+    <div style={{
+      ...base,
+      background: "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
+      color: "#fff", fontSize: Math.round(size * 0.36) + "px", fontWeight: 700,
+      display: "flex", alignItems: "center", justifyContent: "center", userSelect: "none",
+    }}>
       {getInitials(name)}
     </div>
   );
@@ -122,27 +114,101 @@ function AuthorAvatar({
 
 function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: "1.5rem",
-        left: "50%",
-        transform: `translateX(-50%) translateY(${visible ? 0 : "12px"})`,
-        background: "var(--bg-elevated)",
-        border: "1px solid var(--emerald-dim)",
-        color: "var(--emerald)",
-        fontSize: "0.82rem",
-        fontWeight: 600,
-        padding: "8px 20px",
-        borderRadius: "var(--radius-full)",
-        boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
-        opacity: visible ? 1 : 0,
-        transition: "all 0.25s ease",
-        pointerEvents: "none",
-        zIndex: 999,
-      }}
-    >
+    <div style={{
+      position: "fixed", bottom: "1.5rem", left: "50%",
+      transform: `translateX(-50%) translateY(${visible ? 0 : "12px"})`,
+      background: "var(--bg-elevated)", border: "1px solid var(--emerald-dim)",
+      color: "var(--emerald)", fontSize: "0.82rem", fontWeight: 600,
+      padding: "8px 20px", borderRadius: "var(--radius-full)",
+      boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+      opacity: visible ? 1 : 0, transition: "all 0.25s ease",
+      pointerEvents: "none", zIndex: 999,
+    }}>
       {msg}
+    </div>
+  );
+}
+
+/* ─── ShareMiniDropdown ────────────────────────────────── */
+
+function ShareMiniDropdown({
+  url,
+  titulo,
+  autorNome,
+  onClose,
+  anchorRef,
+}: {
+  url: string;
+  titulo: string;
+  autorNome: string;
+  onClose: () => void;
+  anchorRef: React.RefObject<HTMLButtonElement>;
+}) {
+  const dropRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [copiado, setCopiado] = useState(false);
+
+  const texto = encodeURIComponent(`${titulo} - ${autorNome}`);
+  const urlEnc = encodeURIComponent(url);
+
+  useEffect(() => {
+    if (!anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceBelow < 140;
+    setPos({
+      top: openUp ? rect.top - 130 : rect.bottom + 6,
+      left: Math.min(rect.left, window.innerWidth - 250),
+    });
+  }, []);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (dropRef.current && !dropRef.current.contains(e.target as Node) &&
+        anchorRef.current && !anchorRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    // Defer by one tick so the click that opened the dropdown
+    // doesn't immediately trigger onClose
+    const timer = setTimeout(() => {
+      document.addEventListener("mousedown", handler);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", handler);
+    };
+  }, [onClose]);
+
+  async function copiar() {
+    await navigator.clipboard.writeText(url);
+    setCopiado(true);
+    setTimeout(onClose, 1500);
+  }
+
+  return (
+    <div ref={dropRef} onClick={(e) => e.stopPropagation()} style={{
+      position: "fixed", top: pos.top, left: pos.left,
+      background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
+      borderRadius: "var(--radius-lg)", padding: "0.5rem",
+      display: "flex", flexWrap: "wrap", gap: "0.375rem",
+      width: 244, zIndex: 9999, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+    }}>
+      <a href={`https://wa.me/?text=${texto}%20${urlEnc}`} target="_blank"
+        rel="noopener noreferrer" className="share-btn share-whatsapp" onClick={onClose}>
+        WhatsApp
+      </a>
+      <a href={`https://www.facebook.com/sharer/sharer.php?u=${urlEnc}`} target="_blank"
+        rel="noopener noreferrer" className="share-btn share-facebook" onClick={onClose}>
+        Facebook
+      </a>
+      <a href={`https://twitter.com/intent/tweet?text=${texto}&url=${urlEnc}`} target="_blank"
+        rel="noopener noreferrer" className="share-btn share-twitter" onClick={onClose}>
+        X (Twitter)
+      </a>
+      <button onClick={copiar} className="share-btn share-copy">
+        {copiado ? "✓ Copiado!" : "Copiar link"}
+      </button>
     </div>
   );
 }
@@ -169,44 +235,32 @@ function PostCard({
   const [likeCount, setLikeCount] = useState<number>(post.likes ?? 0);
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
-  const [downloadCount, setDownloadCount] = useState<number>(
-    post.downloads ?? 0
-  );
+  const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
+  const [compartilharAberto, setCompartilharAberto] = useState(false);
+  const shareRef = useRef<HTMLButtonElement>(null!);
 
-  const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${
-    post.slug
-  }`;
-  const fullUrl =
-    typeof window !== "undefined" ? window.location.origin + url : url;
+  const viewCount: number = post.visualizacoes ?? 0;
+
+  const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
+  const fullUrl = typeof window !== "undefined" ? window.location.origin + url : url;
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!uid) {
-      onToast("Faça login para curtir ❤️");
-      return;
-    }
+    if (!uid) { onToast("Faça login para curtir"); return; }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
       const ref = doc(db, "posts", post.id);
       if (liked) {
-        await updateDoc(ref, {
-          likes: increment(-1),
-          likedBy: arrayRemove(uid),
-        });
+        await updateDoc(ref, { likes: increment(-1), likedBy: arrayRemove(uid) });
         setLiked(false);
         setLikeCount((n) => Math.max(0, n - 1));
       } else {
-        await updateDoc(ref, {
-          likes: increment(1),
-          likedBy: arrayUnion(uid),
-        });
+        await updateDoc(ref, { likes: increment(1), likedBy: arrayUnion(uid) });
         setLiked(true);
         setLikeCount((n) => n + 1);
       }
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
     setLoadingLike(false);
   }
 
@@ -222,15 +276,11 @@ function PostCard({
         fotoAutor: post.autorFoto ?? null,
         dataPost: formatData(post.data),
         igreja: post.igreja || "",
-        conteudo:
-          post.conteudo ||
-          "Acesse o link para ler o conteúdo completo:\n" + fullUrl,
+        conteudo: post.conteudo || "Acesse o link para ler o conteúdo completo:\n" + fullUrl,
         tipo: post.tipo,
         onDownload: async () => {
           try {
-            await updateDoc(doc(db, "posts", post.id), {
-              downloads: increment(1),
-            });
+            await updateDoc(doc(db, "posts", post.id), { downloads: increment(1) });
             setDownloadCount((n) => n + 1);
           } catch {}
         },
@@ -242,27 +292,26 @@ function PostCard({
     setGerandoPdf(false);
   }
 
+  function handleShare(e: React.MouseEvent) {
+    e.stopPropagation();
+    setCompartilharAberto((v) => !v);
+  }
+
   return (
-    <article
-      className="post-card"
-      style={{ animationDelay: `${index * 60}ms` }}
-    >
-      <div className="card-header-row">
+    <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
+      <div className="card-header-row" onClick={() => router.push(url)} style={{ cursor: "pointer" }}>
         <AuthorAvatar src={post.autorFoto} name={post.autorNome || "Autor"} size={36} />
-        <div className="author-col">
+        <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
           <span
             className="author-name-link"
-            onClick={(e) => onAuthorClick(e, post.autorId)}
+            onClick={(e) => { e.stopPropagation(); onAuthorClick(e, post.autorId); }}
+            style={{ display: "inline", width: "fit-content", alignSelf: "flex-start" }}
           >
             {post.autorNome || "Autor"}
           </span>
           <span className="card-meta">{buildFrase(post)}</span>
         </div>
-        <span
-          className={`cat-badge ${
-            post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"
-          }`}
-        >
+        <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
           {post.tipo === "sermao" ? "Sermão" : "Artigo"}
         </span>
       </div>
@@ -273,75 +322,83 @@ function PostCard({
       </div>
 
       <div className="card-footer-row">
-        {/* ❤️ Amei */}
+        {/* Amei */}
         <button
           className={`action-btn ${liked ? "liked" : ""}`}
           onClick={handleLike}
           disabled={loadingLike}
-          title={
-            uid
-              ? liked
-                ? "Remover curtida"
-                : "Curtir"
-              : "Faça login para curtir"
-          }
+          title={uid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
+          style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
         >
-          {liked ? "❤️" : "🤍"} Amei
+          <IconHeart size={13} filled={liked} />
+          Amei
           {likeCount > 0 && (
-            <span
-              style={{
-                marginLeft: 3,
-                fontSize: "0.72rem",
-                color: "var(--text-3)",
-              }}
-            >
+            <span style={{ marginLeft: 1, fontSize: "0.72rem", color: "var(--text-3)" }}>
               {likeCount}
             </span>
           )}
         </button>
 
-        {/* PDF */}
-        <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+        {/* Compartilhar */}
+        <div style={{ position: "relative" }}>
           <button
+            ref={shareRef}
             className="action-btn"
-            onClick={handleDownloadPdf}
-            disabled={gerandoPdf}
-            title="Baixar como PDF"
-            style={{
-              opacity: gerandoPdf ? 0.6 : 1,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "5px",
-            }}
+            onClick={handleShare}
+            title="Compartilhar"
+            style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}
           >
-            {gerandoPdf ? (
-              <>
-                <span className="btn-spinner" />
-                PDF
-              </>
-            ) : (
-              <>
-                <IconDownload size={13} />
-                PDF
-              </>
-            )}
+            <IconShare size={13} />
+            Compartilhar
           </button>
+          {compartilharAberto && (
+            <ShareMiniDropdown
+              url={fullUrl}
+              titulo={post.titulo}
+              autorNome={post.autorNome || "Autor"}
+              onClose={() => setCompartilharAberto(false)}
+              anchorRef={shareRef}
+            />
+          )}
+        </div>
+
+        {/* PDF */}
+        <button
+          className="action-btn"
+          onClick={handleDownloadPdf}
+          disabled={gerandoPdf}
+          title="Baixar como PDF"
+          style={{
+            opacity: gerandoPdf ? 0.6 : 1,
+            display: "inline-flex", alignItems: "center", gap: "5px",
+          }}
+        >
+          {gerandoPdf ? (
+            <><span className="btn-spinner" />PDF</>
+          ) : (
+            <><IconDownload size={13} />PDF</>
+          )}
           {downloadCount > 0 && (
-            <span
-              style={{
-                fontSize: "0.72rem",
-                fontWeight: 700,
-                color: "var(--text-3)",
-                padding: "0 4px",
-              }}
-              title={`${downloadCount} download${
-                downloadCount !== 1 ? "s" : ""
-              }`}
-            >
+            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}
+              title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
               {downloadCount}
             </span>
           )}
-        </div>
+        </button>
+
+        {/* Visualizações */}
+        {viewCount > 0 && (
+          <span
+            style={{
+              display: "inline-flex", alignItems: "center", gap: "4px",
+              fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)",
+            }}
+            title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}
+          >
+            <IconEye size={13} />
+            {viewCount}
+          </span>
+        )}
 
         <span className="read-link" onClick={() => router.push(url)}>
           Ler completo →
@@ -368,10 +425,7 @@ export default function Posts() {
   useEffect(() => {
     async function fetchPosts() {
       try {
-        const q = query(
-          collection(db, "posts"),
-          orderBy("data", "desc")
-        );
+        const q = query(collection(db, "posts"), orderBy("data", "desc"));
         const snapshot = await getDocs(q);
         const lista: any[] = [];
         snapshot.forEach((d) => lista.push({ id: d.id, ...d.data() }));
@@ -391,10 +445,7 @@ export default function Posts() {
     toastTimer.current = setTimeout(() => setToastVisible(false), 2200);
   }
 
-  const postsFiltrados =
-    filtro === "todos"
-      ? posts
-      : posts.filter((p) => p.tipo === filtro);
+  const postsFiltrados = filtro === "todos" ? posts : posts.filter((p) => p.tipo === filtro);
 
   function handleAuthorClick(e: React.MouseEvent, autorId: string) {
     e.stopPropagation();
@@ -405,109 +456,60 @@ export default function Posts() {
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
 
-      {/* Overlay mobile para sidebar */}
       {sidebarAberta && (
-        <div
-          onClick={() => setSidebarAberta(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.5)",
-            zIndex: 40,
-          }}
-        />
+        <div onClick={() => setSidebarAberta(false)} style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 40,
+        }} />
       )}
 
       <div className="feed-wrapper">
         <div>
           <div className="feed-main-header">
             <h1 className="feed-main-title">Publicações Recentes</h1>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                flexWrap: "wrap",
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
               <div className="feed-filters">
                 {(["todos", "sermao", "artigo"] as Filtro[]).map((f) => (
-                  <button
-                    key={f}
-                    onClick={() => setFiltro(f)}
-                    className={`filter-btn ${filtro === f ? "active" : ""}`}
-                  >
-                    {f === "todos"
-                      ? "Todos"
-                      : f === "sermao"
-                      ? "Sermões"
-                      : "Artigos"}
+                  <button key={f} onClick={() => setFiltro(f)}
+                    className={`filter-btn ${filtro === f ? "active" : ""}`}>
+                    {f === "todos" ? "Todos" : f === "sermao" ? "Sermões" : "Artigos"}
                   </button>
                 ))}
               </div>
-
-              {/* Botão "Em Alta" visível só em mobile */}
-              <button
-                className="sidebar-toggle-btn"
-                onClick={() => setSidebarAberta(true)}
-                aria-label="Ver em alta e mais"
-              >
+              <button className="sidebar-toggle-btn" onClick={() => setSidebarAberta(true)}
+                aria-label="Ver em alta e mais">
                 🔥 Em alta
               </button>
             </div>
           </div>
 
           {loading ? (
-            <div className="loading-state">
-              <div className="spinner" />
-              Carregando publicações...
-            </div>
+            <div className="loading-state"><div className="spinner" />Carregando publicações...</div>
           ) : postsFiltrados.length === 0 ? (
             <div className="empty-state">Nenhuma publicação encontrada.</div>
           ) : (
             <div className="posts-list">
               {postsFiltrados.map((post, i) => (
-                <PostCard
-                  key={post.id}
-                  post={post}
-                  index={i}
-                  onAuthorClick={handleAuthorClick}
-                  onToast={showToast}
-                />
+                <PostCard key={post.id} post={post} index={i}
+                  onAuthorClick={handleAuthorClick} onToast={showToast} />
               ))}
             </div>
           )}
         </div>
 
-        {/* Sidebar — desktop normal, mobile deslizante */}
-        <aside
-          className={`feed-sidebar${sidebarAberta ? " feed-sidebar--open" : ""}`}
-        >
-          {/* Botão fechar (só mobile) */}
-          <button
-            className="sidebar-close-btn"
-            onClick={() => setSidebarAberta(false)}
-            aria-label="Fechar painel"
-          >
-            ×
-          </button>
+        {/* Sidebar */}
+        <aside className={`feed-sidebar${sidebarAberta ? " feed-sidebar--open" : ""}`}>
+          <button className="sidebar-close-btn" onClick={() => setSidebarAberta(false)}
+            aria-label="Fechar painel">×</button>
 
           <div className="sidebar-card">
             <h3 className="sidebar-title">🔥 Em Alta</h3>
             <ul className="trending-list">
               {posts.slice(0, 4).map((p) => (
                 <li key={p.id}>
-                  <Link
-                    href={`/posts/${
-                      p.tipo === "sermao" ? "sermoes" : "artigos"
-                    }/${p.slug}`}
-                    className="trending-link"
-                    onClick={() => setSidebarAberta(false)}
-                  >
+                  <Link href={`/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`}
+                    className="trending-link" onClick={() => setSidebarAberta(false)}>
                     <span className="trending-text">{p.titulo}</span>
-                    <span className="trending-count">
-                      {p.tipo === "sermao" ? "🎤" : "📝"}
-                    </span>
+                    <span className="trending-count">{p.tipo === "sermao" ? "🎤" : "📝"}</span>
                   </Link>
                 </li>
               ))}
@@ -515,13 +517,9 @@ export default function Posts() {
           </div>
 
           <div className="sidebar-card sidebar-cta">
-            <div style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>
-              ✍️
-            </div>
+            <div style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>✍️</div>
             <h3>Compartilhe sua fé</h3>
-            <p>
-              Publique seu sermão ou reflexão e edifique a comunidade.
-            </p>
+            <p>Publique seu sermão ou reflexão e edifique a comunidade.</p>
             <Link href="/criar-post" className="btn-cta" onClick={() => setSidebarAberta(false)}>
               Publicar agora
             </Link>
@@ -538,9 +536,7 @@ export default function Posts() {
         </aside>
       </div>
 
-      {/* Estilos mobile embutidos */}
       <style>{`
-        /* Botão "Em Alta" só aparece em mobile */
         .sidebar-toggle-btn {
           display: none;
           align-items: center;
@@ -555,7 +551,6 @@ export default function Posts() {
           cursor: pointer;
           white-space: nowrap;
         }
-
         .sidebar-close-btn {
           display: none;
           position: absolute;
@@ -570,21 +565,12 @@ export default function Posts() {
           padding: 4px 8px;
           border-radius: var(--radius-sm);
         }
-
         @media (max-width: 768px) {
-          .sidebar-toggle-btn {
-            display: inline-flex;
-          }
-
-          .sidebar-close-btn {
-            display: block;
-          }
-
+          .sidebar-toggle-btn { display: inline-flex; }
+          .sidebar-close-btn { display: block; }
           .feed-sidebar {
             position: fixed !important;
-            top: 0;
-            right: 0;
-            bottom: 0;
+            top: 0; right: 0; bottom: 0;
             width: min(85vw, 320px);
             overflow-y: auto;
             z-index: 50;
@@ -595,60 +581,21 @@ export default function Posts() {
             border-left: 1px solid var(--border-light);
             box-shadow: -8px 0 32px rgba(0,0,0,0.4);
           }
-
-          .feed-sidebar--open {
-            transform: translateX(0) !important;
-          }
-
-          /* Cards maiores em mobile */
-          .post-card {
-            padding: 1rem !important;
-          }
-
-          /* Footer dos cards em coluna em telas muito pequenas */
+          .feed-sidebar--open { transform: translateX(0) !important; }
+          .post-card { padding: 1rem !important; }
           @media (max-width: 360px) {
-            .card-footer-row {
-              flex-wrap: wrap;
-              gap: 0.5rem;
-            }
+            .card-footer-row { flex-wrap: wrap; gap: 0.5rem; }
           }
-
-          /* Botões de ação com touch targets maiores */
-          .action-btn,
-          .post-btn-share,
-          .filter-btn {
+          .action-btn, .post-btn-share, .filter-btn {
             min-height: 40px;
             padding-top: 8px !important;
             padding-bottom: 8px !important;
           }
-
-          /* Header do feed em coluna */
-          .feed-main-header {
-            flex-direction: column !important;
-            align-items: flex-start !important;
-            gap: 0.75rem !important;
-          }
-
-          /* Título menor */
-          .post-detail-title {
-            font-size: clamp(1.3rem, 5vw, 2rem) !important;
-          }
-
-          /* Ações do post detail empilhadas em mobile */
-          .post-detail-actions {
-            flex-wrap: wrap;
-            gap: 0.5rem;
-          }
-
-          /* Navegação entre posts em coluna */
-          .post-nav {
-            grid-template-columns: 1fr !important;
-          }
-
-          /* Meta do post em wrap */
-          .post-detail-meta {
-            flex-wrap: wrap;
-          }
+          .feed-main-header { flex-direction: column !important; align-items: flex-start !important; gap: 0.75rem !important; }
+          .post-detail-title { font-size: clamp(1.3rem, 5vw, 2rem) !important; }
+          .post-detail-actions { flex-wrap: wrap; gap: 0.5rem; }
+          .post-nav { grid-template-columns: 1fr !important; }
+          .post-detail-meta { flex-wrap: wrap; }
         }
       `}</style>
     </>
