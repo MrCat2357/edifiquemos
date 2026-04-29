@@ -32,7 +32,6 @@ export default function Header() {
     return () => unsubscribe();
   }, [user]);
 
-  // Fecha o menu ao navegar
   useEffect(() => {
     if (!menuAberto) return;
     const handleKey = (e: KeyboardEvent) => {
@@ -42,7 +41,6 @@ export default function Header() {
     return () => document.removeEventListener("keydown", handleKey);
   }, [menuAberto]);
 
-  // Trava o scroll do body quando menu está aberto
   useEffect(() => {
     document.body.style.overflow = menuAberto ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
@@ -113,10 +111,11 @@ export default function Header() {
 
       {/* Overlay do menu mobile */}
       <div
-  className={`mobile-overlay${menuAberto ? " is-visible" : ""}`}
-  onClick={fecharMenu}
-  aria-hidden="true"
-/>
+        className={`mobile-overlay${menuAberto ? " is-visible" : ""}`}
+        onClick={fecharMenu}
+        aria-hidden="true"
+      />
+
       {/* Drawer mobile */}
       <nav className={`mobile-drawer${menuAberto ? " is-open" : ""}`} aria-hidden={!menuAberto}>
         <div className="mobile-drawer-header">
@@ -142,6 +141,24 @@ export default function Header() {
               <Link href="/criar-post" className="mobile-nav-link" onClick={fecharMenu}>
                 Publicar
               </Link>
+            </li>
+          )}
+          {user && (
+            <li>
+              <button
+                className="mobile-nav-link"
+                style={{
+                  width: "100%",
+                  background: "none",
+                  border: "none",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+                onClick={() => { fecharMenu(); router.push("/perfil"); }}
+              >
+                Meu Perfil
+              </button>
             </li>
           )}
         </ul>
