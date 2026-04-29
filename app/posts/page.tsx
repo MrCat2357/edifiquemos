@@ -276,15 +276,11 @@ function PostCard({
 
 /* ─── Page ─────────────────────────────────────────────── */
 
-type Filtro = "todos" | "sermao" | "artigo";
-
 export default function Posts() {
   const [posts, setPosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filtro, setFiltro] = useState<Filtro>("todos");
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
-  const [sidebarAberta, setSidebarAberta] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const router = useRouter();
 
@@ -311,8 +307,6 @@ export default function Posts() {
     toastTimer.current = setTimeout(() => setToastVisible(false), 2200);
   }
 
-  const postsFiltrados = filtro === "todos" ? posts : posts.filter((p) => p.tipo === filtro);
-
   function handleAuthorClick(e: React.MouseEvent, autorId: string) {
     e.stopPropagation();
     router.push(`/perfil/${autorId}`);
@@ -322,48 +316,20 @@ export default function Posts() {
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
 
-      {sidebarAberta && (
-        <div
-          onClick={() => setSidebarAberta(false)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 998 }}
-        />
-      )}
-
       <div className="feed-wrapper">
         {/* Coluna principal dos posts */}
-        <div style={{ minWidth: 0, overflowX: "visible" }}>
+        <div>
           <div className="feed-main-header">
             <h1 className="feed-main-title">Publicações Recentes</h1>
-
-            {/* Linha com scroll horizontal - NUNCA corta os botões */}
-            <div className="feed-filter-row">
-              {(["todos", "sermao", "artigo"] as Filtro[]).map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFiltro(f)}
-                  className={`filter-btn${filtro === f ? " active" : ""}`}
-                >
-                  {f === "todos" ? "Todos" : f === "sermao" ? "Sermões" : "Artigos"}
-                </button>
-              ))}
-
-              <button
-                onClick={() => setSidebarAberta(true)}
-                aria-label="Ver em alta e mais"
-                className="emalta-btn"
-              >
-                🔥 Em alta
-              </button>
-            </div>
           </div>
 
           {loading ? (
             <div className="loading-state"><div className="spinner" />Carregando publicações...</div>
-          ) : postsFiltrados.length === 0 ? (
+          ) : posts.length === 0 ? (
             <div className="empty-state">Nenhuma publicação encontrada.</div>
           ) : (
             <div className="posts-list">
-              {postsFiltrados.map((post, i) => (
+              {posts.map((post, i) => (
                 <PostCard key={post.id} post={post} index={i}
                   onAuthorClick={handleAuthorClick} onToast={showToast} />
               ))}
@@ -371,14 +337,8 @@ export default function Posts() {
           )}
         </div>
 
-        {/* Sidebar — drawer no mobile, coluna fixa no desktop */}
-        <aside className="feed-sidebar" data-open={sidebarAberta ? "true" : "false"}>
-          <button
-            onClick={() => setSidebarAberta(false)}
-            aria-label="Fechar painel"
-            className="sidebar-close-btn"
-          >×</button>
-
+        {/* Sidebar */}
+        <aside className="feed-sidebar">
           <div className="sidebar-card">
             <h3 className="sidebar-title">🔥 Em Alta</h3>
             <ul className="trending-list">
@@ -387,7 +347,6 @@ export default function Posts() {
                   <Link
                     href={`/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`}
                     className="trending-link"
-                    onClick={() => setSidebarAberta(false)}
                   >
                     <span className="trending-text">{p.titulo}</span>
                     <span className="trending-count">{p.tipo === "sermao" ? "🎤" : "📝"}</span>
@@ -401,7 +360,7 @@ export default function Posts() {
             <div style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>✍️</div>
             <h3>Compartilhe sua fé</h3>
             <p>Publique seu sermão ou reflexão e edifique a comunidade.</p>
-            <Link href="/criar-post" className="btn-cta" onClick={() => setSidebarAberta(false)}>
+            <Link href="/criar-post" className="btn-cta">
               Publicar agora
             </Link>
           </div>
@@ -416,115 +375,6 @@ export default function Posts() {
           </div>
         </aside>
       </div>
-
-      <style>{`
-        /* Linha de filtros com scroll horizontal */
-        .feed-filter-row {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          flex-wrap: nowrap;
-          overflow-x: auto;
-          -webkit-overflow-scrolling: touch;
-          scrollbar-width: thin;
-          padding-bottom: 4px;
-          width: 100%;
-        }
-        
-        .feed-filter-row::-webkit-scrollbar {
-          height: 3px;
-        }
-        
-        .feed-filter-row::-webkit-scrollbar-track {
-          background: var(--border);
-          border-radius: 3px;
-        }
-        
-        .feed-filter-row::-webkit-scrollbar-thumb {
-          background: var(--emerald-dim);
-          border-radius: 3px;
-        }
-
-        /* Botão Em Alta */
-        .emalta-btn {
-          flex-shrink: 0;
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border-light);
-          color: var(--text-2);
-          font-size: 0.78rem;
-          font-weight: 600;
-          padding: 5px 12px;
-          border-radius: var(--radius-full);
-          cursor: pointer;
-          white-space: nowrap;
-          font-family: inherit;
-          transition: border-color 0.15s, color 0.15s;
-        }
-        
-        .emalta-btn:hover {
-          border-color: var(--emerald);
-          color: var(--emerald);
-        }
-
-        /* Botão fechar sidebar */
-        .sidebar-close-btn {
-          display: none;
-          position: absolute;
-          top: 1rem;
-          right: 1rem;
-          background: none;
-          border: none;
-          font-size: 1.5rem;
-          color: var(--text-3);
-          cursor: pointer;
-          line-height: 1;
-          padding: 4px 8px;
-          border-radius: var(--radius-sm);
-          z-index: 1;
-        }
-
-        /* Mobile/Tablet specific */
-        @media (max-width: 820px) {
-          .feed-sidebar {
-            display: flex !important;
-            flex-direction: column;
-            position: fixed !important;
-            top: 0; right: 0; bottom: 0;
-            width: min(85vw, 320px);
-            overflow-y: auto;
-            z-index: 999;
-            padding: 3.5rem 1rem 2rem;
-            transform: translateX(100%);
-            transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-            background: var(--bg-card);
-            border-left: 1px solid var(--border-light);
-            box-shadow: -8px 0 32px rgba(0,0,0,0.4);
-          }
-          
-          .feed-sidebar[data-open="true"] {
-            transform: translateX(0);
-          }
-          
-          .sidebar-close-btn {
-            display: block;
-          }
-        }
-
-        @media (max-width: 640px) {
-          .filter-btn {
-            font-size: 0.75rem;
-            padding: 6px 14px;
-          }
-          
-          .emalta-btn {
-            font-size: 0.75rem;
-            padding: 6px 14px;
-          }
-        }
-      `}</style>
     </>
   );
 }
