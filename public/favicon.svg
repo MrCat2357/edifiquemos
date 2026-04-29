@@ -1,7 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- Fundo verde escuro -->
-  <rect width="32" height="32" rx="6" fill="#059669"/>
-  <!-- Cruz branca -->
-  <rect x="13" y="5" width="6" height="22" rx="1.5" fill="white"/>
-  <rect x="5" y="11" width="22" height="6" rx="1.5" fill="white"/>
+  <circle cx="16" cy="15" r="14" fill="#059669"/>
+  <circle cx="16" cy="15" r="10.5" fill="none" stroke="white" stroke-width="1.6"/>
+  <rect x="14.4" y="6.5" width="3.2" height="17" rx="1" fill="white"/>
+  <rect x="9.5" y="10.5" width="13" height="3.2" rx="1" fill="white"/>
 </svg>
