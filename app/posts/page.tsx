@@ -330,14 +330,12 @@ export default function Posts() {
       )}
 
       <div className="feed-wrapper">
-        {/* ↓ FIX: min-width: 0 é obrigatório em grid items que contêm
-            filhos com overflow-x: auto. Sem isso o grid item expande
-            além da célula e o scroll nunca ativa.                      */}
-        <div style={{ minWidth: 0 }}>
+        {/* Coluna principal dos posts */}
+        <div style={{ minWidth: 0, overflowX: "visible" }}>
           <div className="feed-main-header">
             <h1 className="feed-main-title">Publicações Recentes</h1>
 
-            {/* Linha com scroll horizontal: nunca corta os botões */}
+            {/* Linha com scroll horizontal - NUNCA corta os botões */}
             <div className="feed-filter-row">
               {(["todos", "sermao", "artigo"] as Filtro[]).map((f) => (
                 <button
@@ -424,16 +422,28 @@ export default function Posts() {
         .feed-filter-row {
           display: flex;
           align-items: center;
-          gap: 0.375rem;
+          gap: 0.5rem;
           flex-wrap: nowrap;
           overflow-x: auto;
           -webkit-overflow-scrolling: touch;
-          scrollbar-width: none;
-          -ms-overflow-style: none;
-          padding-bottom: 2px;
+          scrollbar-width: thin;
+          padding-bottom: 4px;
           width: 100%;
         }
-        .feed-filter-row::-webkit-scrollbar { display: none; }
+        
+        .feed-filter-row::-webkit-scrollbar {
+          height: 3px;
+        }
+        
+        .feed-filter-row::-webkit-scrollbar-track {
+          background: var(--border);
+          border-radius: 3px;
+        }
+        
+        .feed-filter-row::-webkit-scrollbar-thumb {
+          background: var(--emerald-dim);
+          border-radius: 3px;
+        }
 
         /* Botão Em Alta */
         .emalta-btn {
@@ -453,6 +463,7 @@ export default function Posts() {
           font-family: inherit;
           transition: border-color 0.15s, color 0.15s;
         }
+        
         .emalta-btn:hover {
           border-color: var(--emerald);
           color: var(--emerald);
@@ -475,7 +486,7 @@ export default function Posts() {
           z-index: 1;
         }
 
-        /* Sidebar vira drawer no mobile/tablet */
+        /* Mobile/Tablet specific */
         @media (max-width: 820px) {
           .feed-sidebar {
             display: flex !important;
@@ -492,11 +503,25 @@ export default function Posts() {
             border-left: 1px solid var(--border-light);
             box-shadow: -8px 0 32px rgba(0,0,0,0.4);
           }
+          
           .feed-sidebar[data-open="true"] {
             transform: translateX(0);
           }
+          
           .sidebar-close-btn {
             display: block;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .filter-btn {
+            font-size: 0.75rem;
+            padding: 6px 14px;
+          }
+          
+          .emalta-btn {
+            font-size: 0.75rem;
+            padding: 6px 14px;
           }
         }
       `}</style>

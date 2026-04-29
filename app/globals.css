@@ -398,6 +398,7 @@ a { color: inherit; text-decoration: none; }
   grid-template-columns: 1fr 280px;
   gap: 1.5rem;
   align-items: start;
+  overflow-x: visible;
 }
 
 .feed-main-header {
@@ -422,6 +423,7 @@ a { color: inherit; text-decoration: none; }
   border-radius: var(--radius-full);
   cursor: pointer;
   transition: all 0.15s;
+  white-space: nowrap;
 }
 
 .filter-btn:hover { border-color: var(--emerald); color: var(--emerald); }
@@ -1233,43 +1235,56 @@ a { color: inherit; text-decoration: none; }
   .hero-stats { gap: 1rem; }
   .stat-number { font-size: 1.1rem; }
 
-  /* Feed */
+  /* Feed - CORREÇÃO PRINCIPAL DOS BOTÕES */
   .feed-wrapper {
     padding: 1rem 0.75rem;
-    /* FIX: impede que o wrapper engula o overflow-x dos filhos */
-    overflow: hidden;
+    overflow-x: visible;
   }
 
-  /* FIX PRINCIPAL: o container direto do feed-main-header precisa de
-     min-width: 0 para que o filho com overflow-x: auto possa rolar
-     em vez de ser comprimido/cortado pelo flexbox pai               */
-  .feed-wrapper > div {
-    min-width: 0;
-    overflow: hidden;
-  }
-
+  /* Container dos filtros — rolagem horizontal funciona */
   .feed-main-header {
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.5rem;
-  }
-
-  /* Garante largura total para a linha de filtros poder rolar */
-  .feed-filter-row {
+    gap: 0.75rem;
     width: 100%;
-    min-width: 0;
   }
 
-  .feed-main-title { font-size: 1rem; }
+  .feed-main-title {
+    font-size: 1rem;
+  }
 
-  /* Mantém os filtros visíveis e adiciona o toggle "Em alta" */
-  .feed-filters { display: flex; }
+  /* Linha de filtros com scroll horizontal - CORREÇÃO */
+  .feed-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    padding-bottom: 6px;
+    width: 100%;
+  }
 
-  .sidebar-toggle-btn {
-    display: inline-flex !important;
-    min-height: 36px;
-    font-size: 0.78rem;
-    padding: 5px 12px;
+  /* Ajuste dos botões de filtro */
+  .filter-btn {
+    font-size: 0.75rem;
+    padding: 6px 14px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .emalta-btn {
+    font-size: 0.75rem;
+    padding: 6px 14px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Garantir que o conteúdo não vaze */
+  .feed-wrapper > div:first-child {
+    min-width: 0;
+    overflow-x: visible;
   }
 
   .card-header-row { padding: 0.875rem 1rem 0.4rem; }
