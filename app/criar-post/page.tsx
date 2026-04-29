@@ -36,6 +36,11 @@ export default function CriarPost() {
   const [error, setError] = useState("");
   const [mostrarAviso, setMostrarAviso] = useState(false);
 
+  // Estado para correção gramatical
+  const [corrigindo, setCorrigindo] = useState(false);
+  const [mostrarBotaoCorrigir, setMostrarBotaoCorrigir] = useState(false);
+  const [correcaoFeita, setCorrecaoFeita] = useState(false);
+
   useEffect(() => {
     const draft = sessionStorage.getItem("draft-post");
     if (draft) {
@@ -47,6 +52,33 @@ export default function CriarPost() {
       setData(d.data || "");
     }
   }, []);
+
+  // Mostrar botão de corrigir assim que houver conteúdo
+  useEffect(() => {
+    setMostrarBotaoCorrigir(conteudo.trim().length > 20);
+    // Se o usuário editar após uma correção, resetar o indicador
+    setCorrecaoFeita(false);
+  }, [conteudo]);
+
+  async function corrigirGramatica() {
+    if (!conteudo.trim() || corrigindo) return;
+    setCorrigindo(true);
+    try {
+      const response = await fetch("/api/corrigir", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conteudo }),
+      });
+      const dataResp = await response.json();
+      if (dataResp?.texto) {
+        setConteudo(dataResp.texto);
+        setCorrecaoFeita(true);
+      }
+    } catch (err) {
+      console.error("Erro ao corrigir:", err);
+    }
+    setCorrigindo(false);
+  }
 
   async function handleCriarPost(e: React.FormEvent) {
     e.preventDefault();
@@ -208,7 +240,7 @@ export default function CriarPost() {
             />
           </div>
 
-          {/* Conteúdo + botão importar */}
+          {/* Conteúdo + botão importar + botão corrigir */}
           <div className="auth-field">
             <div
               style={{
@@ -223,13 +255,65 @@ export default function CriarPost() {
               <label className="auth-label" style={{ margin: 0 }}>
                 Conteúdo
               </label>
-              <FileImportButton
-                onImport={(texto) =>
-                  setConteudo((prev) =>
-                    prev.trim() ? prev + "\n\n" + texto : texto
-                  )
-                }
-              />
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                <FileImportButton
+                  onImport={(texto) =>
+                    setConteudo((prev) =>
+                      prev.trim() ? prev + "\n\n" + texto : texto
+                    )
+                  }
+                />
+                {/* Botão de correção gramatical — aparece assim que há texto suficiente */}
+                {mostrarBotaoCorrigir && (
+                  <button
+                    type="button"
+                    onClick={corrigirGramatica}
+                    disabled={corrigindo}
+                    title="Corrigir erros de gramática e ortografia com IA"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.35rem",
+                      padding: "5px 12px",
+                      borderRadius: "var(--radius-full)",
+                      border: correcaoFeita
+                        ? "1px solid var(--emerald)"
+                        : "1px solid var(--border-light)",
+                      background: correcaoFeita
+                        ? "var(--emerald-dim)"
+                        : "var(--bg-elevated)",
+                      color: correcaoFeita ? "var(--emerald)" : "var(--text-2)",
+                      fontWeight: 600,
+                      fontSize: "0.78rem",
+                      cursor: corrigindo ? "wait" : "pointer",
+                      transition: "all 0.2s",
+                      whiteSpace: "nowrap",
+                      opacity: corrigindo ? 0.7 : 1,
+                    }}
+                  >
+                    {corrigindo ? (
+                      <>
+                        <span
+                          style={{
+                            display: "inline-block",
+                            width: "10px",
+                            height: "10px",
+                            border: "2px solid var(--text-3)",
+                            borderTopColor: "var(--emerald)",
+                            borderRadius: "50%",
+                            animation: "spin 0.7s linear infinite",
+                          }}
+                        />
+                        Corrigindo...
+                      </>
+                    ) : correcaoFeita ? (
+                      <>✓ Corrigido</>
+                    ) : (
+                      <>✦ Corrigir texto</>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
             <textarea
               placeholder="Escreva seu sermão ou artigo aqui, ou importe um arquivo acima..."
@@ -286,6 +370,13 @@ export default function CriarPost() {
           </button>
         </div>
       </div>
+
+      {/* Animação do spinner */}
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
