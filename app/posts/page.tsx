@@ -140,7 +140,6 @@ function PostCard({
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
 
-
   const viewCount: number = post.visualizacoes ?? 0;
 
   const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
@@ -219,9 +218,7 @@ function PostCard({
       </div>
 
       <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }}>
-        {/* Grupo esquerdo: Amei · PDF · olhinho — espaçamento uniforme */}
         <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-          {/* Amei */}
           <button
             className={`action-btn ${liked ? "liked" : ""}`}
             onClick={handleLike}
@@ -238,7 +235,6 @@ function PostCard({
             )}
           </button>
 
-          {/* PDF */}
           <button
             className="action-btn"
             onClick={handleDownloadPdf}
@@ -259,7 +255,6 @@ function PostCard({
             )}
           </button>
 
-          {/* Visualizações */}
           {viewCount > 0 && (
             <span
               style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}
@@ -271,7 +266,6 @@ function PostCard({
           )}
         </div>
 
-        {/* Ler completo → empurrado para a direita */}
         <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(url)}>
           Ler completo →
         </span>
@@ -328,27 +322,65 @@ export default function Posts() {
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
 
+      {/* Overlay do drawer mobile */}
       {sidebarAberta && (
-        <div onClick={() => setSidebarAberta(false)} style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 40,
-        }} />
+        <div
+          onClick={() => setSidebarAberta(false)}
+          style={{
+            position: "fixed", inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            zIndex: 998,
+          }}
+        />
       )}
 
       <div className="feed-wrapper">
         <div>
           <div className="feed-main-header">
             <h1 className="feed-main-title">Publicações Recentes</h1>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-              <div className="feed-filters">
-                {(["todos", "sermao", "artigo"] as Filtro[]).map((f) => (
-                  <button key={f} onClick={() => setFiltro(f)}
-                    className={`filter-btn ${filtro === f ? "active" : ""}`}>
-                    {f === "todos" ? "Todos" : f === "sermao" ? "Sermões" : "Artigos"}
-                  </button>
-                ))}
-              </div>
-              <button className="sidebar-toggle-btn" onClick={() => setSidebarAberta(true)}
-                aria-label="Ver em alta e mais">
+
+            {/* Filtros + botão Em Alta — numa linha só, sem corte */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.375rem",
+              flexWrap: "nowrap",
+              overflowX: "auto",
+              WebkitOverflowScrolling: "touch",
+              scrollbarWidth: "none",
+              msOverflowStyle: "none",
+              paddingBottom: "2px",
+            }}>
+              {(["todos", "sermao", "artigo"] as Filtro[]).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFiltro(f)}
+                  className={`filter-btn${filtro === f ? " active" : ""}`}
+                  style={{ flexShrink: 0 }}
+                >
+                  {f === "todos" ? "Todos" : f === "sermao" ? "Sermões" : "Artigos"}
+                </button>
+              ))}
+
+              <button
+                onClick={() => setSidebarAberta(true)}
+                aria-label="Ver em alta e mais"
+                style={{
+                  flexShrink: 0,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "5px",
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-light)",
+                  color: "var(--text-2)",
+                  fontSize: "0.78rem",
+                  fontWeight: 600,
+                  padding: "5px 12px",
+                  borderRadius: "var(--radius-full)",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 🔥 Em alta
               </button>
             </div>
@@ -368,18 +400,31 @@ export default function Posts() {
           )}
         </div>
 
-        {/* Sidebar */}
-        <aside className={`feed-sidebar${sidebarAberta ? " feed-sidebar--open" : ""}`}>
-          <button className="sidebar-close-btn" onClick={() => setSidebarAberta(false)}
-            aria-label="Fechar painel">×</button>
+        {/* Sidebar — drawer no mobile, coluna fixa no desktop */}
+        <aside
+          className="feed-sidebar"
+          style={sidebarAberta ? undefined : undefined}
+          data-open={sidebarAberta ? "true" : "false"}
+        >
+          <button
+            onClick={() => setSidebarAberta(false)}
+            aria-label="Fechar painel"
+            style={{
+              display: "none", // controlado pelo CSS abaixo
+            }}
+            className="sidebar-close-btn"
+          >×</button>
 
           <div className="sidebar-card">
             <h3 className="sidebar-title">🔥 Em Alta</h3>
             <ul className="trending-list">
               {posts.slice(0, 4).map((p) => (
                 <li key={p.id}>
-                  <Link href={`/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`}
-                    className="trending-link" onClick={() => setSidebarAberta(false)}>
+                  <Link
+                    href={`/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`}
+                    className="trending-link"
+                    onClick={() => setSidebarAberta(false)}
+                  >
                     <span className="trending-text">{p.titulo}</span>
                     <span className="trending-count">{p.tipo === "sermao" ? "🎤" : "📝"}</span>
                   </Link>
@@ -409,22 +454,11 @@ export default function Posts() {
       </div>
 
       <style>{`
-        .sidebar-toggle-btn {
-          display: none;
-          align-items: center;
-          gap: 5px;
-          background: var(--bg-elevated);
-          border: 1px solid var(--border-light);
-          color: var(--text-2);
-          font-size: 0.8rem;
-          font-weight: 600;
-          padding: 6px 12px;
-          border-radius: var(--radius-full);
-          cursor: pointer;
-          white-space: nowrap;
-        }
+        /* Esconde a scrollbar horizontal dos filtros */
+        .feed-main-header > div::-webkit-scrollbar { display: none; }
+
+        /* Botão fechar — só aparece no mobile */
         .sidebar-close-btn {
-          display: none;
           position: absolute;
           top: 1rem;
           right: 1rem;
@@ -436,16 +470,19 @@ export default function Posts() {
           line-height: 1;
           padding: 4px 8px;
           border-radius: var(--radius-sm);
+          z-index: 1;
         }
-        @media (max-width: 768px) {
-          .sidebar-toggle-btn { display: inline-flex; }
-          .sidebar-close-btn { display: block; }
+
+        @media (max-width: 820px) {
+          /* Sidebar vira drawer deslizante */
           .feed-sidebar {
+            display: flex !important;
+            flex-direction: column;
             position: fixed !important;
             top: 0; right: 0; bottom: 0;
             width: min(85vw, 320px);
             overflow-y: auto;
-            z-index: 50;
+            z-index: 999;
             padding: 3.5rem 1rem 2rem;
             transform: translateX(100%);
             transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
@@ -453,21 +490,20 @@ export default function Posts() {
             border-left: 1px solid var(--border-light);
             box-shadow: -8px 0 32px rgba(0,0,0,0.4);
           }
-          .feed-sidebar--open { transform: translateX(0) !important; }
-          .post-card { padding: 1rem !important; }
-          @media (max-width: 360px) {
-            .card-footer-row { flex-wrap: wrap; gap: 0.5rem; }
+
+          .feed-sidebar[data-open="true"] {
+            transform: translateX(0);
           }
-          .action-btn, .post-btn-share, .filter-btn {
-            min-height: 40px;
-            padding-top: 8px !important;
-            padding-bottom: 8px !important;
+
+          .sidebar-close-btn {
+            display: block;
           }
-          .feed-main-header { flex-direction: column !important; align-items: flex-start !important; gap: 0.75rem !important; }
-          .post-detail-title { font-size: clamp(1.3rem, 5vw, 2rem) !important; }
-          .post-detail-actions { flex-wrap: wrap; gap: 0.5rem; }
-          .post-nav { grid-template-columns: 1fr !important; }
-          .post-detail-meta { flex-wrap: wrap; }
+
+          /* Cabeçalho vira coluna no mobile */
+          .feed-main-header {
+            flex-direction: column !important;
+            align-items: flex-start !important;
+          }
         }
       `}</style>
     </>
