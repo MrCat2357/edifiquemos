@@ -7,9 +7,10 @@ import {
   increment, getDoc, deleteDoc,
   collection, query, orderBy, getDocs, where,
 } from "firebase/firestore";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
+import LinksReferencia from "@/components/LinksReferencia";
 
 /* ── helpers ─────────────────────────────────────────── */
 
@@ -153,10 +154,10 @@ type PostNav = {
 
 type PostNavAutor = { nome: string; fotoUrl: string | null };
 
-function PostNavigation({ postId }: { postId: string }) {
+// ✅ CORRIGIDO: recebe autorIdProp via prop em vez de ler da URL (searchParams)
+// Isso evita que o ?autorId= apareça na URL ao navegar entre posts
+function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?: string }) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const autorId = searchParams.get("autorId");
 
   const [prev, setPrev] = useState<PostNav | null>(null);
   const [next, setNext] = useState<PostNav | null>(null);
@@ -167,9 +168,9 @@ function PostNavigation({ postId }: { postId: string }) {
   useEffect(() => {
     async function fetchNav() {
       try {
-        // Se vier do perfil de um autor, filtra só posts desse autor
-        const q = autorId
-          ? query(collection(db, "posts"), where("autorId", "==", autorId), orderBy("data", "desc"))
+        // Filtra por autor se vier do perfil, usando a prop em vez da URL
+        const q = autorIdProp
+          ? query(collection(db, "posts"), where("autorId", "==", autorIdProp), orderBy("data", "desc"))
           : query(collection(db, "posts"), orderBy("data", "desc"));
 
         const snap = await getDocs(q);
@@ -189,7 +190,6 @@ function PostNavigation({ postId }: { postId: string }) {
         setPrev(p);
         setNext(n);
 
-        // Busca dados de autor dos posts adjacentes em paralelo
         async function fetchAutorData(post: PostNav): Promise<PostNavAutor> {
           if (!post.autorId) return { nome: post.autorNome || "Autor", fotoUrl: null };
           try {
@@ -218,14 +218,13 @@ function PostNavigation({ postId }: { postId: string }) {
       setLoading(false);
     }
     fetchNav();
-  }, [postId, autorId]);
+  }, [postId, autorIdProp]);
 
+  // ✅ CORRIGIDO: URL limpa, sem ?autorId= na query string
   function navUrl(p: PostNav) {
-    const base = p.slug
+    return p.slug
       ? `/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`
       : `/posts/${p.id}`;
-    // Preserva o autorId na navegação para manter o filtro
-    return autorId ? `${base}?autorId=${autorId}` : base;
   }
 
   if (loading || (!prev && !next)) return null;
@@ -270,7 +269,6 @@ function PostNavigation({ postId }: { postId: string }) {
             e.currentTarget.style.background = "var(--bg-elevated)";
           }}
         >
-          {/* Label com seta */}
           <span style={{
             display: "flex", alignItems: "center", gap: "4px",
             fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.08em",
@@ -280,7 +278,6 @@ function PostNavigation({ postId }: { postId: string }) {
             {prev.tipo === "sermao" ? "Sermão anterior" : "Artigo anterior"}
           </span>
 
-          {/* Título */}
           <span style={{
             fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
             lineHeight: 1.3, overflow: "hidden",
@@ -290,7 +287,6 @@ function PostNavigation({ postId }: { postId: string }) {
             {prev.titulo}
           </span>
 
-          {/* Autor */}
           {prevAutor && (
             <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
               <AuthorAvatar src={prevAutor.fotoUrl} name={prevAutor.nome} size={22} />
@@ -324,7 +320,6 @@ function PostNavigation({ postId }: { postId: string }) {
             e.currentTarget.style.background = "var(--bg-elevated)";
           }}
         >
-          {/* Label com seta */}
           <span style={{
             display: "flex", alignItems: "center", gap: "4px",
             fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.08em",
@@ -334,7 +329,6 @@ function PostNavigation({ postId }: { postId: string }) {
             <IconArrowRight size={12} />
           </span>
 
-          {/* Título */}
           <span style={{
             fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
             lineHeight: 1.3, overflow: "hidden",
@@ -344,7 +338,6 @@ function PostNavigation({ postId }: { postId: string }) {
             {next.titulo}
           </span>
 
-          {/* Autor */}
           {nextAutor && (
             <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
               <span style={{
@@ -737,18 +730,15 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
 
-  // ── Visualizações ──────────────────────────────────────
   const [viewCount, setViewCount] = useState<number>(post.visualizacoes ?? 0);
 
   useEffect(() => {
-    // Só incrementa se o usuário estiver autenticado (evita erro de permissão)
-    // e apenas uma vez por sessão por post (evita contar recargas)
     async function registrarVisualizacao() {
       const uid = auth.currentUser?.uid;
-      if (!uid) return; // usuário não logado: não tenta escrever no Firestore
+      if (!uid) return;
 
       const sessionKey = `viewed_${postId}`;
-      if (sessionStorage.getItem(sessionKey)) return; // já contou nesta sessão
+      if (sessionStorage.getItem(sessionKey)) return;
 
       try {
         const ref = doc(db, "posts", postId);
@@ -756,13 +746,11 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         sessionStorage.setItem(sessionKey, "1");
         setViewCount((n) => n + 1);
       } catch (err) {
-        // silencia: não exibe erro para o usuário por falha em contagem
         console.error("Erro ao registrar visualização:", err);
       }
     }
     if (postId) registrarVisualizacao();
   }, [postId]);
-  // ──────────────────────────────────────────────────────
 
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
@@ -883,6 +871,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         igreja: post.igreja || "",
         conteudo: post.conteudo,
         tipo: post.tipo,
+        links: post.links ?? [],
         onDownload: async () => {
           try {
             await updateDoc(doc(db, "posts", postId), { downloads: increment(1) });
@@ -908,19 +897,10 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     }
   }
 
-  /* ── Estilo compartilhado dos botões de ação ── */
   const actionBtnStyle: React.CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
     gap: "5px",
-  };
-
-  /* ── Estilo do contador lateral ── */
-  const counterStyle: React.CSSProperties = {
-    fontSize: "0.72rem",
-    fontWeight: 700,
-    color: "var(--text-3)",
-    padding: "4px 4px",
   };
 
   return (
@@ -1044,6 +1024,11 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           </p>
         )}
 
+        {/* ── Links de Referência ── */}
+        {post.links && post.links.length > 0 && (
+          <LinksReferencia links={post.links} />
+        )}
+
         <hr className="post-detail-divider" />
 
         {/* ── Barra de ações ── */}
@@ -1127,7 +1112,8 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         </div>
 
         {/* ── Navegação entre posts ── */}
-        <PostNavigation postId={postId} />
+        {/* ✅ CORRIGIDO: passa autorId via prop, não pela URL */}
+        <PostNavigation postId={postId} autorIdProp={post.autorId} />
       </article>
     </>
   );

@@ -1,30 +1,41 @@
 import jsPDF from "jspdf";
+import type { LinkReferencia } from "@/components/LinksReferencia";
 
-// Carrega a fonte NotoSerif (suporta grego, hebraico, árabe, etc.)
 async function carregarFonteUnicode(pdf: jsPDF): Promise<void> {
   try {
     const response = await fetch("/fonts/NotoSerif-Regular.ttf");
     const buffer = await response.arrayBuffer();
     const uint8 = new Uint8Array(buffer);
-
-    // Converte para base64
     let binary = "";
     for (let i = 0; i < uint8.length; i++) {
       binary += String.fromCharCode(uint8[i]);
     }
     const base64 = btoa(binary);
-
     pdf.addFileToVFS("NotoSerif-Regular.ttf", base64);
     pdf.addFont("NotoSerif-Regular.ttf", "NotoSerif", "normal");
-    pdf.addFileToVFS("NotoSerif-Bold.ttf", base64); // usa regular como bold também
+    pdf.addFileToVFS("NotoSerif-Bold.ttf", base64);
     pdf.addFont("NotoSerif-Regular.ttf", "NotoSerif", "bold");
   } catch (err) {
     console.warn("Fonte unicode não carregada, usando fallback:", err);
   }
 }
 
+function normalizeUrl(url: string): string {
+  if (!url) return "";
+  if (/^https?:\/\//i.test(url)) return url;
+  return "https://" + url;
+}
+
+const TIPO_LABEL: Record<LinkReferencia["tipo"], string> = {
+  youtube: "▶  YouTube",
+  blog:    "✍  Blog / Site",
+  livro:   "📖  Livro",
+  site:    "🌐  Site",
+  outro:   "🔗  Link",
+};
+
 export async function gerarPDF({
-  titulo, nomeAutor, fotoAutor, dataPost, igreja, conteudo, tipo, postId,
+  titulo, nomeAutor, fotoAutor, dataPost, igreja, conteudo, tipo, postId, links,
   onDownload,
 }: {
   titulo: string;
@@ -35,19 +46,21 @@ export async function gerarPDF({
   conteudo: string;
   tipo: string;
   postId?: string;
+  links?: LinkReferencia[];
   onDownload?: () => void;
 }) {
   const pdf = new jsPDF({ unit: "mm", format: "a4" });
   const largura = pdf.internal.pageSize.getWidth();
+  const alturaUtil = pdf.internal.pageSize.getHeight() - 20;
   const margem = 20;
   const larguraUtil = largura - margem * 2;
   let y = 20;
 
-  // Carrega fonte com suporte unicode (grego, etc.)
   await carregarFonteUnicode(pdf);
-  const fonteCorpo = "NotoSerif";   // usa a fonte embebida
-  const fonteMeta  = "NotoSerif";   // mesma fonte para tudo
+  const fonteCorpo = "NotoSerif";
+  const fonteMeta  = "NotoSerif";
 
+  /* ── Cabeçalho do autor ── */
   if (fotoAutor) {
     try {
       const img = await new Promise<HTMLImageElement>((res, rej) => {
@@ -87,21 +100,24 @@ export async function gerarPDF({
     y += 18;
   }
 
+  /* ── Linha divisória ── */
   pdf.setDrawColor(200, 200, 200);
   pdf.line(margem, y, largura - margem, y);
   y += 8;
 
+  /* ── Título ── */
   pdf.setFont(fonteMeta, "bold"); pdf.setFontSize(20); pdf.setTextColor(15, 15, 15);
   const linhasTitulo = pdf.splitTextToSize(titulo, larguraUtil);
   pdf.text(linhasTitulo, margem, y);
   y += linhasTitulo.length * 8 + 6;
 
+  /* ── Linha divisória ── */
   pdf.setDrawColor(220, 220, 220);
   pdf.line(margem, y, largura - margem, y);
   y += 8;
 
+  /* ── Conteúdo ── */
   pdf.setFont(fonteCorpo, "normal"); pdf.setFontSize(11); pdf.setTextColor(40, 40, 40);
-  const alturaUtil = pdf.internal.pageSize.getHeight() - margem * 2;
   const linhasConteudo = pdf.splitTextToSize(conteudo, larguraUtil);
   for (const linha of linhasConteudo) {
     if (y + 6 > alturaUtil) { pdf.addPage(); y = margem; }
@@ -109,6 +125,7 @@ export async function gerarPDF({
     y += 6;
   }
 
+  /* ── Rodapé do conteúdo ── */
   y += 8;
   if (y + 10 > alturaUtil) { pdf.addPage(); y = margem; }
   pdf.setFont(fonteMeta, "normal"); pdf.setFontSize(9); pdf.setTextColor(130, 130, 130);
@@ -117,6 +134,59 @@ export async function gerarPDF({
     : `Artigo publicado por ${nomeAutor}${dataPost ? ` em ${dataPost}` : ""}`;
   if (rodape) pdf.text(rodape, margem, y);
 
+  /* ── Links de referência (clicáveis no PDF) ── */
+  const linksFiltrados = (links ?? []).filter((l) => l.label?.trim() && l.url?.trim());
+  if (linksFiltrados.length > 0) {
+    y += 12;
+    if (y + 10 > alturaUtil) { pdf.addPage(); y = margem; }
+
+    // Título da seção
+    pdf.setFont(fonteMeta, "bold");
+    pdf.setFontSize(9);
+    pdf.setTextColor(100, 100, 100);
+    pdf.text("REFERÊNCIAS & LINKS", margem, y);
+    y += 6;
+
+    pdf.setDrawColor(220, 220, 220);
+    pdf.line(margem, y, largura - margem, y);
+    y += 5;
+
+    for (const link of linksFiltrados) {
+      if (y + 16 > alturaUtil) { pdf.addPage(); y = margem; }
+
+      const url = normalizeUrl(link.url);
+      const tipoLabel = TIPO_LABEL[link.tipo] ?? "🔗  Link";
+
+      // Caixa de fundo
+      pdf.setFillColor(245, 250, 247);
+      pdf.setDrawColor(200, 230, 215);
+      pdf.roundedRect(margem, y, larguraUtil, 13, 2, 2, "FD");
+
+      // Ícone/tipo (pequeno, cinza)
+      pdf.setFont(fonteMeta, "normal");
+      pdf.setFontSize(7.5);
+      pdf.setTextColor(120, 150, 130);
+      pdf.text(tipoLabel, margem + 3, y + 5);
+
+      // Label do link (negrito, verde escuro)
+      pdf.setFont(fonteMeta, "bold");
+      pdf.setFontSize(9.5);
+      pdf.setTextColor(5, 90, 60);
+      const labelTruncado = pdf.splitTextToSize(link.label, larguraUtil - 6)[0];
+      pdf.text(labelTruncado, margem + 3, y + 10);
+
+      // URL clicável (azul sublinhado)
+      pdf.setFont(fonteMeta, "normal");
+      pdf.setFontSize(7);
+      pdf.setTextColor(30, 100, 200);
+      const urlTruncada = url.length > 80 ? url.slice(0, 77) + "..." : url;
+      pdf.textWithLink(urlTruncada, margem + larguraUtil - pdf.getTextWidth(urlTruncada) - 3, y + 10, { url });
+
+      y += 17;
+    }
+  }
+
+  /* ── Salvar ── */
   const slugify = (s: string) =>
     s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
