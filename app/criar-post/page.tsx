@@ -140,7 +140,7 @@ export default function CriarPost() {
       const linksFiltrados = links.filter((l) => l.label.trim() && l.url.trim());
 
       await addDoc(collection(db, "posts"), {
-        titulo: titulo.trim(),
+        titulo: titulo.trim().toUpperCase(),
         conteudo: conteudo.trim(),
         tipo,
         igreja: igreja.trim() || "",
