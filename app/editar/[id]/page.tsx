@@ -1,21 +1,223 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { db, auth } from "@/lib/firebase";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytesResumable,
+  getDownloadURL,
+  deleteObject,
+} from "firebase/storage";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { useParams, useRouter } from "next/navigation";
 import FileImportButton from "@/components/Button";
 import type { LinkReferencia } from "@/components/LinksReferencia";
 
-/* ── Opções de tipo de link (iguais ao criar-post) ─────── */
+/* ── Opções de tipo de link ─────────────────────────── */
 
 const TIPO_LINK_OPTIONS: { value: LinkReferencia["tipo"]; label: string; icon: string }[] = [
-  { value: "youtube", label: "YouTube",   icon: "▶" },
+  { value: "youtube", label: "YouTube",    icon: "▶" },
   { value: "blog",    label: "Blog / Site", icon: "✍" },
-  { value: "livro",   label: "Livro",     icon: "📖" },
-  { value: "site",    label: "Site",      icon: "🌐" },
-  { value: "outro",   label: "Outro",     icon: "🔗" },
+  { value: "livro",   label: "Livro",      icon: "📖" },
+  { value: "site",    label: "Site",       icon: "🌐" },
+  { value: "outro",   label: "Outro",      icon: "🔗" },
 ];
+
+/* ── Upload helper ──────────────────────────────────── */
+
+async function uploadImagem(
+  file: File,
+  uid: string,
+  onProgress: (p: number) => void
+): Promise<string> {
+  const storage = getStorage();
+  const ext  = file.name.split(".").pop() ?? "jpg";
+  const path = `capas/${uid}/${Date.now()}.${ext}`;
+  const sRef = storageRef(storage, path);
+  const task = uploadBytesResumable(sRef, file);
+
+  return new Promise((resolve, reject) => {
+    task.on(
+      "state_changed",
+      (snap) => onProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+      reject,
+      async () => resolve(await getDownloadURL(task.snapshot.ref))
+    );
+  });
+}
+
+/* Tenta deletar a imagem antiga do Storage (falha silenciosa) */
+async function tentarDeletarImagem(url: string) {
+  try {
+    const storage = getStorage();
+    // Extrai path da URL do Firebase Storage
+    const match = url.match(/\/o\/(.+?)\?/);
+    if (!match) return;
+    const path = decodeURIComponent(match[1]);
+    await deleteObject(storageRef(storage, path));
+  } catch {
+    /* ignora erros de deleção */
+  }
+}
+
+/* ── Componente de upload de imagem ─────────────────── */
+
+function ImageUpload({
+  file,
+  existingUrl,
+  onFileChange,
+  onRemoveExisting,
+}: {
+  file: File | null;
+  existingUrl: string | null;
+  onFileChange: (f: File) => void;
+  onRemoveExisting: () => void;
+}) {
+  const inputRef  = useRef<HTMLInputElement>(null);
+  const [preview, setPreview]  = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  useEffect(() => {
+    if (!file) { setPreview(null); return; }
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
+  function handleFile(f: File) {
+    if (!f.type.startsWith("image/")) return;
+    if (f.size > 5 * 1024 * 1024) { alert("A imagem deve ter no máximo 5 MB."); return; }
+    onFileChange(f);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  }
+
+  /* Qual imagem mostrar: nova (preview) > existente > nenhuma */
+  const shown = preview ?? existingUrl ?? null;
+
+  if (shown) {
+    return (
+      <div
+        style={{
+          position: "relative",
+          borderRadius: "var(--radius-sm)",
+          overflow: "hidden",
+          border: "1px solid var(--border-light)",
+        }}
+      >
+        <img
+          src={shown}
+          alt="Capa do post"
+          style={{ width: "100%", aspectRatio: "16/7", objectFit: "cover", display: "block" }}
+        />
+
+        {/* Botão remover */}
+        <button
+          type="button"
+          onClick={preview ? () => { /* limpa o file — o pai vai lidar */ onRemoveExisting(); } : onRemoveExisting}
+          title="Remover imagem"
+          style={{
+            position: "absolute", top: "0.5rem", right: "0.5rem",
+            background: "rgba(10,15,10,0.75)", border: "1px solid var(--border-light)",
+            color: "var(--text-1)", borderRadius: "var(--radius-full)",
+            width: 28, height: 28, cursor: "pointer", fontSize: "0.85rem",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            backdropFilter: "blur(4px)", transition: "background 0.15s",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.7)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(10,15,10,0.75)")}
+        >
+          ✕
+        </button>
+
+        {/* Botão trocar */}
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          title="Trocar imagem"
+          style={{
+            position: "absolute", top: "0.5rem", right: "2.5rem",
+            background: "rgba(10,15,10,0.75)", border: "1px solid var(--border-light)",
+            color: "var(--text-2)", borderRadius: "var(--radius-full)",
+            fontSize: "0.68rem", fontWeight: 600, padding: "4px 10px",
+            cursor: "pointer", backdropFilter: "blur(4px)", transition: "background 0.15s",
+            whiteSpace: "nowrap",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(16,185,129,0.5)")}
+          onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(10,15,10,0.75)")}
+        >
+          Trocar
+        </button>
+
+        <div
+          style={{
+            position: "absolute", bottom: "0.5rem", left: "0.5rem",
+            background: "rgba(10,15,10,0.72)", border: "1px solid var(--emerald-dim)",
+            color: "var(--emerald)", fontSize: "0.68rem", fontWeight: 600,
+            padding: "2px 10px", borderRadius: "var(--radius-full)",
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          {preview ? "Nova imagem" : "Imagem atual"}
+        </div>
+
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          style={{ display: "none" }}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={() => inputRef.current?.click()}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+      style={{
+        border: `1.5px dashed ${dragOver ? "var(--emerald)" : "var(--border-light)"}`,
+        borderRadius: "var(--radius-sm)",
+        padding: "1.5rem",
+        textAlign: "center",
+        cursor: "pointer",
+        background: dragOver ? "var(--emerald-glow)" : "var(--bg)",
+        transition: "all 0.15s",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: "0.375rem",
+      }}
+    >
+      <span style={{ fontSize: "1.5rem" }}>🖼️</span>
+      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-2)" }}>
+        Arraste uma imagem ou{" "}
+        <span style={{ color: "var(--emerald)" }}>clique para selecionar</span>
+      </span>
+      <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>
+        JPG, PNG ou WEBP · máx. 5 MB · proporção ideal 16:7
+      </span>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        style={{ display: "none" }}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+      />
+    </div>
+  );
+}
+
+/* ── Page ─────────────────────────────────────────────── */
 
 export default function EditarPost() {
   const params = useParams();
@@ -30,57 +232,53 @@ export default function EditarPost() {
   const [slug,     setSlug]     = useState("");
   const [links,    setLinks]    = useState<LinkReferencia[]>([]);
 
+  /* imagem */
+  const [imagemUrlAtual,  setImagemUrlAtual]  = useState<string | null>(null); // salva no Firestore
+  const [imagemRemovida,  setImagemRemovida]  = useState(false);               // usuário clicou em remover
+  const [novaImagemFile,  setNovaImagemFile]  = useState<File | null>(null);   // novo arquivo escolhido
+  const [uploadProgress,  setUploadProgress]  = useState<number | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
   const [error,   setError]   = useState("");
 
-  /* ── Correção gramatical (mesma lógica do criar-post) ── */
-  const [corrigindo,          setCorrigindo]          = useState(false);
+  /* correção gramatical */
+  const [corrigindo,           setCorrigindo]           = useState(false);
   const [mostrarBotaoCorrigir, setMostrarBotaoCorrigir] = useState(false);
-  const [correcaoFeita,       setCorrecaoFeita]       = useState(false);
+  const [correcaoFeita,        setCorrecaoFeita]        = useState(false);
 
   useEffect(() => {
     setMostrarBotaoCorrigir(conteudo.trim().length > 20);
     setCorrecaoFeita(false);
   }, [conteudo]);
 
-  /* ── Carregar post ────────────────────────────────────── */
+  /* ── Carregar post ─────────────────────────────────── */
 
   useEffect(() => {
     async function fetchPost() {
       if (!id) return;
       try {
-        const ref  = doc(db, "posts", id);
-        const snap = await getDoc(ref);
-
-        if (!snap.exists()) {
-          setError("Post não encontrado.");
-          return;
-        }
-
-        const postData = snap.data();
-
-        if (auth.currentUser?.uid !== postData.autorId) {
+        const snap = await getDoc(doc(db, "posts", id));
+        if (!snap.exists()) { setError("Post não encontrado."); return; }
+        const d = snap.data();
+        if (auth.currentUser?.uid !== d.autorId) {
           setError("Você não tem permissão para editar este post.");
           return;
         }
+        setTitulo(d.titulo    || "");
+        setConteudo(d.conteudo  || "");
+        setTipo(d.tipo      || "sermao");
+        setIgreja(d.igreja    || "");
+        setSlug(d.slug      || "");
+        setLinks(d.links     || []);
+        setImagemUrlAtual(d.imagemUrl ?? null);
 
-        setTitulo(postData.titulo   || "");
-        setConteudo(postData.conteudo || "");
-        setTipo(postData.tipo       || "sermao");
-        setIgreja(postData.igreja   || "");
-        setSlug(postData.slug       || "");
-        setLinks(postData.links     || []);
-
-        if (typeof postData.data === "string") {
-          setData(postData.data);
-        } else if (postData.data?.toDate) {
-          const d = postData.data.toDate();
+        if (typeof d.data === "string") {
+          setData(d.data);
+        } else if (d.data?.toDate) {
           setData(
-            d.toLocaleDateString("pt-BR", {
-              day: "2-digit",
-              month: "long",
-              year: "numeric",
+            d.data.toDate().toLocaleDateString("pt-BR", {
+              day: "2-digit", month: "long", year: "numeric",
             })
           );
         }
@@ -94,80 +292,94 @@ export default function EditarPost() {
     fetchPost();
   }, [id]);
 
-  /* ── Helpers de links ─────────────────────────────────── */
+  /* ── Links helpers ─────────────────────────────────── */
 
-  function addLink() {
-    setLinks((prev) => [...prev, { label: "", url: "", tipo: "youtube" }]);
-  }
-
-  function removeLink(i: number) {
-    setLinks((prev) => prev.filter((_, idx) => idx !== i));
-  }
-
+  function addLink() { setLinks((p) => [...p, { label: "", url: "", tipo: "youtube" }]); }
+  function removeLink(i: number) { setLinks((p) => p.filter((_, idx) => idx !== i)); }
   function updateLink(i: number, field: keyof LinkReferencia, value: string) {
-    setLinks((prev) =>
-      prev.map((l, idx) => (idx === i ? { ...l, [field]: value } : l))
-    );
+    setLinks((p) => p.map((l, idx) => (idx === i ? { ...l, [field]: value } : l)));
   }
 
-  /* ── Correção gramatical ──────────────────────────────── */
+  /* ── Imagem helpers ────────────────────────────────── */
+
+  function handleRemoverImagem() {
+    if (novaImagemFile) {
+      /* descarta o novo arquivo sem tocar o existente */
+      setNovaImagemFile(null);
+    } else {
+      /* marca a imagem atual para remoção */
+      setImagemRemovida(true);
+    }
+  }
+
+  /* ── Correção gramatical ───────────────────────────── */
 
   async function corrigirGramatica() {
     if (!conteudo.trim() || corrigindo) return;
     setCorrigindo(true);
     try {
-      const response = await fetch("/api/corrigir", {
+      const res  = await fetch("/api/corrigir", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conteudo }),
       });
-      const dataResp = await response.json();
-      if (dataResp?.texto) {
-        setConteudo(dataResp.texto);
-        setCorrecaoFeita(true);
-      }
-    } catch (err) {
-      console.error("Erro ao corrigir:", err);
-    }
+      const json = await res.json();
+      if (json?.texto) { setConteudo(json.texto); setCorrecaoFeita(true); }
+    } catch (err) { console.error("Erro ao corrigir:", err); }
     setCorrigindo(false);
   }
 
-  /* ── Salvar ───────────────────────────────────────────── */
+  /* ── Salvar ────────────────────────────────────────── */
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
-
     if (!titulo.trim() || !conteudo.trim()) {
       setError("Título e conteúdo são obrigatórios.");
       return;
     }
-
     setSaving(true);
     setError("");
 
     try {
       const linksFiltrados = links.filter((l) => l.label.trim() && l.url.trim());
+      const uid = auth.currentUser!.uid;
 
-      const ref = doc(db, "posts", id);
-      await updateDoc(ref, {
-        titulo:   titulo.trim(),
-        conteudo: conteudo.trim(),
+      let imagemUrl: string | null = imagemUrlAtual;
+
+      if (novaImagemFile) {
+        /* faz upload da nova */
+        setUploadProgress(0);
+        imagemUrl = await uploadImagem(novaImagemFile, uid, setUploadProgress);
+        setUploadProgress(null);
+        /* deleta a antiga se existia */
+        if (imagemUrlAtual) await tentarDeletarImagem(imagemUrlAtual);
+      } else if (imagemRemovida) {
+        /* remove sem substituir */
+        if (imagemUrlAtual) await tentarDeletarImagem(imagemUrlAtual);
+        imagemUrl = null;
+      }
+
+      await updateDoc(doc(db, "posts", id), {
+        titulo:    titulo.trim(),
+        conteudo:  conteudo.trim(),
         tipo,
-        igreja:   igreja.trim() || "",
-        data:     data.trim()   || "",
-        links:    linksFiltrados,
+        igreja:    igreja.trim()  || "",
+        data:      data.trim()    || "",
+        links:     linksFiltrados,
+        imagemUrl: imagemUrl ?? null,
       });
 
       router.push(`/posts/${tipo === "sermao" ? "sermoes" : "artigos"}/${slug}`);
     } catch (err) {
       console.error(err);
       setError("Erro ao atualizar post.");
+      setUploadProgress(null);
     }
 
     setSaving(false);
   }
 
-  /* ── Estados de carregamento / erro ──────────────────── */
+  /* ── Estados de carregamento / erro ───────────────── */
 
   if (loading) return (
     <div className="post-detail-loading">
@@ -180,7 +392,10 @@ export default function EditarPost() {
     <div className="post-detail-notfound">{error}</div>
   );
 
-  /* ── Render ───────────────────────────────────────────── */
+  /* qual URL exibir no componente */
+  const imagemExibida = imagemRemovida ? null : imagemUrlAtual;
+
+  /* ── Render ────────────────────────────────────────── */
 
   return (
     <div style={{ paddingTop: "calc(var(--header-h) + 2rem)", paddingBottom: "4rem" }}>
@@ -238,9 +453,7 @@ export default function EditarPost() {
                     flex: 1,
                     padding: "8px 0",
                     borderRadius: "var(--radius-full)",
-                    border: tipo === t
-                      ? "1px solid var(--emerald)"
-                      : "1px solid var(--border-light)",
+                    border: tipo === t ? "1px solid var(--emerald)" : "1px solid var(--border-light)",
                     background: tipo === t ? "var(--emerald)" : "var(--bg-elevated)",
                     color: tipo === t ? "#fff" : "var(--text-2)",
                     fontWeight: 600,
@@ -264,6 +477,60 @@ export default function EditarPost() {
               onChange={(e) => setTitulo(e.target.value)}
               className="auth-input"
             />
+          </div>
+
+          {/* Imagem de capa */}
+          <div className="auth-field">
+            <label className="auth-label">
+              Imagem de capa{" "}
+              <span className="auth-label-opt">(opcional)</span>
+            </label>
+            <p
+              style={{
+                fontSize: "0.72rem",
+                color: "var(--text-3)",
+                marginBottom: "0.5rem",
+              }}
+            >
+              Quando presente, o card terá um visual diferenciado com a imagem em destaque
+            </p>
+            <ImageUpload
+              file={novaImagemFile}
+              existingUrl={imagemExibida}
+              onFileChange={setNovaImagemFile}
+              onRemoveExisting={handleRemoverImagem}
+            />
+            {uploadProgress !== null && (
+              <div style={{ marginTop: "0.5rem" }}>
+                <div
+                  style={{
+                    height: 4,
+                    background: "var(--border-light)",
+                    borderRadius: "var(--radius-full)",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${uploadProgress}%`,
+                      background: "var(--emerald)",
+                      borderRadius: "var(--radius-full)",
+                      transition: "width 0.2s ease",
+                    }}
+                  />
+                </div>
+                <p
+                  style={{
+                    fontSize: "0.72rem",
+                    color: "var(--text-3)",
+                    marginTop: "0.25rem",
+                  }}
+                >
+                  Enviando imagem… {uploadProgress}%
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Conteúdo */}
@@ -301,12 +568,8 @@ export default function EditarPost() {
                       gap: "0.35rem",
                       padding: "5px 12px",
                       borderRadius: "var(--radius-full)",
-                      border: correcaoFeita
-                        ? "1px solid var(--emerald)"
-                        : "1px solid var(--border-light)",
-                      background: correcaoFeita
-                        ? "var(--emerald-dim)"
-                        : "var(--bg-elevated)",
+                      border: correcaoFeita ? "1px solid var(--emerald)" : "1px solid var(--border-light)",
+                      background: correcaoFeita ? "var(--emerald-dim)" : "var(--bg-elevated)",
                       color: correcaoFeita ? "var(--emerald)" : "var(--text-2)",
                       fontWeight: 600,
                       fontSize: "0.78rem",
@@ -350,7 +613,13 @@ export default function EditarPost() {
           </div>
 
           {/* Igreja e Data */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "0.75rem",
+            }}
+          >
             <div className="auth-field">
               <label className="auth-label">
                 Igreja <span className="auth-label-opt">(opcional)</span>
@@ -376,7 +645,7 @@ export default function EditarPost() {
             </div>
           </div>
 
-          {/* ── Links de Referência ── */}
+          {/* Links de Referência */}
           <div className="auth-field">
             <div
               style={{
@@ -391,7 +660,13 @@ export default function EditarPost() {
                   Links de referência{" "}
                   <span className="auth-label-opt">(opcional)</span>
                 </label>
-                <p style={{ fontSize: "0.72rem", color: "var(--text-3)", marginTop: "2px" }}>
+                <p
+                  style={{
+                    fontSize: "0.72rem",
+                    color: "var(--text-3)",
+                    marginTop: "2px",
+                  }}
+                >
                   YouTube, blog, livro, site… aparecem como botões visuais no post
                 </p>
               </div>
@@ -429,10 +704,13 @@ export default function EditarPost() {
                   fontSize: "0.82rem",
                 }}
               >
-                Nenhum link adicionado ainda.
-                <br />
+                Nenhum link adicionado ainda.{" "}
                 <span
-                  style={{ color: "var(--emerald)", cursor: "pointer", fontWeight: 600 }}
+                  style={{
+                    color: "var(--emerald)",
+                    cursor: "pointer",
+                    fontWeight: 600,
+                  }}
                   onClick={addLink}
                 >
                   Clique em "+ Adicionar"
@@ -442,7 +720,13 @@ export default function EditarPost() {
             )}
 
             {links.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "0.75rem",
+                }}
+              >
                 {links.map((link, i) => (
                   <div
                     key={i}
@@ -456,8 +740,13 @@ export default function EditarPost() {
                       gap: "0.625rem",
                     }}
                   >
-                    {/* Tipo + remover */}
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                      }}
+                    >
                       <label
                         style={{
                           fontSize: "0.72rem",
@@ -469,7 +758,14 @@ export default function EditarPost() {
                       >
                         Tipo:
                       </label>
-                      <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", flex: 1 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "0.375rem",
+                          flexWrap: "wrap",
+                          flex: 1,
+                        }}
+                      >
                         {TIPO_LINK_OPTIONS.map((opt) => (
                           <button
                             key={opt.value}
@@ -520,7 +816,6 @@ export default function EditarPost() {
                       </button>
                     </div>
 
-                    {/* Label */}
                     <input
                       placeholder={
                         link.tipo === "youtube"
@@ -539,7 +834,6 @@ export default function EditarPost() {
                       style={{ fontSize: "0.85rem", padding: "8px 12px" }}
                     />
 
-                    {/* URL */}
                     <input
                       placeholder="https://..."
                       value={link.url}
@@ -571,15 +865,17 @@ export default function EditarPost() {
             className="auth-btn-primary"
             style={{ marginTop: "0.25rem" }}
           >
-            {saving ? "Salvando..." : "Salvar alterações"}
+            {saving
+              ? uploadProgress !== null
+                ? `Enviando imagem… ${uploadProgress}%`
+                : "Salvando..."
+              : "Salvar alterações"}
           </button>
         </form>
       </div>
 
       <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
       `}</style>
     </div>
   );
