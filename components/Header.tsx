@@ -65,11 +65,9 @@ export default function Header() {
             Voz da Fé
           </Link>
 
-          {/* Nav desktop */}
+          {/* Nav desktop — apenas Publicar quando logado */}
           <nav className="header-nav-desktop">
             <ul className="header-nav">
-              <li><Link href="/">Home</Link></li>
-              <li><Link href="/posts">Posts</Link></li>
               {user && <li><Link href="/criar-post">Publicar</Link></li>}
             </ul>
           </nav>
@@ -126,16 +124,6 @@ export default function Header() {
         </div>
 
         <ul className="mobile-nav-list">
-          <li>
-            <Link href="/" className="mobile-nav-link" onClick={fecharMenu}>
-              Home
-            </Link>
-          </li>
-          <li>
-            <Link href="/posts" className="mobile-nav-link" onClick={fecharMenu}>
-              Posts
-            </Link>
-          </li>
           {user && (
             <li>
               <Link href="/criar-post" className="mobile-nav-link" onClick={fecharMenu}>
