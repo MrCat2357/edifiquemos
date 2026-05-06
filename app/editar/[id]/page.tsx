@@ -51,7 +51,6 @@ async function uploadImagem(
 async function tentarDeletarImagem(url: string) {
   try {
     const storage = getStorage();
-    // Extrai path da URL do Firebase Storage
     const match = url.match(/\/o\/(.+?)\?/);
     if (!match) return;
     const path = decodeURIComponent(match[1]);
@@ -109,18 +108,30 @@ function ImageUpload({
           borderRadius: "var(--radius-sm)",
           overflow: "hidden",
           border: "1px solid var(--border-light)",
+          /* CORREÇÃO: fundo neutro + flex para centralizar imagem de qualquer proporção */
+          background: "#0d1310",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "120px",
         }}
       >
         <img
           src={shown}
           alt="Capa do post"
-          style={{ width: "100%", aspectRatio: "16/7", objectFit: "cover", display: "block" }}
+          style={{
+            width: "100%",
+            /* CORREÇÃO: contain exibe a imagem completa; max-height evita cards enormes */
+            maxHeight: "380px",
+            objectFit: "contain",
+            display: "block",
+          }}
         />
 
         {/* Botão remover */}
         <button
           type="button"
-          onClick={preview ? () => { /* limpa o file — o pai vai lidar */ onRemoveExisting(); } : onRemoveExisting}
+          onClick={preview ? () => { onRemoveExisting(); } : onRemoveExisting}
           title="Remover imagem"
           style={{
             position: "absolute", top: "0.5rem", right: "0.5rem",
@@ -204,7 +215,7 @@ function ImageUpload({
         <span style={{ color: "var(--emerald)" }}>clique para selecionar</span>
       </span>
       <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>
-        JPG, PNG ou WEBP · máx. 5 MB · proporção ideal 16:7
+        JPG, PNG ou WEBP · máx. 5 MB · qualquer proporção
       </span>
       <input
         ref={inputRef}
@@ -233,9 +244,9 @@ export default function EditarPost() {
   const [links,    setLinks]    = useState<LinkReferencia[]>([]);
 
   /* imagem */
-  const [imagemUrlAtual,  setImagemUrlAtual]  = useState<string | null>(null); // salva no Firestore
-  const [imagemRemovida,  setImagemRemovida]  = useState(false);               // usuário clicou em remover
-  const [novaImagemFile,  setNovaImagemFile]  = useState<File | null>(null);   // novo arquivo escolhido
+  const [imagemUrlAtual,  setImagemUrlAtual]  = useState<string | null>(null);
+  const [imagemRemovida,  setImagemRemovida]  = useState(false);
+  const [novaImagemFile,  setNovaImagemFile]  = useState<File | null>(null);
   const [uploadProgress,  setUploadProgress]  = useState<number | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -304,10 +315,8 @@ export default function EditarPost() {
 
   function handleRemoverImagem() {
     if (novaImagemFile) {
-      /* descarta o novo arquivo sem tocar o existente */
       setNovaImagemFile(null);
     } else {
-      /* marca a imagem atual para remoção */
       setImagemRemovida(true);
     }
   }
@@ -347,14 +356,11 @@ export default function EditarPost() {
       let imagemUrl: string | null = imagemUrlAtual;
 
       if (novaImagemFile) {
-        /* faz upload da nova */
         setUploadProgress(0);
         imagemUrl = await uploadImagem(novaImagemFile, uid, setUploadProgress);
         setUploadProgress(null);
-        /* deleta a antiga se existia */
         if (imagemUrlAtual) await tentarDeletarImagem(imagemUrlAtual);
       } else if (imagemRemovida) {
-        /* remove sem substituir */
         if (imagemUrlAtual) await tentarDeletarImagem(imagemUrlAtual);
         imagemUrl = null;
       }

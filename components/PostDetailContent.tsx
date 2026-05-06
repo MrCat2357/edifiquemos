@@ -154,8 +154,6 @@ type PostNav = {
 
 type PostNavAutor = { nome: string; fotoUrl: string | null };
 
-// ✅ CORRIGIDO: recebe autorIdProp via prop em vez de ler da URL (searchParams)
-// Isso evita que o ?autorId= apareça na URL ao navegar entre posts
 function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?: string }) {
   const router = useRouter();
 
@@ -168,7 +166,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
   useEffect(() => {
     async function fetchNav() {
       try {
-        // Filtra por autor se vier do perfil, usando a prop em vez da URL
         const q = autorIdProp
           ? query(collection(db, "posts"), where("autorId", "==", autorIdProp), orderBy("data", "desc"))
           : query(collection(db, "posts"), orderBy("data", "desc"));
@@ -220,7 +217,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
     fetchNav();
   }, [postId, autorIdProp]);
 
-  // ✅ CORRIGIDO: URL limpa, sem ?autorId= na query string
   function navUrl(p: PostNav) {
     return p.slug
       ? `/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`
@@ -998,6 +994,46 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         <hr className="post-detail-divider" />
 
+        {/* ── IMAGEM DE CAPA — CORRIGIDA ── */}
+        {post.imagemUrl && (
+          <div
+            className="post-detail-cover-wrapper"
+            style={{
+              width: "100%",
+              borderRadius: "var(--radius-lg)",
+              overflow: "hidden",
+              border: "1px solid var(--border)",
+              marginBottom: "1.5rem",
+              /*
+               * CORREÇÃO: fundo neutro escuro para preencher o espaço vazio
+               * quando a imagem não é horizontal (ex: foto de livro vertical).
+               * O flex centraliza a imagem dentro do container.
+               */
+              background: "#0d1310",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <img
+              src={post.imagemUrl}
+              alt={`Imagem de capa: ${post.titulo}`}
+              style={{
+                width: "100%",
+                /*
+                 * CORREÇÃO PRINCIPAL:
+                 * - object-fit: contain → exibe a imagem inteira sem cortar nada
+                 * - max-height: 520px  → limita para não ficar gigante no desktop
+                 * - No mobile, o CSS abaixo reduz para 360px
+                 */
+                maxHeight: "520px",
+                objectFit: "contain",
+                display: "block",
+              }}
+            />
+          </div>
+        )}
+
         {/* Conteúdo */}
         <div
           ref={conteudoRef}
@@ -1112,9 +1148,17 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         </div>
 
         {/* ── Navegação entre posts ── */}
-        {/* ✅ CORRIGIDO: passa autorId via prop, não pela URL */}
         <PostNavigation postId={postId} autorIdProp={post.autorId} />
       </article>
+
+      <style>{`
+        /* CORREÇÃO MOBILE: altura máxima menor para imagens de capa */
+        @media (max-width: 640px) {
+          .post-detail-cover-wrapper img {
+            max-height: 360px !important;
+          }
+        }
+      `}</style>
     </>
   );
 }
