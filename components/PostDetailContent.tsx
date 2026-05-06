@@ -7,7 +7,7 @@ import {
   increment, getDoc, deleteDoc,
   collection, query, orderBy, getDocs, where,
 } from "firebase/firestore";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
 import LinksReferencia from "@/components/LinksReferencia";
@@ -154,8 +154,23 @@ type PostNav = {
 
 type PostNavAutor = { nome: string; fotoUrl: string | null };
 
+/**
+ * PostNavigation
+ *
+ * Comportamento:
+ * - Se a URL contiver ?from=perfil  → navega só entre posts do mesmo autor
+ * - Caso contrário (padrão)         → navega entre TODOS os posts
+ *
+ * O parâmetro `autorIdProp` ainda é necessário para o modo perfil
+ * saber qual autor filtrar.
+ */
 function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // "perfil" = veio do perfil de alguém → filtra por autor
+  // qualquer outro valor (ou ausente) = veio da página de posts → todos
+  const fromPerfil = searchParams.get("from") === "perfil";
 
   const [prev, setPrev] = useState<PostNav | null>(null);
   const [next, setNext] = useState<PostNav | null>(null);
@@ -166,9 +181,15 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
   useEffect(() => {
     async function fetchNav() {
       try {
-        const q = autorIdProp
-          ? query(collection(db, "posts"), where("autorId", "==", autorIdProp), orderBy("data", "desc"))
-          : query(collection(db, "posts"), orderBy("data", "desc"));
+        // Decide a query com base na origem da navegação
+        const q =
+          fromPerfil && autorIdProp
+            ? query(
+                collection(db, "posts"),
+                where("autorId", "==", autorIdProp),
+                orderBy("data", "desc")
+              )
+            : query(collection(db, "posts"), orderBy("data", "desc"));
 
         const snap = await getDocs(q);
         const all: PostNav[] = snap.docs.map((d) => ({
@@ -179,6 +200,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           autorId: d.data().autorId,
           autorNome: d.data().autorNome,
         }));
+
         const idx = all.findIndex((p) => p.id === postId);
         if (idx === -1) { setLoading(false); return; }
 
@@ -215,12 +237,14 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
       setLoading(false);
     }
     fetchNav();
-  }, [postId, autorIdProp]);
+  }, [postId, autorIdProp, fromPerfil]);
 
   function navUrl(p: PostNav) {
-    return p.slug
+    const base = p.slug
       ? `/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`
       : `/posts/${p.id}`;
+    // Preserva o contexto de navegação na URL do próximo post
+    return fromPerfil ? `${base}?from=perfil` : base;
   }
 
   if (loading || (!prev && !next)) return null;
@@ -994,7 +1018,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         <hr className="post-detail-divider" />
 
-        {/* ── IMAGEM DE CAPA — CORRIGIDA ── */}
+        {/* Imagem de capa */}
         {post.imagemUrl && (
           <div
             className="post-detail-cover-wrapper"
@@ -1004,11 +1028,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
               overflow: "hidden",
               border: "1px solid var(--border)",
               marginBottom: "1.5rem",
-              /*
-               * CORREÇÃO: fundo neutro escuro para preencher o espaço vazio
-               * quando a imagem não é horizontal (ex: foto de livro vertical).
-               * O flex centraliza a imagem dentro do container.
-               */
               background: "#0d1310",
               display: "flex",
               alignItems: "center",
@@ -1020,12 +1039,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
               alt={`Imagem de capa: ${post.titulo}`}
               style={{
                 width: "100%",
-                /*
-                 * CORREÇÃO PRINCIPAL:
-                 * - object-fit: contain → exibe a imagem inteira sem cortar nada
-                 * - max-height: 520px  → limita para não ficar gigante no desktop
-                 * - No mobile, o CSS abaixo reduz para 360px
-                 */
                 maxHeight: "520px",
                 objectFit: "contain",
                 display: "block",
@@ -1060,14 +1073,14 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           </p>
         )}
 
-        {/* ── Links de Referência ── */}
+        {/* Links de Referência */}
         {post.links && post.links.length > 0 && (
           <LinksReferencia links={post.links} />
         )}
 
         <hr className="post-detail-divider" />
 
-        {/* ── Barra de ações ── */}
+        {/* Barra de ações */}
         <div className="post-detail-actions">
 
           {/* Amei */}
@@ -1128,7 +1141,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             )}
           </button>
 
-          {/* Visualizações — chip passivo */}
+          {/* Visualizações */}
           <div
             style={{
               display: "inline-flex", alignItems: "center", gap: "5px",
@@ -1147,12 +1160,11 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         </div>
 
-        {/* ── Navegação entre posts ── */}
+        {/* Navegação entre posts */}
         <PostNavigation postId={postId} autorIdProp={post.autorId} />
       </article>
 
       <style>{`
-        /* CORREÇÃO MOBILE: altura máxima menor para imagens de capa */
         @media (max-width: 640px) {
           .post-detail-cover-wrapper img {
             max-height: 360px !important;

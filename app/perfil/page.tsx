@@ -222,14 +222,11 @@ export default function Perfil() {
     setSalvando(false);
   }
 
-  // Navega para o post passando o autorId como query param,
-  // igual ao que acontece ao visitar o perfil de outro usuário.
-  // Isso garante que as setas de anterior/próximo filtrem apenas
-  // os posts deste autor — mesmo quando o usuário visita o próprio perfil.
+  // ?from=perfil garante que os botões anterior/próximo dentro do post
+  // naveguem apenas entre os posts deste autor — igual ao perfil público.
   function navegarParaPost(post: any) {
     const categoria = post.tipo === "sermao" ? "sermoes" : "artigos";
-    const autorParam = uid ? `?autorId=${uid}` : "";
-    router.push(`/posts/${categoria}/${post.slug}${autorParam}`);
+    router.push(`/posts/${categoria}/${post.slug}?from=perfil`);
   }
 
   if (loading)

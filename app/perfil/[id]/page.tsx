@@ -145,10 +145,12 @@ function PostCardPerfil({
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
 
-
   const viewCount: number = post.visualizacoes ?? 0;
 
-  const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}?autorId=${autorUid}`;
+  // ?from=perfil indica ao PostDetailContent que a navegação
+  // anterior/próximo deve ficar restrita aos posts deste autor
+  const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}?from=perfil`;
+
   const fullUrl = typeof window !== "undefined"
     ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`
     : `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
@@ -247,7 +249,6 @@ function PostCardPerfil({
 
       {/* Rodapé */}
       <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }}>
-        {/* Grupo esquerdo: Amei · PDF · olhinho — espaçamento uniforme */}
         <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
           {/* Amei */}
           <button
@@ -299,7 +300,7 @@ function PostCardPerfil({
           )}
         </div>
 
-        {/* Ler completo → empurrado para a direita */}
+        {/* Ler completo */}
         <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
           Ler completo →
         </span>
