@@ -6,14 +6,18 @@ import { signOut } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, onSnapshot } from "firebase/firestore";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 
 export default function Header() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [nomeExibicao, setNomeExibicao] = useState("");
   const [carregandoNome, setCarregandoNome] = useState(false);
   const [menuAberto, setMenuAberto] = useState(false);
+
+  // Só mostra "Início" quando não estiver na home
+  const mostrarInicio = pathname !== "/";
 
   useEffect(() => {
     if (!user) { setNomeExibicao(""); return; }
@@ -65,9 +69,12 @@ export default function Header() {
             Voz da Fé
           </Link>
 
-          {/* Nav desktop — apenas Publicar quando logado */}
+          {/* Nav desktop */}
           <nav className="header-nav-desktop">
             <ul className="header-nav">
+              {mostrarInicio && (
+                <li><Link href="/">Início</Link></li>
+              )}
               {user && <li><Link href="/criar-post">Publicar</Link></li>}
             </ul>
           </nav>
@@ -124,6 +131,13 @@ export default function Header() {
         </div>
 
         <ul className="mobile-nav-list">
+          {mostrarInicio && (
+            <li>
+              <Link href="/" className="mobile-nav-link" onClick={fecharMenu}>
+                Início
+              </Link>
+            </li>
+          )}
           {user && (
             <li>
               <Link href="/criar-post" className="mobile-nav-link" onClick={fecharMenu}>
