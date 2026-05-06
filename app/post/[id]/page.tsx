@@ -148,7 +148,7 @@ export default function PostPage() {
         <span>{formatData(post.data)}</span>
       </div>
 
-      {/* IMAGEM DE CAPA (quando existir) */}
+      {/* IMAGEM DE CAPA — CORRIGIDA: contain + fundo neutro */}
       {post.imagemUrl && (
         <div
           style={{
@@ -156,6 +156,11 @@ export default function PostPage() {
             borderRadius: "var(--radius-lg)",
             overflow: "hidden",
             border: "1px solid var(--border)",
+            /* Fundo neutro escuro para imagens que não preenchem toda a área */
+            background: "#0d1310",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
           <img
@@ -163,8 +168,10 @@ export default function PostPage() {
             alt={`Imagem de capa: ${post.titulo}`}
             style={{
               width: "100%",
-              aspectRatio: "16 / 7",
-              objectFit: "cover",
+              /* Altura máxima generosa; imagens verticais não serão cortadas */
+              maxHeight: "520px",
+              /* contain: exibe a imagem inteira sem cortar */
+              objectFit: "contain",
               display: "block",
             }}
           />
