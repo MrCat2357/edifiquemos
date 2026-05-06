@@ -92,11 +92,30 @@ function ImageUpload({
 
   if (preview) {
     return (
-      <div style={{ position: "relative", borderRadius: "var(--radius-sm)", overflow: "hidden", border: "1px solid var(--border-light)" }}>
+      <div
+        style={{
+          position: "relative",
+          borderRadius: "var(--radius-sm)",
+          overflow: "hidden",
+          border: "1px solid var(--border-light)",
+          /* CORREÇÃO: fundo neutro escuro + flex para centralizar a imagem */
+          background: "#0d1310",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "120px",
+        }}
+      >
         <img
           src={preview}
           alt="Pré-visualização da capa"
-          style={{ width: "100%", aspectRatio: "16/7", objectFit: "cover", display: "block" }}
+          style={{
+            width: "100%",
+            /* CORREÇÃO: contain exibe a imagem completa; max-height limita o tamanho */
+            maxHeight: "380px",
+            objectFit: "contain",
+            display: "block",
+          }}
         />
         <button
           type="button"
@@ -155,7 +174,7 @@ function ImageUpload({
         Arraste uma imagem ou <span style={{ color: "var(--emerald)" }}>clique para selecionar</span>
       </span>
       <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>
-        JPG, PNG ou WEBP · máx. 5 MB · proporção ideal 16:7
+        JPG, PNG ou WEBP · máx. 5 MB · qualquer proporção
       </span>
       <input
         ref={inputRef}

@@ -398,7 +398,7 @@ function PostCard({
     </div>
   );
 
-  /* ── Layout COM imagem (estilo Substack) ── */
+  /* ── Layout COM imagem ── */
   if (temImagem) {
     return (
       <article
@@ -406,7 +406,7 @@ function PostCard({
         style={{ animationDelay: `${index * 60}ms` }}
         onClick={() => router.push(url)}
       >
-        {/* Imagem de capa */}
+        {/* Wrapper da imagem com altura fixa e fundo neutro para conter qualquer proporção */}
         <div className="card-cover-wrapper">
           <img
             src={post.imagemUrl}
@@ -660,29 +660,45 @@ export default function Posts() {
       </div>
 
       <style>{`
-        /* ── Card com imagem (estilo Substack) ── */
+        /* ── Card com imagem ── */
         .post-card-image {
           cursor: pointer;
         }
 
+        /*
+         * CORREÇÃO PRINCIPAL: o wrapper usa altura máxima fixa em vez de
+         * aspect-ratio. O fundo escuro preenche o espaço vazio quando a
+         * imagem não é 16:7, e object-fit: contain garante que a imagem
+         * inteira seja sempre exibida sem cortes.
+         */
         .card-cover-wrapper {
           position: relative;
           width: 100%;
-          aspect-ratio: 16 / 7;
+          /* Altura máxima generosa para comportar imagens verticais */
+          max-height: 420px;
+          min-height: 160px;
           overflow: hidden;
           border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+          /* Fundo neutro escuro que harmoniza com o tema dark do site */
+          background: #0d1310;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
         .card-cover-img {
           width: 100%;
           height: 100%;
-          object-fit: cover;
+          /* contain: mostra a imagem inteira sem cortar nada */
+          object-fit: contain;
           display: block;
+          /* Limita a altura para que imagens muito altas não exploda o card */
+          max-height: 420px;
           transition: transform 0.35s ease;
         }
 
         .post-card-image:hover .card-cover-img {
-          transform: scale(1.03);
+          transform: scale(1.025);
         }
 
         .card-cover-badge {
@@ -698,10 +714,14 @@ export default function Posts() {
           flex-direction: column;
         }
 
-        /* Mobile: imagem um pouco menos alta */
+        /* Mobile: altura máxima um pouco menor */
         @media (max-width: 640px) {
           .card-cover-wrapper {
-            aspect-ratio: 16 / 8;
+            max-height: 320px;
+            min-height: 120px;
+          }
+          .card-cover-img {
+            max-height: 320px;
           }
         }
       `}</style>
