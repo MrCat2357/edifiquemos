@@ -16,7 +16,6 @@ export default function Header() {
   const [carregandoNome, setCarregandoNome] = useState(false);
   const [menuAberto, setMenuAberto] = useState(false);
 
-  // Só mostra "Início" quando não estiver na home
   const mostrarInicio = pathname !== "/";
 
   useEffect(() => {
@@ -38,9 +37,7 @@ export default function Header() {
 
   useEffect(() => {
     if (!menuAberto) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuAberto(false);
-    };
+    const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuAberto(false); };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [menuAberto]);
@@ -56,9 +53,7 @@ export default function Header() {
     router.push("/login");
   }
 
-  function fecharMenu() {
-    setMenuAberto(false);
-  }
+  function fecharMenu() { setMenuAberto(false); }
 
   return (
     <>
@@ -69,17 +64,14 @@ export default function Header() {
             Voz da Fé
           </Link>
 
-          {/* Nav desktop */}
           <nav className="header-nav-desktop">
             <ul className="header-nav">
-              {mostrarInicio && (
-                <li><Link href="/">Início</Link></li>
-              )}
+              {mostrarInicio && <li><Link href="/">Início</Link></li>}
               {user && <li><Link href="/criar-post">Publicar</Link></li>}
+              {user && <li><Link href="/criar-serie">Criar série</Link></li>}
             </ul>
           </nav>
 
-          {/* Ações desktop */}
           <div className="header-actions header-actions-desktop">
             {loading ? (
               <span style={{ color: "var(--text-3)", fontSize: "0.8rem" }}>...</span>
@@ -92,73 +84,38 @@ export default function Header() {
               </>
             ) : (
               <>
-                <Link href="/login" className="header-user-btn" style={{ border: "none", background: "none" }}>
-                  Entrar
-                </Link>
+                <Link href="/login" className="header-user-btn" style={{ border: "none", background: "none" }}>Entrar</Link>
                 <Link href="/cadastro" className="header-btn-primary">Cadastrar</Link>
               </>
             )}
           </div>
 
-          {/* Botão hamburguer — só aparece no mobile */}
           <button
             className={`header-hamburger${menuAberto ? " is-open" : ""}`}
             onClick={() => setMenuAberto((v) => !v)}
             aria-label={menuAberto ? "Fechar menu" : "Abrir menu"}
             aria-expanded={menuAberto}
           >
-            <span />
-            <span />
-            <span />
+            <span /><span /><span />
           </button>
         </div>
       </header>
 
-      {/* Overlay do menu mobile */}
-      <div
-        className={`mobile-overlay${menuAberto ? " is-visible" : ""}`}
-        onClick={fecharMenu}
-        aria-hidden="true"
-      />
+      <div className={`mobile-overlay${menuAberto ? " is-visible" : ""}`} onClick={fecharMenu} aria-hidden="true" />
 
-      {/* Drawer mobile */}
       <nav className={`mobile-drawer${menuAberto ? " is-open" : ""}`} aria-hidden={!menuAberto}>
         <div className="mobile-drawer-header">
-          <span className="header-logo">
-            <span className="header-logo-dot" />
-            Voz da Fé
-          </span>
+          <span className="header-logo"><span className="header-logo-dot" />Voz da Fé</span>
         </div>
 
         <ul className="mobile-nav-list">
-          {mostrarInicio && (
-            <li>
-              <Link href="/" className="mobile-nav-link" onClick={fecharMenu}>
-                Início
-              </Link>
-            </li>
-          )}
+          {mostrarInicio && <li><Link href="/" className="mobile-nav-link" onClick={fecharMenu}>Início</Link></li>}
+          {user && <li><Link href="/criar-post" className="mobile-nav-link" onClick={fecharMenu}>Publicar</Link></li>}
+          {user && <li><Link href="/criar-serie" className="mobile-nav-link" onClick={fecharMenu}>Criar série</Link></li>}
           {user && (
             <li>
-              <Link href="/criar-post" className="mobile-nav-link" onClick={fecharMenu}>
-                Publicar
-              </Link>
-            </li>
-          )}
-          {user && (
-            <li>
-              <button
-                className="mobile-nav-link"
-                style={{
-                  width: "100%",
-                  background: "none",
-                  border: "none",
-                  textAlign: "left",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-                onClick={() => { fecharMenu(); router.push("/perfil"); }}
-              >
+              <button className="mobile-nav-link" style={{ width: "100%", background: "none", border: "none", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}
+                onClick={() => { fecharMenu(); router.push("/perfil"); }}>
                 Meu Perfil
               </button>
             </li>
@@ -168,24 +125,15 @@ export default function Header() {
         <div className="mobile-drawer-footer">
           {loading ? null : user ? (
             <>
-              <button
-                className="mobile-nav-user-btn"
-                onClick={() => { fecharMenu(); router.push("/perfil"); }}
-              >
+              <button className="mobile-nav-user-btn" onClick={() => { fecharMenu(); router.push("/perfil"); }}>
                 {carregandoNome ? "..." : nomeExibicao}
               </button>
-              <button className="mobile-nav-logout-btn" onClick={handleLogout}>
-                Sair
-              </button>
+              <button className="mobile-nav-logout-btn" onClick={handleLogout}>Sair</button>
             </>
           ) : (
             <>
-              <Link href="/login" className="mobile-nav-link" onClick={fecharMenu}>
-                Entrar
-              </Link>
-              <Link href="/cadastro" className="mobile-nav-cta" onClick={fecharMenu}>
-                Cadastrar
-              </Link>
+              <Link href="/login" className="mobile-nav-link" onClick={fecharMenu}>Entrar</Link>
+              <Link href="/cadastro" className="mobile-nav-cta" onClick={fecharMenu}>Cadastrar</Link>
             </>
           )}
         </div>
