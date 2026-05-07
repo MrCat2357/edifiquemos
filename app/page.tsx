@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { db, auth } from "@/lib/firebase";
 import {
   collection,
@@ -45,6 +45,16 @@ function buildFrase(post: any) {
 function getInitials(name: string) {
   if (!name) return "?";
   return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+}
+
+function getDataValor(item: any): number {
+  if (!item) return 0;
+  // séries usam criadoEm
+  const d = item.criadoEm || item.data;
+  if (!d) return 0;
+  if (d?.toDate) return d.toDate().getTime();
+  if (typeof d === "string") return new Date(d).getTime();
+  return 0;
 }
 
 /* ─── SVG Icons ───────────────────────────────────────── */
@@ -118,6 +128,93 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
     }}>
       {msg}
     </div>
+  );
+}
+
+/* ─── SerieCard ────────────────────────────────────────── */
+
+function SerieCard({ serie, index }: { serie: any; index: number }) {
+  const router = useRouter();
+  const postCount = serie.postIds?.length ?? 0;
+
+  return (
+    <article
+      className="post-card serie-card"
+      style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
+      onClick={() => router.push(`/series/${serie.slug}`)}
+    >
+      {serie.imagemUrl && (
+        <div className="card-cover-wrapper">
+          <img src={serie.imagemUrl} alt={serie.titulo} className="card-cover-img" />
+          <span className="cat-badge card-cover-badge" style={{
+            background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)",
+            color: "var(--emerald)", borderColor: "var(--emerald-dim)",
+          }}>
+            📚 Série
+          </span>
+        </div>
+      )}
+      <div style={{ padding: serie.imagemUrl ? "0.875rem 1.125rem 0.875rem" : undefined }}>
+        {!serie.imagemUrl && (
+          <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
+            <AuthorAvatar src={serie.autorFoto} name={serie.autorNome || "Autor"} size={36} />
+            <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+              <span
+                className="author-name-link"
+                onClick={(e) => { e.stopPropagation(); router.push(`/perfil/${serie.autorId}`); }}
+              >
+                {serie.autorNome || "Autor"}
+              </span>
+              <span className="card-meta">
+                {postCount} publicação{postCount !== 1 ? "ões" : ""}
+              </span>
+            </div>
+            <span className="cat-badge" style={{
+              color: "var(--emerald)",
+              background: "var(--emerald-dim)",
+              borderColor: "var(--emerald-dim)",
+            }}>
+              📚 Série
+            </span>
+          </div>
+        )}
+
+        <div
+          className="card-body-area"
+          style={serie.imagemUrl ? { paddingTop: 0 } : undefined}
+        >
+          {serie.imagemUrl && (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.375rem" }}
+              onClick={(e) => e.stopPropagation()}>
+              <AuthorAvatar src={serie.autorFoto} name={serie.autorNome || "Autor"} size={22} />
+              <span
+                className="author-name-link"
+                onClick={(e) => { e.stopPropagation(); router.push(`/perfil/${serie.autorId}`); }}
+                style={{ fontSize: "0.78rem" }}
+              >
+                {serie.autorNome || "Autor"}
+              </span>
+              <span className="card-meta">· {postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
+            </div>
+          )}
+          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>
+            {serie.titulo}
+          </h2>
+          {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
+        </div>
+
+        <div className="card-footer-row" style={{ display: "flex", alignItems: "center" }}
+          onClick={(e) => e.stopPropagation()}>
+          <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>
+            Coleção temática de sermões e artigos
+          </span>
+          <span className="read-link" style={{ marginLeft: "auto" }}
+            onClick={() => router.push(`/series/${serie.slug}`)}>
+            Ver série →
+          </span>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -282,13 +379,27 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   );
 }
 
+/* ─── FeedItem ─────────────────────────────────────────── */
+
+function FeedItem({ item, index, onAuthorClick, onToast }: {
+  item: any; index: number;
+  onAuthorClick: (e: React.MouseEvent, id: string) => void;
+  onToast: (msg: string) => void;
+}) {
+  if (item._feedType === "serie") {
+    return <SerieCard serie={item} index={index} />;
+  }
+  return <PostCard post={item} index={index} onAuthorClick={onAuthorClick} onToast={onToast} />;
+}
+
 /* ─── HomePage ─────────────────────────────────────────── */
 
 export default function HomePage() {
   const { user } = useAuth();
   const router = useRouter();
 
-  const [allPosts, setAllPosts] = useState<any[]>([]);
+  const [feedItems, setFeedItems] = useState<any[]>([]);
+  const [allPosts, setAllPosts] = useState<any[]>([]); // só posts para o sidebar
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [toastMsg, setToastMsg] = useState("");
@@ -299,19 +410,32 @@ export default function HomePage() {
   const feedRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    async function fetchPosts() {
+    async function fetchAll() {
       try {
-        const q = query(collection(db, "posts"), orderBy("data", "desc"));
-        const snapshot = await getDocs(q);
-        const lista: any[] = [];
-        snapshot.forEach((d) => lista.push({ id: d.id, ...d.data() }));
-        setAllPosts(lista);
+        const [postsSnap, seriesSnap] = await Promise.all([
+          getDocs(query(collection(db, "posts"), orderBy("data", "desc"))),
+          getDocs(query(collection(db, "series"), orderBy("criadoEm", "desc"))),
+        ]);
+
+        const posts: any[] = [];
+        postsSnap.forEach((d) => posts.push({ id: d.id, _feedType: "post", ...d.data() }));
+
+        const series: any[] = [];
+        seriesSnap.forEach((d) => series.push({ id: d.id, _feedType: "serie", ...d.data() }));
+
+        // mistura e ordena por data desc
+        const mixed = [...posts, ...series].sort(
+          (a, b) => getDataValor(b) - getDataValor(a)
+        );
+
+        setAllPosts(posts);
+        setFeedItems(mixed);
       } catch (error) {
-        console.error("Erro ao buscar posts:", error);
+        console.error("Erro ao buscar feed:", error);
       }
       setLoading(false);
     }
-    fetchPosts();
+    fetchAll();
   }, []);
 
   useEffect(() => {
@@ -340,14 +464,13 @@ export default function HomePage() {
     router.push(`/perfil/${autorId}`);
   }
 
-  // Scroll suave para o feed sem modificar a URL
   function scrollToFeed(e: React.MouseEvent) {
     e.preventDefault();
     feedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  const visiblePosts = allPosts.slice(0, visibleCount);
-  const hasMore = visibleCount < allPosts.length;
+  const visibleItems = feedItems.slice(0, visibleCount);
+  const hasMore = visibleCount < feedItems.length;
 
   return (
     <>
@@ -372,7 +495,6 @@ export default function HomePage() {
             <cite>1 Tessalonicenses 5:11</cite>
           </blockquote>
           <div className="hero-actions">
-            {/* botão sem âncora — scroll via JS, URL fica limpa */}
             <button className="btn-hero-primary" onClick={scrollToFeed}>
               Explorar Conteúdos
             </button>
@@ -390,7 +512,6 @@ export default function HomePage() {
       </section>
 
       {/* ── Feed ── */}
-      {/* ref aqui — é o alvo do scroll suave */}
       <div ref={feedRef} className="feed-wrapper">
         {/* Coluna principal */}
         <div>
@@ -403,15 +524,15 @@ export default function HomePage() {
               <div className="spinner" />
               Carregando publicações...
             </div>
-          ) : allPosts.length === 0 ? (
+          ) : feedItems.length === 0 ? (
             <div className="empty-state">Nenhuma publicação encontrada.</div>
           ) : (
             <>
               <div className="posts-list">
-                {visiblePosts.map((post, i) => (
-                  <PostCard
-                    key={post.id}
-                    post={post}
+                {visibleItems.map((item, i) => (
+                  <FeedItem
+                    key={`${item._feedType}-${item.id}`}
+                    item={item}
                     index={i}
                     onAuthorClick={handleAuthorClick}
                     onToast={showToast}
@@ -428,7 +549,7 @@ export default function HomePage() {
                 </div>
               )}
 
-              {!hasMore && allPosts.length > PAGE_SIZE && (
+              {!hasMore && feedItems.length > PAGE_SIZE && (
                 <p style={{
                   textAlign: "center", fontSize: "0.82rem",
                   color: "var(--text-3)", padding: "2rem 0 1rem",
@@ -498,6 +619,7 @@ export default function HomePage() {
           transition: transform 0.35s ease;
         }
         .post-card-image:hover .card-cover-img { transform: scale(1.025); }
+        .serie-card:hover .card-cover-img { transform: scale(1.025); }
         .card-cover-badge {
           position: absolute; top: 0.625rem; right: 0.75rem;
           backdrop-filter: blur(6px);

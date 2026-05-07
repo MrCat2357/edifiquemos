@@ -16,6 +16,7 @@ import {
   arrayUnion,
   arrayRemove,
   increment,
+  deleteDoc,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useRouter } from "next/navigation";
@@ -121,6 +122,99 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
     }}>
       {msg}
     </div>
+  );
+}
+
+/* ── SerieCardMeuPerfil ─────────────────────────────── */
+
+function SerieCardMeuPerfil({
+  serie, index, onToast,
+}: {
+  serie: any; index: number; onToast: (msg: string) => void;
+}) {
+  const router = useRouter();
+  const postCount = serie.postIds?.length ?? 0;
+
+  async function handleDeletar(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Tem certeza que deseja apagar esta série?")) return;
+    try {
+      await deleteDoc(doc(db, "series", serie.id));
+      onToast("Série apagada.");
+      // força re-render via reload simples
+      router.refresh();
+    } catch (err) {
+      console.error(err);
+      onToast("Erro ao apagar série.");
+    }
+  }
+
+  return (
+    <article
+      className="post-card serie-card"
+      style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
+      onClick={() => router.push(`/series/${serie.slug}`)}
+    >
+      {serie.imagemUrl && (
+        <div className="card-cover-wrapper">
+          <img src={serie.imagemUrl} alt={serie.titulo} className="card-cover-img" />
+          <span className="cat-badge card-cover-badge" style={{
+            background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)",
+            color: "var(--emerald)", borderColor: "var(--emerald-dim)",
+          }}>
+            📚 Série
+          </span>
+        </div>
+      )}
+      <div style={{ padding: serie.imagemUrl ? "0.875rem 1.125rem 0.875rem" : undefined }}>
+        {!serie.imagemUrl && (
+          <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ flex: 1 }}>
+              <span className="card-meta">{postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
+            </div>
+            <span className="cat-badge" style={{
+              color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)",
+            }}>
+              📚 Série
+            </span>
+          </div>
+        )}
+
+        <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
+          {serie.imagemUrl && (
+            <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
+              {postCount} publicação{postCount !== 1 ? "ões" : ""}
+            </p>
+          )}
+          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>
+            {serie.titulo}
+          </h2>
+          {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
+        </div>
+
+        <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+          onClick={(e) => e.stopPropagation()}>
+          <button
+            onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
+            className="post-btn-edit"
+            style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+          >
+            ✏ Editar
+          </button>
+          <button
+            onClick={handleDeletar}
+            className="post-btn-delete"
+            style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+          >
+            🗑 Apagar
+          </button>
+          <span className="read-link" style={{ marginLeft: "auto" }}
+            onClick={() => router.push(`/series/${serie.slug}`)}>
+            Ver série →
+          </span>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -319,6 +413,9 @@ export default function Perfil() {
   const [rascFotoFile, setRascFotoFile] = useState<File | null>(null);
 
   const [posts, setPosts] = useState<any[]>([]);
+  const [series, setSeries] = useState<any[]>([]);
+  const [aba, setAba] = useState<"posts" | "series">("posts");
+
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -346,20 +443,47 @@ export default function Perfil() {
         setNome(user.displayName || "");
         setFotoUrl(user.photoURL || null);
       }
-      const q = query(
-        collection(db, "posts"),
-        where("autorId", "==", user.uid),
-        orderBy("data", "desc")
-      );
-      const snapshot = await getDocs(q);
-      const lista: any[] = [];
-      snapshot.forEach((d) => lista.push({ id: d.id, ...d.data() }));
-      setPosts(lista);
+
+      const [postsSnap, seriesSnap] = await Promise.all([
+        getDocs(query(
+          collection(db, "posts"),
+          where("autorId", "==", user.uid),
+          orderBy("data", "desc")
+        )),
+        getDocs(query(
+          collection(db, "series"),
+          where("autorId", "==", user.uid),
+          orderBy("criadoEm", "desc")
+        )),
+      ]);
+
+      const listaP: any[] = [];
+      postsSnap.forEach((d) => listaP.push({ id: d.id, ...d.data() }));
+      setPosts(listaP);
+
+      const listaS: any[] = [];
+      seriesSnap.forEach((d) => listaS.push({ id: d.id, ...d.data() }));
+      setSeries(listaS);
     } catch (err) { console.error(err); }
     setLoading(false);
   }
 
   useEffect(() => { carregar(); }, []);
+
+  // re-carrega séries quando volta para aba (por causa do router.refresh no delete)
+  useEffect(() => {
+    if (aba === "series" && uid) {
+      getDocs(query(
+        collection(db, "series"),
+        where("autorId", "==", uid),
+        orderBy("criadoEm", "desc")
+      )).then((snap) => {
+        const lista: any[] = [];
+        snap.forEach((d) => lista.push({ id: d.id, ...d.data() }));
+        setSeries(lista);
+      }).catch(console.error);
+    }
+  }, [aba, uid]);
 
   function abrirEdicao() {
     setRascNome(nome);
@@ -402,11 +526,17 @@ export default function Perfil() {
       await updateProfile(user, {
         displayName: rascNome, photoURL: novaFotoUrl ?? undefined,
       });
-      const q = query(collection(db, "posts"), where("autorId", "==", user.uid));
-      const snapshot = await getDocs(q);
+      // atualiza posts e séries com novo nome/foto
+      const [postsSnap, seriesSnap] = await Promise.all([
+        getDocs(query(collection(db, "posts"), where("autorId", "==", user.uid))),
+        getDocs(query(collection(db, "series"), where("autorId", "==", user.uid))),
+      ]);
       const batch = writeBatch(db);
-      snapshot.forEach((postDoc) => {
+      postsSnap.forEach((postDoc) => {
         batch.update(postDoc.ref, { autorNome: nomeCompleto, autorFoto: novaFotoUrl });
+      });
+      seriesSnap.forEach((serieDoc) => {
+        batch.update(serieDoc.ref, { autorNome: nomeCompleto, autorFoto: novaFotoUrl });
       });
       await batch.commit();
       await carregar();
@@ -433,9 +563,15 @@ export default function Perfil() {
             <div className="perfil-info" style={{ flex: 1 }}>
               <h1 className="perfil-nome">{nomeExibicao}</h1>
               {bio ? <p className="perfil-bio">{bio}</p> : <p className="perfil-bio-vazia">Sem descrição.</p>}
-              <div className="perfil-stat">
-                <span className="perfil-stat-num">{posts.length}</span>
-                <span className="perfil-stat-label">publicações</span>
+              <div style={{ display: "flex", gap: "1.25rem" }}>
+                <div className="perfil-stat">
+                  <span className="perfil-stat-num">{posts.length}</span>
+                  <span className="perfil-stat-label">publicações</span>
+                </div>
+                <div className="perfil-stat">
+                  <span className="perfil-stat-num">{series.length}</span>
+                  <span className="perfil-stat-label">série{series.length !== 1 ? "s" : ""}</span>
+                </div>
               </div>
             </div>
             <div style={{ alignSelf: "flex-start" }}>
@@ -495,26 +631,79 @@ export default function Perfil() {
           </div>
         )}
 
-        {/* PUBLICAÇÕES */}
+        {/* ABAS */}
         <div className="perfil-posts-section">
-          <h2 className="perfil-posts-title">Meus conteúdos</h2>
-
-          {posts.length === 0 && (
-            <div className="empty-state">Você ainda não publicou nada.</div>
-          )}
-
-          <div className="posts-list">
-            {posts.map((post, i) => (
-              <PostCardMeuPerfil
-                key={post.id}
-                post={post}
-                index={i}
-                fotoUrl={fotoUrl}
-                nomeExibicao={nomeExibicao}
-                onToast={showToast}
-              />
+          <div style={{ display: "flex", gap: "0", borderBottom: "1px solid var(--border)", marginBottom: "1.5rem" }}>
+            {(["posts", "series"] as const).map((a) => (
+              <button
+                key={a}
+                onClick={() => setAba(a)}
+                style={{
+                  padding: "0.625rem 1.25rem",
+                  fontSize: "0.875rem",
+                  fontWeight: 600,
+                  background: "none",
+                  border: "none",
+                  borderBottom: aba === a ? "2px solid var(--emerald)" : "2px solid transparent",
+                  color: aba === a ? "var(--emerald)" : "var(--text-3)",
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  marginBottom: "-1px",
+                }}
+              >
+                {a === "posts"
+                  ? `Publicações (${posts.length})`
+                  : `Séries (${series.length})`}
+              </button>
             ))}
           </div>
+
+          {aba === "posts" && (
+            <>
+              {posts.length === 0 && (
+                <div className="empty-state">Você ainda não publicou nada.</div>
+              )}
+              <div className="posts-list">
+                {posts.map((post, i) => (
+                  <PostCardMeuPerfil
+                    key={post.id}
+                    post={post}
+                    index={i}
+                    fotoUrl={fotoUrl}
+                    nomeExibicao={nomeExibicao}
+                    onToast={showToast}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {aba === "series" && (
+            <>
+              {series.length === 0 ? (
+                <div className="empty-state">
+                  Você ainda não criou nenhuma série.{" "}
+                  <span
+                    style={{ color: "var(--emerald)", cursor: "pointer", textDecoration: "underline" }}
+                    onClick={() => router.push("/criar-serie")}
+                  >
+                    Criar primeira série
+                  </span>
+                </div>
+              ) : (
+                <div className="posts-list">
+                  {series.map((serie, i) => (
+                    <SerieCardMeuPerfil
+                      key={serie.id}
+                      serie={serie}
+                      index={i}
+                      onToast={showToast}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
 
@@ -535,6 +724,7 @@ export default function Perfil() {
           transition: transform 0.35s ease;
         }
         .post-card-image:hover .card-cover-img { transform: scale(1.025); }
+        .serie-card:hover .card-cover-img { transform: scale(1.025); }
         .card-cover-badge {
           position: absolute; top: 0.625rem; right: 0.75rem;
           backdrop-filter: blur(6px);
