@@ -111,6 +111,72 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   );
 }
 
+/* ── SerieCardPublico ────────────────────────────────── */
+
+function SerieCardPublico({ serie, index }: { serie: any; index: number }) {
+  const router = useRouter();
+  const postCount = serie.postIds?.length ?? 0;
+
+  return (
+    <article
+      className="post-card serie-card"
+      style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
+      onClick={() => router.push(`/series/${serie.slug}`)}
+    >
+      {serie.imagemUrl && (
+        <div className="card-cover-wrapper">
+          <img src={serie.imagemUrl} alt={serie.titulo} className="card-cover-img" />
+          <span className="cat-badge card-cover-badge" style={{
+            background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)",
+            color: "var(--emerald)", borderColor: "var(--emerald-dim)",
+          }}>
+            📚 Série
+          </span>
+        </div>
+      )}
+      <div style={{ padding: serie.imagemUrl ? "0.875rem 1.125rem 0.875rem" : undefined }}>
+        {!serie.imagemUrl && (
+          <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ flex: 1 }}>
+              <span className="card-meta">{postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
+            </div>
+            <span className="cat-badge" style={{
+              color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)",
+            }}>
+              📚 Série
+            </span>
+          </div>
+        )}
+
+        <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
+          {serie.imagemUrl && (
+            <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
+              {postCount} publicação{postCount !== 1 ? "ões" : ""}
+            </p>
+          )}
+          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>
+            {serie.titulo}
+          </h2>
+          {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
+        </div>
+
+        <div className="card-footer-row" style={{ display: "flex", alignItems: "center" }}
+          onClick={(e) => e.stopPropagation()}>
+          <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>
+            Coleção temática de sermões e artigos
+          </span>
+          <span className="read-link" style={{ marginLeft: "auto" }}
+            onClick={() => router.push(`/series/${serie.slug}`)}>
+            Ver série →
+          </span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/* ── PostCardPerfil ─────────────────────────────────── */
+
 function PostCardPerfil({
   post, index, user, nomeExibicao, autorUid, onToast,
 }: {
@@ -129,7 +195,7 @@ function PostCardPerfil({
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
 
   const viewCount: number = post.visualizacoes ?? 0;
-  const temImagem = !!post.imagemUrl; // ✅ VERIFICA SE TEM IMAGEM
+  const temImagem = !!post.imagemUrl;
 
   const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}?from=perfil`;
   const fullUrl = typeof window !== "undefined"
@@ -229,7 +295,6 @@ function PostCardPerfil({
     </div>
   );
 
-  // ✅ CARD COM IMAGEM
   if (temImagem) {
     return (
       <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }}
@@ -261,7 +326,6 @@ function PostCardPerfil({
     );
   }
 
-  // ✅ CARD SEM IMAGEM
   return (
     <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
       <div className="card-header-row" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
@@ -286,6 +350,8 @@ function PostCardPerfil({
   );
 }
 
+/* ── PerfilPublico ───────────────────────────────────── */
+
 export default function PerfilPublico() {
   const { id } = useParams();
   const router = useRouter();
@@ -293,6 +359,8 @@ export default function PerfilPublico() {
   const [user, setUser] = useState<User | null>(null);
   const [uid, setUid] = useState<string | null>(null);
   const [posts, setPosts] = useState<any[]>([]);
+  const [series, setSeries] = useState<any[]>([]);
+  const [aba, setAba] = useState<"posts" | "series">("posts");
   const [loading, setLoading] = useState(true);
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
@@ -319,15 +387,26 @@ export default function PerfilPublico() {
           router.replace(`/perfil/${resultado.userData.slug}`);
         }
 
-        const q = query(
-          collection(db, "posts"),
-          where("autorId", "==", resultado.uid),
-          orderBy("data", "desc")
-        );
-        const snap = await getDocs(q);
-        const lista: any[] = [];
-        snap.forEach((d) => lista.push({ id: d.id, ...d.data() }));
-        setPosts(lista);
+        const [postsSnap, seriesSnap] = await Promise.all([
+          getDocs(query(
+            collection(db, "posts"),
+            where("autorId", "==", resultado.uid),
+            orderBy("data", "desc")
+          )),
+          getDocs(query(
+            collection(db, "series"),
+            where("autorId", "==", resultado.uid),
+            orderBy("criadoEm", "desc")
+          )),
+        ]);
+
+        const listaP: any[] = [];
+        postsSnap.forEach((d) => listaP.push({ id: d.id, ...d.data() }));
+        setPosts(listaP);
+
+        const listaS: any[] = [];
+        seriesSnap.forEach((d) => listaS.push({ id: d.id, ...d.data() }));
+        setSeries(listaS);
       } catch (err) { console.error(err); }
       setLoading(false);
     }
@@ -352,31 +431,77 @@ export default function PerfilPublico() {
           <div className="perfil-info">
             <h1 className="perfil-nome">{nomeExibicao}</h1>
             {user.bio ? <p className="perfil-bio">{user.bio}</p> : <p className="perfil-bio-vazia">Sem descrição.</p>}
-            <div className="perfil-stat">
-              <span className="perfil-stat-num">{posts.length}</span>
-              <span className="perfil-stat-label">publicações</span>
+            <div style={{ display: "flex", gap: "1.25rem" }}>
+              <div className="perfil-stat">
+                <span className="perfil-stat-num">{posts.length}</span>
+                <span className="perfil-stat-label">publicações</span>
+              </div>
+              <div className="perfil-stat">
+                <span className="perfil-stat-num">{series.length}</span>
+                <span className="perfil-stat-label">série{series.length !== 1 ? "s" : ""}</span>
+              </div>
             </div>
           </div>
         </div>
 
         <div className="perfil-posts-section">
-          <h2 className="perfil-posts-title">Publicações</h2>
-
-          {posts.length === 0 && <div className="empty-state">Nenhuma publicação ainda.</div>}
-
-          <div className="posts-list">
-            {posts.map((post, i) => (
-              <PostCardPerfil
-                key={post.id}
-                post={post}
-                index={i}
-                user={user}
-                nomeExibicao={nomeExibicao}
-                autorUid={uid!}
-                onToast={showToast}
-              />
+          {/* Abas */}
+          <div style={{ display: "flex", gap: "0", borderBottom: "1px solid var(--border)", marginBottom: "1.5rem" }}>
+            {(["posts", "series"] as const).map((a) => (
+              <button
+                key={a}
+                onClick={() => setAba(a)}
+                style={{
+                  padding: "0.625rem 1.25rem",
+                  fontSize: "0.875rem",
+                  fontWeight: 600,
+                  background: "none",
+                  border: "none",
+                  borderBottom: aba === a ? "2px solid var(--emerald)" : "2px solid transparent",
+                  color: aba === a ? "var(--emerald)" : "var(--text-3)",
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  marginBottom: "-1px",
+                }}
+              >
+                {a === "posts"
+                  ? `Publicações (${posts.length})`
+                  : `Séries (${series.length})`}
+              </button>
             ))}
           </div>
+
+          {aba === "posts" && (
+            <>
+              {posts.length === 0 && <div className="empty-state">Nenhuma publicação ainda.</div>}
+              <div className="posts-list">
+                {posts.map((post, i) => (
+                  <PostCardPerfil
+                    key={post.id}
+                    post={post}
+                    index={i}
+                    user={user}
+                    nomeExibicao={nomeExibicao}
+                    autorUid={uid!}
+                    onToast={showToast}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {aba === "series" && (
+            <>
+              {series.length === 0 && (
+                <div className="empty-state">Este autor ainda não criou nenhuma série.</div>
+              )}
+              <div className="posts-list">
+                {series.map((serie, i) => (
+                  <SerieCardPublico key={serie.id} serie={serie} index={i} />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -397,6 +522,7 @@ export default function PerfilPublico() {
           transition: transform 0.35s ease;
         }
         .post-card-image:hover .card-cover-img { transform: scale(1.025); }
+        .serie-card:hover .card-cover-img { transform: scale(1.025); }
         .card-cover-badge {
           position: absolute; top: 0.625rem; right: 0.75rem;
           backdrop-filter: blur(6px);
