@@ -71,7 +71,20 @@ function IconDownload({ size = 13 }: { size?: number }) {
   );
 }
 
-function PostCardSerie({ post, index, onToast }: { post: any; index: number; onToast: (msg: string) => void }) {
+// ─── PostCardSerie ────────────────────────────────────────────────────────────
+// Recebe o serieSlug para construir URLs com ?from=serie&serieSlug=...
+
+function PostCardSerie({
+  post,
+  index,
+  serieSlug,
+  onToast,
+}: {
+  post: any;
+  index: number;
+  serieSlug: string;
+  onToast: (msg: string) => void;
+}) {
   const router = useRouter();
   const uid = auth.currentUser?.uid;
 
@@ -83,8 +96,11 @@ function PostCardSerie({ post, index, onToast }: { post: any; index: number; onT
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
-  const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
-  const fullUrl = typeof window !== "undefined" ? `${window.location.origin}${postPath}` : postPath;
+  // URL base do post
+  const postBasePath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
+  // URL com contexto de série — usado para navegação e para o PDF
+  const postPathSerie = `${postBasePath}?from=serie&serieSlug=${serieSlug}`;
+  const fullUrl = typeof window !== "undefined" ? `${window.location.origin}${postBasePath}` : postBasePath;
 
   function buildFrase() {
     const data = formatData(post.data);
@@ -154,7 +170,8 @@ function PostCardSerie({ post, index, onToast }: { post: any; index: number; onT
           </span>
         )}
       </div>
-      <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
+      {/* ← CORREÇÃO: link "Ler completo" agora inclui contexto da série */}
+      <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPathSerie)}>
         Ler completo →
       </span>
     </div>
@@ -162,7 +179,8 @@ function PostCardSerie({ post, index, onToast }: { post: any; index: number; onT
 
   if (temImagem) {
     return (
-      <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }} onClick={() => router.push(postPath)}>
+      // ← CORREÇÃO: onClick do card usa postPathSerie
+      <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }} onClick={() => router.push(postPathSerie)}>
         <div className="card-cover-wrapper">
           <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
           <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
@@ -189,7 +207,8 @@ function PostCardSerie({ post, index, onToast }: { post: any; index: number; onT
 
   return (
     <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
-      <div className="card-header-row" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
+      {/* ← CORREÇÃO: onClick usa postPathSerie */}
+      <div className="card-header-row" onClick={() => router.push(postPathSerie)} style={{ cursor: "pointer" }}>
         <Avatar src={post.autorFoto} name={post.autorNome || "Autor"} size={36} />
         <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
           <span className="author-name-link" onClick={(e) => { e.stopPropagation(); router.push(`/perfil/${post.autorId}`); }}>
@@ -201,7 +220,8 @@ function PostCardSerie({ post, index, onToast }: { post: any; index: number; onT
           {post.tipo === "sermao" ? "Sermão" : "Artigo"}
         </span>
       </div>
-      <div className="card-body-area" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
+      {/* ← CORREÇÃO: onClick usa postPathSerie */}
+      <div className="card-body-area" onClick={() => router.push(postPathSerie)} style={{ cursor: "pointer" }}>
         <h2 className="card-title">{post.titulo}</h2>
         {post.resumo && <p className="card-frase">{post.resumo}</p>}
       </div>
@@ -209,6 +229,8 @@ function PostCardSerie({ post, index, onToast }: { post: any; index: number; onT
     </article>
   );
 }
+
+// ─── SeriePage ────────────────────────────────────────────────────────────────
 
 export default function SeriePage() {
   const { slug } = useParams();
@@ -222,6 +244,7 @@ export default function SeriePage() {
   const [toastVisible, setToastVisible] = useState(false);
 
   const currentUid = auth.currentUser?.uid;
+  const serieSlug = Array.isArray(slug) ? slug[0] : slug ?? "";
 
   function showToast(msg: string) {
     setToastMsg(msg);
@@ -233,7 +256,7 @@ export default function SeriePage() {
     async function carregar() {
       if (!slug) return;
       try {
-        const q = query(collection(db, "series"), where("slug", "==", slug));
+        const q = query(collection(db, "series"), where("slug", "==", serieSlug));
         const snap = await getDocs(q);
         if (snap.empty) { setLoading(false); return; }
 
@@ -247,12 +270,9 @@ export default function SeriePage() {
             getDoc(doc(db, "posts", id))
           );
           const postSnaps = await Promise.all(postPromises);
-
-          // Preserva a ordem de postIds; filtra apenas existentes
           const lista = postSnaps
             .filter((s) => s.exists())
             .map((s) => ({ id: s.id, ...s.data() }));
-
           setPosts(lista);
         }
       } catch (err) { console.error(err); }
@@ -361,13 +381,19 @@ export default function SeriePage() {
 
         <hr style={{ border: "none", borderTop: "1px solid var(--border)", marginBottom: "1.5rem" }} />
 
-        {/* Posts */}
+        {/* Posts — passa serieSlug para cada card */}
         {posts.length === 0 ? (
           <div className="empty-state">Esta série ainda não tem publicações.</div>
         ) : (
           <div className="posts-list">
             {posts.map((post, i) => (
-              <PostCardSerie key={post.id} post={post} index={i} onToast={showToast} />
+              <PostCardSerie
+                key={post.id}
+                post={post}
+                index={i}
+                serieSlug={serieSlug}   // ← NOVO: prop que carrega o slug da série
+                onToast={showToast}
+              />
             ))}
           </div>
         )}
