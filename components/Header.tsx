@@ -97,6 +97,7 @@ export default function Header() {
             aria-expanded={menuAberto}
           >
             <span /><span /><span />
+            <span className="header-hamburger-label">Navegar</span>
           </button>
         </div>
       </header>
