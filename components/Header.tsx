@@ -96,7 +96,9 @@ export default function Header() {
             aria-label={menuAberto ? "Fechar menu" : "Abrir menu"}
             aria-expanded={menuAberto}
           >
-            <span /><span /><span />
+            <div className="header-hamburger-lines">
+              <span /><span /><span />
+            </div>
             <span className="header-hamburger-label">Navegar</span>
           </button>
         </div>
