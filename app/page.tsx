@@ -489,6 +489,10 @@ export default function HomePage() {
             <br />
             <span className="hero-title-accent">para Crescer na Fé</span>
           </h1>
+          {/* ── Subtítulo descritivo ── */}
+          <p className="hero-subtitle">
+            Leia sermões dos seus pastores. Compartilhe estudos, reflexões e anotações com a sua comunidade.
+          </p>
           <blockquote className="hero-verse">
             "Por isso, exortem-se e edifiquem-se uns aos outros,
             como de fato vocês estão fazendo."
