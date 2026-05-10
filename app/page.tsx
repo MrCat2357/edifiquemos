@@ -13,14 +13,12 @@ import {
   arrayRemove,
   increment,
 } from "firebase/firestore";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
 
 const PAGE_SIZE = 8;
-
-/* ─── helpers ─────────────────────────────────────────── */
 
 function formatData(data: any) {
   if (!data) return "";
@@ -49,7 +47,6 @@ function getInitials(name: string) {
 
 function getDataValor(item: any): number {
   if (!item) return 0;
-  // séries usam criadoEm
   const d = item.criadoEm || item.data;
   if (!d) return 0;
   if (d?.toDate) return d.toDate().getTime();
@@ -57,14 +54,14 @@ function getDataValor(item: any): number {
   return 0;
 }
 
-/* ─── SVG Icons ───────────────────────────────────────── */
+function normalizar(str: string) {
+  return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
 
 function IconDownload({ size = 13 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
-      <path d="M8 2v7M8 9l-2.5-2.5M8 9l2.5-2.5"
-        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M8 2v7M8 9l-2.5-2.5M8 9l2.5-2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M3 13h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
@@ -72,30 +69,21 @@ function IconDownload({ size = 13 }: { size?: number }) {
 
 function IconHeart({ size = 13, filled = false }: { size?: number; filled?: boolean }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
-      <path
-        d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.567 3.067 2 5 2C6.105 2 7.093 2.535 7.75 3.366L8 3.7L8.25 3.366C8.907 2.535 9.895 2 11 2C12.933 2 14.5 3.567 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z"
-        stroke="currentColor" strokeWidth="1.4"
-        fill={filled ? "currentColor" : "none"}
-        strokeLinecap="round" strokeLinejoin="round"
-      />
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.567 3.067 2 5 2C6.105 2 7.093 2.535 7.75 3.366L8 3.7L8.25 3.366C8.907 2.535 9.895 2 11 2C12.933 2 14.5 3.567 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z"
+        stroke="currentColor" strokeWidth="1.4" fill={filled ? "currentColor" : "none"} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
 function IconEye({ size = 13 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
-      <path d="M1.5 8C3 4.5 5.3 3 8 3s5 1.5 6.5 5C13 11.5 10.7 13 8 13S3 11.5 1.5 8Z"
-        stroke="currentColor" strokeWidth="1.4" />
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M1.5 8C3 4.5 5.3 3 8 3s5 1.5 6.5 5C13 11.5 10.7 13 8 13S3 11.5 1.5 8Z" stroke="currentColor" strokeWidth="1.4" />
       <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.3" />
     </svg>
   );
 }
-
-/* ─── AuthorAvatar ────────────────────────────────────── */
 
 function AuthorAvatar({ src, name, size = 36 }: { src?: string | null; name: string; size?: number }) {
   const base: React.CSSProperties = { width: size, height: size, borderRadius: "50%", flexShrink: 0 };
@@ -111,8 +99,6 @@ function AuthorAvatar({ src, name, size = 36 }: { src?: string | null; name: str
     </div>
   );
 }
-
-/* ─── Toast ───────────────────────────────────────────── */
 
 function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   return (
@@ -131,25 +117,16 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   );
 }
 
-/* ─── SerieCard ────────────────────────────────────────── */
-
 function SerieCard({ serie, index }: { serie: any; index: number }) {
   const router = useRouter();
   const postCount = serie.postIds?.length ?? 0;
-
   return (
-    <article
-      className="post-card serie-card"
-      style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
-      onClick={() => router.push(`/series/${serie.slug}`)}
-    >
+    <article className="post-card serie-card" style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
+      onClick={() => router.push(`/series/${serie.slug}`)}>
       {serie.imagemUrl && (
         <div className="card-cover-wrapper">
           <img src={serie.imagemUrl} alt={serie.titulo} className="card-cover-img" />
-          <span className="cat-badge card-cover-badge" style={{
-            background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)",
-            color: "var(--emerald)", borderColor: "var(--emerald-dim)",
-          }}>
+          <span className="cat-badge card-cover-badge" style={{ background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)", color: "var(--emerald)", borderColor: "var(--emerald-dim)" }}>
             📚 Série
           </span>
         </div>
@@ -159,66 +136,37 @@ function SerieCard({ serie, index }: { serie: any; index: number }) {
           <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
             <AuthorAvatar src={serie.autorFoto} name={serie.autorNome || "Autor"} size={36} />
             <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-              <span
-                className="author-name-link"
-                onClick={(e) => { e.stopPropagation(); router.push(`/perfil/${serie.autorId}`); }}
-              >
+              <span className="author-name-link" onClick={(e) => { e.stopPropagation(); router.push(`/perfil/${serie.autorId}`); }}>
                 {serie.autorNome || "Autor"}
               </span>
-              <span className="card-meta">
-                {postCount} publicação{postCount !== 1 ? "ões" : ""}
-              </span>
+              <span className="card-meta">{postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
             </div>
-            <span className="cat-badge" style={{
-              color: "var(--emerald)",
-              background: "var(--emerald-dim)",
-              borderColor: "var(--emerald-dim)",
-            }}>
+            <span className="cat-badge" style={{ color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)" }}>
               📚 Série
             </span>
           </div>
         )}
-
-        <div
-          className="card-body-area"
-          style={serie.imagemUrl ? { paddingTop: 0 } : undefined}
-        >
+        <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
           {serie.imagemUrl && (
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.375rem" }}
-              onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.375rem" }} onClick={(e) => e.stopPropagation()}>
               <AuthorAvatar src={serie.autorFoto} name={serie.autorNome || "Autor"} size={22} />
-              <span
-                className="author-name-link"
-                onClick={(e) => { e.stopPropagation(); router.push(`/perfil/${serie.autorId}`); }}
-                style={{ fontSize: "0.78rem" }}
-              >
+              <span className="author-name-link" onClick={(e) => { e.stopPropagation(); router.push(`/perfil/${serie.autorId}`); }} style={{ fontSize: "0.78rem" }}>
                 {serie.autorNome || "Autor"}
               </span>
               <span className="card-meta">· {postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
             </div>
           )}
-          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>
-            {serie.titulo}
-          </h2>
+          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>{serie.titulo}</h2>
           {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
         </div>
-
-        <div className="card-footer-row" style={{ display: "flex", alignItems: "center" }}
-          onClick={(e) => e.stopPropagation()}>
-          <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>
-            Coleção temática de sermões e artigos
-          </span>
-          <span className="read-link" style={{ marginLeft: "auto" }}
-            onClick={() => router.push(`/series/${serie.slug}`)}>
-            Ver série →
-          </span>
+        <div className="card-footer-row" style={{ display: "flex", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
+          <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>Coleção temática de sermões e artigos</span>
+          <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(`/series/${serie.slug}`)}>Ver série →</span>
         </div>
       </div>
     </article>
   );
 }
-
-/* ─── PostCard ─────────────────────────────────────────── */
 
 function PostCard({ post, index, onAuthorClick, onToast }: {
   post: any; index: number;
@@ -227,15 +175,11 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
 }) {
   const router = useRouter();
   const uid = auth.currentUser?.uid;
-
-  const [liked, setLiked] = useState<boolean>(() =>
-    uid ? (post.likedBy ?? []).includes(uid) : false
-  );
+  const [liked, setLiked] = useState<boolean>(() => uid ? (post.likedBy ?? []).includes(uid) : false);
   const [likeCount, setLikeCount] = useState<number>(post.likes ?? 0);
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
-
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
   const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
@@ -272,10 +216,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
         conteudo: post.conteudo || "Acesse o link para ler o conteúdo completo:\n" + fullUrl,
         tipo: post.tipo,
         onDownload: async () => {
-          try {
-            await updateDoc(doc(db, "posts", post.id), { downloads: increment(1) });
-            setDownloadCount((n) => n + 1);
-          } catch {}
+          try { await updateDoc(doc(db, "posts", post.id), { downloads: increment(1) }); setDownloadCount((n) => n + 1); } catch {}
         },
       });
     } catch (err) { console.error(err); onToast("Erro ao gerar PDF."); }
@@ -283,48 +224,33 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   }
 
   const footerRow = (
-    <div className="card-footer-row"
-      style={{ display: "flex", alignItems: "center", gap: "0" }}
-      onClick={(e) => e.stopPropagation()}>
+    <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }} onClick={(e) => e.stopPropagation()}>
       <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-        <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike}
-          disabled={loadingLike}
+        <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike} disabled={loadingLike}
           title={uid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
           style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
-          <IconHeart size={13} filled={liked} />
-          Amei
+          <IconHeart size={13} filled={liked} />Amei
           {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
         </button>
-
         <button className="action-btn" onClick={handleDownloadPdf} disabled={gerandoPdf}
           title="Baixar como PDF"
           style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
           {gerandoPdf ? <><span className="btn-spinner" />PDF</> : <><IconDownload size={13} />PDF</>}
-          {downloadCount > 0 && (
-            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}
-              title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
-              {downloadCount}
-            </span>
-          )}
+          {downloadCount > 0 && <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}>{downloadCount}</span>}
         </button>
-
         {viewCount > 0 && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}
-            title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}>
             <IconEye size={13} />{viewCount}
           </span>
         )}
       </div>
-      <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(url)}>
-        Ler completo →
-      </span>
+      <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(url)}>Ler completo →</span>
     </div>
   );
 
   if (temImagem) {
     return (
-      <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }}
-        onClick={() => router.push(url)}>
+      <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }} onClick={() => router.push(url)}>
         <div className="card-cover-wrapper">
           <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
           <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
@@ -332,13 +258,10 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
           </span>
         </div>
         <div className="card-image-content">
-          <div className="card-header-row" style={{ padding: "0.875rem 1.125rem 0.375rem" }}
-            onClick={(e) => e.stopPropagation()}>
+          <div className="card-header-row" style={{ padding: "0.875rem 1.125rem 0.375rem" }} onClick={(e) => e.stopPropagation()}>
             <AuthorAvatar src={post.autorFoto} name={post.autorNome || "Autor"} size={28} />
             <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-              <span className="author-name-link"
-                onClick={(e) => { e.stopPropagation(); onAuthorClick(e, post.autorId); }}
-                style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", fontSize: "0.8rem" }}>
+              <span className="author-name-link" onClick={(e) => { e.stopPropagation(); onAuthorClick(e, post.autorId); }} style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", fontSize: "0.8rem" }}>
                 {post.autorNome || "Autor"}
               </span>
               <span className="card-meta">{buildFrase(post)}</span>
@@ -359,9 +282,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
       <div className="card-header-row" onClick={() => router.push(url)} style={{ cursor: "pointer" }}>
         <AuthorAvatar src={post.autorFoto} name={post.autorNome || "Autor"} size={36} />
         <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-          <span className="author-name-link"
-            onClick={(e) => { e.stopPropagation(); onAuthorClick(e, post.autorId); }}
-            style={{ display: "inline", width: "fit-content", alignSelf: "flex-start" }}>
+          <span className="author-name-link" onClick={(e) => { e.stopPropagation(); onAuthorClick(e, post.autorId); }} style={{ display: "inline", width: "fit-content", alignSelf: "flex-start" }}>
             {post.autorNome || "Autor"}
           </span>
           <span className="card-meta">{buildFrase(post)}</span>
@@ -379,33 +300,30 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   );
 }
 
-/* ─── FeedItem ─────────────────────────────────────────── */
-
 function FeedItem({ item, index, onAuthorClick, onToast }: {
   item: any; index: number;
   onAuthorClick: (e: React.MouseEvent, id: string) => void;
   onToast: (msg: string) => void;
 }) {
-  if (item._feedType === "serie") {
-    return <SerieCard serie={item} index={index} />;
-  }
+  if (item._feedType === "serie") return <SerieCard serie={item} index={index} />;
   return <PostCard post={item} index={index} onAuthorClick={onAuthorClick} onToast={onToast} />;
 }
-
-/* ─── HomePage ─────────────────────────────────────────── */
 
 export default function HomePage() {
   const { user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // ✅ Busca lida diretamente da URL — zero estado local de busca aqui
+  const buscaAtiva = searchParams.get("q")?.trim() ?? "";
 
   const [feedItems, setFeedItems] = useState<any[]>([]);
-  const [allPosts, setAllPosts] = useState<any[]>([]); // só posts para o sidebar
+  const [allPosts, setAllPosts] = useState<any[]>([]);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const sentinelRef = useRef<HTMLDivElement>(null);
   const feedRef = useRef<HTMLDivElement>(null);
 
@@ -416,36 +334,26 @@ export default function HomePage() {
           getDocs(query(collection(db, "posts"), orderBy("data", "desc"))),
           getDocs(query(collection(db, "series"), orderBy("criadoEm", "desc"))),
         ]);
-
         const posts: any[] = [];
         postsSnap.forEach((d) => posts.push({ id: d.id, _feedType: "post", ...d.data() }));
-
         const series: any[] = [];
         seriesSnap.forEach((d) => series.push({ id: d.id, _feedType: "serie", ...d.data() }));
-
-        // mistura e ordena por data desc
-        const mixed = [...posts, ...series].sort(
-          (a, b) => getDataValor(b) - getDataValor(a)
-        );
-
+        const mixed = [...posts, ...series].sort((a, b) => getDataValor(b) - getDataValor(a));
         setAllPosts(posts);
         setFeedItems(mixed);
-      } catch (error) {
-        console.error("Erro ao buscar feed:", error);
-      }
+      } catch (error) { console.error("Erro ao buscar feed:", error); }
       setLoading(false);
     }
     fetchAll();
   }, []);
 
+  // Reset paginação ao mudar busca
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [buscaAtiva]);
+
   useEffect(() => {
     if (!sentinelRef.current) return;
     const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          setVisibleCount((prev) => prev + PAGE_SIZE);
-        }
-      },
+      (entries) => { if (entries[0].isIntersecting) setVisibleCount((prev) => prev + PAGE_SIZE); },
       { rootMargin: "200px" }
     );
     observer.observe(sentinelRef.current);
@@ -453,8 +361,7 @@ export default function HomePage() {
   }, [loading]);
 
   function showToast(msg: string) {
-    setToastMsg(msg);
-    setToastVisible(true);
+    setToastMsg(msg); setToastVisible(true);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastVisible(false), 2200);
   }
@@ -469,14 +376,25 @@ export default function HomePage() {
     feedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  const visibleItems = feedItems.slice(0, visibleCount);
-  const hasMore = visibleCount < feedItems.length;
+  const itensFiltrados = buscaAtiva
+    ? feedItems.filter((item) => {
+        const termo = normalizar(buscaAtiva);
+        return (
+          normalizar(item.titulo || "").includes(termo) ||
+          normalizar(item.autorNome || "").includes(termo) ||
+          normalizar(item.descricao || "").includes(termo)
+        );
+      })
+    : feedItems;
+
+  const visibleItems = itensFiltrados.slice(0, visibleCount);
+  const hasMore = visibleCount < itensFiltrados.length;
 
   return (
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
 
-      {/* ── Hero ── */}
+      {/* Hero */}
       <section className="hero">
         <div className="hero-grid" />
         <div className="hero-content">
@@ -489,13 +407,11 @@ export default function HomePage() {
             <br />
             <span className="hero-title-accent">para Crescer na Fé</span>
           </h1>
-          {/* ── Subtítulo descritivo ── */}
           <p className="hero-subtitle">
             Leia sermões dos seus pastores. Compartilhe estudos, reflexões e anotações com a sua comunidade.
           </p>
           <blockquote className="hero-verse">
-            "Por isso, exortem-se e edifiquem-se uns aos outros,
-            como de fato vocês estão fazendo."
+            "Por isso, exortem-se e edifiquem-se uns aos outros, como de fato vocês estão fazendo."
             <cite>1 Tessalonicenses 5:11</cite>
           </blockquote>
           <div className="hero-actions">
@@ -503,33 +419,41 @@ export default function HomePage() {
               Explorar Conteúdos
             </button>
             {user ? (
-              <Link href="/criar-post" className="btn-hero-secondary">
-                Publicar Sermão ou Artigo
-              </Link>
+              <Link href="/criar-post" className="btn-hero-secondary">Publicar Sermão ou Artigo</Link>
             ) : (
-              <Link href="/login" className="btn-hero-secondary">
-                Entrar para Publicar
-              </Link>
+              <Link href="/login" className="btn-hero-secondary">Entrar para Publicar</Link>
             )}
           </div>
         </div>
       </section>
 
-      {/* ── Feed ── */}
+      {/* Feed */}
       <div ref={feedRef} className="feed-wrapper">
-        {/* Coluna principal */}
         <div>
           <div className="feed-main-header">
-            <h1 className="feed-main-title">Publicações Recentes</h1>
+            <h1 className="feed-main-title">
+              {buscaAtiva
+                ? `${itensFiltrados.length} resultado${itensFiltrados.length !== 1 ? "s" : ""} para "${buscaAtiva}"`
+                : "Publicações Recentes"}
+            </h1>
+            {buscaAtiva && (
+              <span
+                onClick={() => router.push("/")}
+                style={{ marginLeft: "0.75rem", fontSize: "0.78rem", color: "var(--emerald)", cursor: "pointer", fontWeight: 600 }}
+              >
+                Limpar
+              </span>
+            )}
           </div>
 
           {loading ? (
-            <div className="loading-state">
-              <div className="spinner" />
-              Carregando publicações...
+            <div className="loading-state"><div className="spinner" />Carregando publicações...</div>
+          ) : itensFiltrados.length === 0 ? (
+            <div className="empty-state">
+              {buscaAtiva
+                ? <>Nenhum resultado para <strong>"{buscaAtiva}"</strong>.</>
+                : "Nenhuma publicação encontrada."}
             </div>
-          ) : feedItems.length === 0 ? (
-            <div className="empty-state">Nenhuma publicação encontrada.</div>
           ) : (
             <>
               <div className="posts-list">
@@ -543,22 +467,14 @@ export default function HomePage() {
                   />
                 ))}
               </div>
-
               <div ref={sentinelRef} style={{ height: 1 }} />
-
               {hasMore && (
                 <div className="loading-state" style={{ padding: "1.5rem 0" }}>
-                  <div className="spinner" />
-                  Carregando mais...
+                  <div className="spinner" />Carregando mais...
                 </div>
               )}
-
-              {!hasMore && feedItems.length > PAGE_SIZE && (
-                <p style={{
-                  textAlign: "center", fontSize: "0.82rem",
-                  color: "var(--text-3)", padding: "2rem 0 1rem",
-                  fontStyle: "italic",
-                }}>
+              {!hasMore && itensFiltrados.length > PAGE_SIZE && (
+                <p style={{ textAlign: "center", fontSize: "0.82rem", color: "var(--text-3)", padding: "2rem 0 1rem", fontStyle: "italic" }}>
                   Você chegou ao fim das publicações.
                 </p>
               )}
@@ -573,32 +489,24 @@ export default function HomePage() {
             <ul className="trending-list">
               {allPosts.slice(0, 4).map((p) => (
                 <li key={p.id}>
-                  <Link
-                    href={`/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`}
-                    className="trending-link"
-                  >
+                  <Link href={`/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`} className="trending-link">
                     <span className="trending-text">{p.titulo}</span>
-                    <span className="trending-count">
-                      {p.tipo === "sermao" ? "🎤" : "📝"}
-                    </span>
+                    <span className="trending-count">{p.tipo === "sermao" ? "🎤" : "📝"}</span>
                   </Link>
                 </li>
               ))}
             </ul>
           </div>
-
           <div className="sidebar-card sidebar-cta">
             <div style={{ fontSize: "1.75rem", marginBottom: "0.5rem" }}>✍️</div>
             <h3>Compartilhe sua fé</h3>
             <p>Publique seu sermão ou reflexão e edifique a comunidade.</p>
             <Link href="/criar-post" className="btn-cta">Publicar agora</Link>
           </div>
-
           <div className="sidebar-card">
             <h3 className="sidebar-title">📖 Versículo do Dia</h3>
             <blockquote className="verse-blockquote">
-              "Porque eu bem sei os pensamentos que tenho a vosso respeito,
-              diz o SENHOR; pensamentos de paz, e não de mal."
+              "Porque eu bem sei os pensamentos que tenho a vosso respeito, diz o SENHOR; pensamentos de paz, e não de mal."
             </blockquote>
             <p className="verse-ref-text">— Jeremias 29:11</p>
           </div>
@@ -607,30 +515,16 @@ export default function HomePage() {
 
       <style>{`
         .post-card-image { cursor: pointer; }
-
         .card-cover-wrapper {
-          position: relative; width: 100%;
-          max-height: 420px; min-height: 160px;
-          overflow: hidden;
-          border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-          background: #0d1310;
-          display: flex; align-items: center; justify-content: center;
+          position: relative; width: 100%; max-height: 420px; min-height: 160px;
+          overflow: hidden; border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+          background: #0d1310; display: flex; align-items: center; justify-content: center;
         }
-        .card-cover-img {
-          width: 100%; height: 100%;
-          object-fit: contain; display: block;
-          max-height: 420px;
-          transition: transform 0.35s ease;
-        }
+        .card-cover-img { width: 100%; height: 100%; object-fit: contain; display: block; max-height: 420px; transition: transform 0.35s ease; }
         .post-card-image:hover .card-cover-img { transform: scale(1.025); }
         .serie-card:hover .card-cover-img { transform: scale(1.025); }
-        .card-cover-badge {
-          position: absolute; top: 0.625rem; right: 0.75rem;
-          backdrop-filter: blur(6px);
-          background: rgba(10, 15, 10, 0.72) !important;
-        }
+        .card-cover-badge { position: absolute; top: 0.625rem; right: 0.75rem; backdrop-filter: blur(6px); background: rgba(10, 15, 10, 0.72) !important; }
         .card-image-content { display: flex; flex-direction: column; }
-
         @media (max-width: 640px) {
           .card-cover-wrapper { max-height: 320px; min-height: 120px; }
           .card-cover-img { max-height: 320px; }
