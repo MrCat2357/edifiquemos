@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/useAuth";
 import { signOut } from "firebase/auth";
 import { auth, db } from "@/lib/firebase";
 import { doc, onSnapshot } from "firebase/firestore";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, Suspense } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
 function IconSearch({ size = 14 }: { size?: number }) {
@@ -17,7 +17,10 @@ function IconSearch({ size = 14 }: { size?: number }) {
   );
 }
 
-export default function Header() {
+// ─────────────────────────────────────────────────────────────
+// Componente interno que usa useSearchParams — envolto em Suspense
+// ─────────────────────────────────────────────────────────────
+function HeaderContent() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
@@ -114,7 +117,7 @@ export default function Header() {
         <input
           ref={inputRef}
           type="text"
-          placeholder="Buscar sermões..."
+          placeholder="Buscar publicações..."
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
           onFocus={() => setBuscaFocada(true)}
@@ -238,7 +241,6 @@ export default function Header() {
             </ul>
           </nav>
 
-          {/* ✅ Busca desktop */}
           <div className="header-search-desktop">
             {searchBarDesktop}
           </div>
@@ -284,7 +286,6 @@ export default function Header() {
           <span className="header-logo"><span className="header-logo-dot" />Voz da Fé</span>
         </div>
 
-        {/* ✅ Busca no topo do drawer */}
         {searchBarMobile}
 
         <ul className="mobile-nav-list">
@@ -322,5 +323,25 @@ export default function Header() {
         </div>
       </nav>
     </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Exportação padrão: envolve HeaderContent em Suspense
+// ─────────────────────────────────────────────────────────────
+export default function Header() {
+  return (
+    <Suspense fallback={
+      <header className="site-header">
+        <div className="header-inner">
+          <span className="header-logo">
+            <span className="header-logo-dot" />
+            Voz da Fé
+          </span>
+        </div>
+      </header>
+    }>
+      <HeaderContent />
+    </Suspense>
   );
 }

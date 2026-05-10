@@ -314,7 +314,6 @@ export default function HomePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // ✅ Busca lida diretamente da URL — zero estado local de busca aqui
   const buscaAtiva = searchParams.get("q")?.trim() ?? "";
 
   const [feedItems, setFeedItems] = useState<any[]>([]);
@@ -349,6 +348,22 @@ export default function HomePage() {
 
   // Reset paginação ao mudar busca
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [buscaAtiva]);
+
+  // ✅ CORREÇÃO: scroll automático para o feed ao realizar pesquisa
+  useEffect(() => {
+    if (!buscaAtiva) return;
+    // Pequeno delay para garantir que o DOM já atualizou com os resultados
+    const timer = setTimeout(() => {
+      if (feedRef.current) {
+        const headerHeight = parseInt(
+          getComputedStyle(document.documentElement).getPropertyValue("--header-h") || "72"
+        );
+        const top = feedRef.current.getBoundingClientRect().top + window.scrollY - headerHeight - 16;
+        window.scrollTo({ top, behavior: "smooth" });
+      }
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [buscaAtiva]);
 
   useEffect(() => {
     if (!sentinelRef.current) return;
