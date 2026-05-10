@@ -22,6 +22,10 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useRouter } from "next/navigation";
 import { slugify } from "@/lib/slugify";
 import { gerarPDF } from "@/lib/gerarPDF";
+import { getReflexoesPorAutor } from "@/lib/reflexoes";
+import type { Reflexao } from "@/lib/reflexoes";
+import BotaoGerarReflexoes from "@/components/reflexoes/BotaoGerarReflexoes";
+import CardReflexao from "@/components/reflexoes/CardReflexao";
 
 /* ── gerarSlugUnico ─────────────────────────────────── */
 
@@ -141,7 +145,6 @@ function SerieCardMeuPerfil({
     try {
       await deleteDoc(doc(db, "series", serie.id));
       onToast("Série apagada.");
-      // força re-render via reload simples
       router.refresh();
     } catch (err) {
       console.error(err);
@@ -179,7 +182,6 @@ function SerieCardMeuPerfil({
             </span>
           </div>
         )}
-
         <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
           {serie.imagemUrl && (
             <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
@@ -191,7 +193,6 @@ function SerieCardMeuPerfil({
           </h2>
           {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
         </div>
-
         <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
           onClick={(e) => e.stopPropagation()}>
           <button
@@ -309,7 +310,6 @@ function PostCardMeuPerfil({
           Amei
           {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
         </button>
-
         <button className="action-btn" onClick={handleDownloadPdf} disabled={gerandoPdf}
           title="Baixar como PDF"
           style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
@@ -321,7 +321,6 @@ function PostCardMeuPerfil({
             </span>
           )}
         </button>
-
         {viewCount > 0 && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}
             title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}>
@@ -400,6 +399,7 @@ export default function Perfil() {
   const [bio, setBio] = useState("");
   const [fotoUrl, setFotoUrl] = useState<string | null>(null);
   const [uid, setUid] = useState<string | null>(null);
+  const [autorSlug, setAutorSlug] = useState("");
 
   const [editando, setEditando] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -414,7 +414,8 @@ export default function Perfil() {
 
   const [posts, setPosts] = useState<any[]>([]);
   const [series, setSeries] = useState<any[]>([]);
-  const [aba, setAba] = useState<"posts" | "series">("posts");
+  const [reflexoes, setReflexoes] = useState<Reflexao[]>([]);
+  const [aba, setAba] = useState<"posts" | "series" | "reflexoes">("posts");
 
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
@@ -439,15 +440,17 @@ export default function Perfil() {
         setTitulo(d.titulo || "");
         setBio(d.bio || "");
         setFotoUrl(d.fotoUrl || null);
+        setAutorSlug(d.slug || "");
       } else {
         setNome(user.displayName || "");
         setFotoUrl(user.photoURL || null);
       }
 
-      const [postsSnap, seriesSnap] = await Promise.all([
+      const [postsSnap, seriesSnap, reflexoesData] = await Promise.all([
         getDocs(query(
           collection(db, "posts"),
           where("autorId", "==", user.uid),
+          where("tipo", "in", ["sermao", "artigo"]),
           orderBy("data", "desc")
         )),
         getDocs(query(
@@ -455,6 +458,7 @@ export default function Perfil() {
           where("autorId", "==", user.uid),
           orderBy("criadoEm", "desc")
         )),
+        getReflexoesPorAutor(user.uid),
       ]);
 
       const listaP: any[] = [];
@@ -464,13 +468,22 @@ export default function Perfil() {
       const listaS: any[] = [];
       seriesSnap.forEach((d) => listaS.push({ id: d.id, ...d.data() }));
       setSeries(listaS);
+
+      setReflexoes(reflexoesData);
     } catch (err) { console.error(err); }
     setLoading(false);
   }
 
   useEffect(() => { carregar(); }, []);
 
-  // re-carrega séries quando volta para aba (por causa do router.refresh no delete)
+  // Recarrega reflexões ao entrar na aba (para pegar as recém-criadas)
+  useEffect(() => {
+    if (aba === "reflexoes" && uid) {
+      getReflexoesPorAutor(uid).then(setReflexoes).catch(console.error);
+    }
+  }, [aba, uid]);
+
+  // Recarrega séries ao entrar na aba
   useEffect(() => {
     if (aba === "series" && uid) {
       getDocs(query(
@@ -526,7 +539,6 @@ export default function Perfil() {
       await updateProfile(user, {
         displayName: rascNome, photoURL: novaFotoUrl ?? undefined,
       });
-      // atualiza posts e séries com novo nome/foto
       const [postsSnap, seriesSnap] = await Promise.all([
         getDocs(query(collection(db, "posts"), where("autorId", "==", user.uid))),
         getDocs(query(collection(db, "series"), where("autorId", "==", user.uid))),
@@ -571,6 +583,10 @@ export default function Perfil() {
                 <div className="perfil-stat">
                   <span className="perfil-stat-num">{series.length}</span>
                   <span className="perfil-stat-label">série{series.length !== 1 ? "s" : ""}</span>
+                </div>
+                <div className="perfil-stat">
+                  <span className="perfil-stat-num">{reflexoes.length}</span>
+                  <span className="perfil-stat-label">reflexões</span>
                 </div>
               </div>
             </div>
@@ -634,7 +650,7 @@ export default function Perfil() {
         {/* ABAS */}
         <div className="perfil-posts-section">
           <div style={{ display: "flex", gap: "0", borderBottom: "1px solid var(--border)", marginBottom: "1.5rem" }}>
-            {(["posts", "series"] as const).map((a) => (
+            {(["posts", "series", "reflexoes"] as const).map((a) => (
               <button
                 key={a}
                 onClick={() => setAba(a)}
@@ -651,9 +667,9 @@ export default function Perfil() {
                   marginBottom: "-1px",
                 }}
               >
-                {a === "posts"
-                  ? `Publicações (${posts.length})`
-                  : `Séries (${series.length})`}
+                {a === "posts" && `Publicações (${posts.length})`}
+                {a === "series" && `Séries (${series.length})`}
+                {a === "reflexoes" && `Reflexões (${reflexoes.length})`}
               </button>
             ))}
           </div>
@@ -699,6 +715,33 @@ export default function Perfil() {
                       index={i}
                       onToast={showToast}
                     />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {aba === "reflexoes" && (
+            <>
+              {/* Botão de criação no topo da aba */}
+              <div style={{ marginBottom: "1.25rem" }}>
+                {uid && autorSlug && (
+                  <BotaoGerarReflexoes
+                    autorId={uid}
+                    autorNome={nomeExibicao}
+                    autorSlug={autorSlug}
+                  />
+                )}
+              </div>
+
+              {reflexoes.length === 0 ? (
+                <div className="empty-state">
+                  Você ainda não criou nenhuma reflexão. Clique em "Criar Reflexões" para começar.
+                </div>
+              ) : (
+                <div className="posts-list">
+                  {reflexoes.map((r, i) => (
+                    <CardReflexao key={r.id ?? i} reflexao={r} />
                   ))}
                 </div>
               )}
