@@ -113,7 +113,7 @@ export default function Header() {
         </div>
 
         <ul className="mobile-nav-list">
-          {mostrarInicio && <li><Link href="/" className="mobile-nav-link" onClick={fecharMenu}>Início</Link></li>}
+          <li><Link href="/" className="mobile-nav-link" onClick={fecharMenu}>Início</Link></li>
           <li><Link href="/perfis" className="mobile-nav-link" onClick={fecharMenu}>Perfis</Link></li>
           {user && <li><Link href="/criar-post" className="mobile-nav-link" onClick={fecharMenu}>Publicar</Link></li>}
           {user && <li><Link href="/criar-serie" className="mobile-nav-link" onClick={fecharMenu}>Criar série</Link></li>}
