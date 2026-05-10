@@ -117,7 +117,7 @@ function HeaderContent() {
         <input
           ref={inputRef}
           type="text"
-          placeholder="Buscar publicações..."
+          placeholder="Buscar sermões..."
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
           onFocus={() => setBuscaFocada(true)}
@@ -177,7 +177,7 @@ function HeaderContent() {
               color: "var(--text-1)", fontSize: "0.9rem", fontFamily: "inherit",
             }}
           />
-          {busca ? (
+          {busca && (
             <button
               type="button"
               onClick={() => limparBusca(mobileInputRef)}
@@ -189,18 +189,6 @@ function HeaderContent() {
               aria-label="Limpar busca"
             >
               ✕
-            </button>
-          ) : (
-            <button
-              type="submit"
-              style={{
-                background: "var(--emerald)", border: "none", cursor: "pointer",
-                color: "#fff", fontSize: "0.72rem", fontWeight: 700,
-                padding: "4px 10px", borderRadius: "var(--radius-full)",
-                flexShrink: 0, fontFamily: "inherit",
-              }}
-            >
-              Ir
             </button>
           )}
         </div>
