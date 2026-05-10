@@ -66,7 +66,8 @@ export default function Header() {
 
           <nav className="header-nav-desktop">
             <ul className="header-nav">
-              {mostrarInicio && <li><Link href="/">Início</Link></li>}
+              <li><Link href="/">Início</Link></li>
+              <li><Link href="/perfis">Perfis</Link></li>
               {user && <li><Link href="/criar-post">Publicar</Link></li>}
               {user && <li><Link href="/criar-serie">Criar série</Link></li>}
             </ul>
@@ -113,11 +114,13 @@ export default function Header() {
 
         <ul className="mobile-nav-list">
           {mostrarInicio && <li><Link href="/" className="mobile-nav-link" onClick={fecharMenu}>Início</Link></li>}
+          <li><Link href="/perfis" className="mobile-nav-link" onClick={fecharMenu}>Perfis</Link></li>
           {user && <li><Link href="/criar-post" className="mobile-nav-link" onClick={fecharMenu}>Publicar</Link></li>}
           {user && <li><Link href="/criar-serie" className="mobile-nav-link" onClick={fecharMenu}>Criar série</Link></li>}
           {user && (
             <li>
-              <button className="mobile-nav-link" style={{ width: "100%", background: "none", border: "none", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}
+              <button className="mobile-nav-link"
+                style={{ width: "100%", background: "none", border: "none", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}
                 onClick={() => { fecharMenu(); router.push("/perfil"); }}>
                 Meu Perfil
               </button>
