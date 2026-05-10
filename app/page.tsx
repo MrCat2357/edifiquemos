@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
 import { db, auth } from "@/lib/firebase";
 import {
   collection,
@@ -309,7 +309,10 @@ function FeedItem({ item, index, onAuthorClick, onToast }: {
   return <PostCard post={item} index={index} onAuthorClick={onAuthorClick} onToast={onToast} />;
 }
 
-export default function HomePage() {
+// ─────────────────────────────────────────────────────────────
+// Componente interno que usa useSearchParams — envolto em Suspense
+// ─────────────────────────────────────────────────────────────
+function HomePageContent() {
   const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -349,10 +352,9 @@ export default function HomePage() {
   // Reset paginação ao mudar busca
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [buscaAtiva]);
 
-  // ✅ CORREÇÃO: scroll automático para o feed ao realizar pesquisa
+  // ✅ Scroll automático para o feed ao realizar pesquisa
   useEffect(() => {
     if (!buscaAtiva) return;
-    // Pequeno delay para garantir que o DOM já atualizou com os resultados
     const timer = setTimeout(() => {
       if (feedRef.current) {
         const headerHeight = parseInt(
@@ -546,5 +548,21 @@ export default function HomePage() {
         }
       `}</style>
     </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Exportação padrão: envolve HomePageContent em Suspense
+// ─────────────────────────────────────────────────────────────
+export default function HomePage() {
+  return (
+    <Suspense fallback={
+      <div className="loading-state" style={{ minHeight: "100vh" }}>
+        <div className="spinner" />
+        Carregando...
+      </div>
+    }>
+      <HomePageContent />
+    </Suspense>
   );
 }
