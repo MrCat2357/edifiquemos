@@ -1,6 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { auth, db } from "@/lib/firebase";
+import { doc, deleteDoc } from "firebase/firestore";
+import { useEffect, useState } from "react";
 import type { Reflexao } from "@/lib/reflexoes";
 import CompartilharWhatsapp from "@/components/reflexoes/CompartilharWhatsapp";
 
@@ -10,6 +14,31 @@ type Props = {
 };
 
 export default function ReflexaoView({ reflexao, autorSlug }: Props) {
+  const router = useRouter();
+  const [isOwner, setIsOwner] = useState(false);
+  const [deletando, setDeletando] = useState(false);
+
+  // Detecta se o visitante é o autor desta reflexão
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (uid && reflexao.autorId && uid === reflexao.autorId) {
+      setIsOwner(true);
+    }
+  }, [reflexao.autorId]);
+
+  async function handleDeletar() {
+    if (!reflexao.id) return;
+    if (!confirm("Tem certeza que deseja apagar esta reflexão?")) return;
+    setDeletando(true);
+    try {
+      await deleteDoc(doc(db, "reflexoes", reflexao.id));
+      router.push(`/perfil/${autorSlug}`);
+    } catch (err) {
+      console.error(err);
+      setDeletando(false);
+    }
+  }
+
   const paragrafos = reflexao.conteudo
     .split(/\n\n+/)
     .map((p) => p.trim())
@@ -39,6 +68,38 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       flexDirection: "column",
       gap: "2rem",
     }}>
+
+      {/* ── Barra de ações do autor ─────────────────────────────────── */}
+      {isOwner && (
+        <div style={{
+          display: "flex",
+          gap: "0.625rem",
+          padding: "0.875rem 1.125rem",
+          background: "var(--bg-elevated)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius-lg)",
+          alignItems: "center",
+        }}>
+          <span style={{ fontSize: "0.78rem", color: "var(--text-3)", fontWeight: 600, flex: 1 }}>
+            Você é o autor desta reflexão
+          </span>
+          <button
+            onClick={() => router.push(`/editar-reflexao/${reflexao.id}`)}
+            className="post-btn-edit"
+            style={{ fontSize: "0.78rem", padding: "6px 14px" }}
+          >
+            ✏ Editar
+          </button>
+          <button
+            onClick={handleDeletar}
+            disabled={deletando}
+            className="post-btn-delete"
+            style={{ fontSize: "0.78rem", padding: "6px 14px", opacity: deletando ? 0.6 : 1 }}
+          >
+            {deletando ? "Apagando..." : "🗑 Apagar"}
+          </button>
+        </div>
+      )}
 
       {/* ── Imagem de capa ── */}
       {reflexao.imagemCapa && (
