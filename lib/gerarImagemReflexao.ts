@@ -1,77 +1,76 @@
 /**
  * lib/gerarImagemReflexao.ts
  *
- * Gera uma URL de imagem de capa via Pollinations.ai com base no microtema
- * de cada reflexão. Sem chave de API, sem custo.
- *
- * Estratégia:
- * 1. Monta um prompt visual em inglês a partir do título/tema da reflexão
- * 2. Faz um fetch HEAD para verificar se a Pollinations respondeu (timeout 8s)
- * 3. Se falhar, retorna a imagemCapaFallback (imagem do sermão original)
+ * Busca uma imagem de capa no Unsplash baseada no microtema da reflexão.
+ * Gratuito até 50 requests/hora (Demo) ou 5.000/hora (Production).
+ * Fallback: imagem de capa do sermão original.
  */
 
-const BASE_URL = "https://image.pollinations.ai/prompt";
+const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY!;
 
-/**
- * Converte o título de uma reflexão num prompt visual adequado
- * para imagens pastorais/espirituais.
- */
-function montarPromptVisual(tituloReflexao: string): string {
-  // Instrução em inglês: Pollinations performa melhor com prompts em EN
-  return (
-    `Cinematic Christian pastoral photograph. Theme: "${tituloReflexao}". ` +
-    "Soft golden light rays through dark forest or ancient stone chapel. " +
-    "Mist, depth, solemnity. No text, no people, no crosses as clichés. " +
-    "Aspect ratio 1200x630. Ultra-realistic, award-winning photography."
-  );
+// Mapeia palavras-chave do título para termos de busca em inglês
+// que retornam fotos adequadas para conteúdo pastoral
+function extrairTermoBusca(tituloReflexao: string): string {
+  const titulo = tituloReflexao.toLowerCase();
+
+  if (titulo.match(/paz|peace|tranquil/)) return "peaceful nature light";
+  if (titulo.match(/missão|mission|propósito|purpose/)) return "path road journey";
+  if (titulo.match(/fé|faith|crer|believe/)) return "light hope sky";
+  if (titulo.match(/oração|prayer|pray/)) return "hands prayer meditation";
+  if (titulo.match(/graça|grace|misericórdia|mercy/)) return "sunrise golden light";
+  if (titulo.match(/amor|love|ágape/)) return "warm light nature";
+  if (titulo.match(/esperança|hope/)) return "dawn sunrise horizon";
+  if (titulo.match(/perdão|forgiveness/)) return "open hands light";
+  if (titulo.match(/identidade|identity|posição|position/)) return "mountain peak above clouds";
+  if (titulo.match(/vocação|calling|vocation/)) return "open road horizon sky";
+  if (titulo.match(/palavra|word|bíblia|bible|scripture/)) return "open book light";
+  if (titulo.match(/igreja|church|comunidade|community/)) return "church architecture light";
+  if (titulo.match(/sofrimento|suffering|dor|pain/)) return "rain storm dramatic sky";
+  if (titulo.match(/vitória|victory|superar|overcome/)) return "mountain summit achievement";
+  if (titulo.match(/sabedoria|wisdom/)) return "ancient tree roots forest";
+  if (titulo.match(/família|family|lar|home/)) return "warm home family light";
+
+  // Fallback genérico pastoral
+  return "nature light spiritual peaceful";
 }
 
-/**
- * Retorna a URL da imagem gerada pela Pollinations.
- * Faz um fetch HEAD para validar antes de retornar.
- * Se falhar dentro do timeout, retorna o fallback.
- */
 export async function gerarImagemReflexao(
   tituloReflexao: string,
   imagemCapaFallback: string
 ): Promise<string> {
   try {
-    const prompt = encodeURIComponent(montarPromptVisual(tituloReflexao));
-    // seed baseado no título garante imagens diferentes por reflexão,
-    // mas determinísticas (boa para cache/og:image estável)
-    const seed = hashSimples(tituloReflexao);
-    const url = `${BASE_URL}/${prompt}?width=1200&height=630&nologo=true&seed=${seed}&model=flux`;
-
-    // Valida se a Pollinations está acessível (timeout de 8s)
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
+    const termo = extrairTermoBusca(tituloReflexao);
+    const url = `https://api.unsplash.com/photos/random?query=${encodeURIComponent(termo)}&orientation=landscape&content_filter=high`;
 
     const res = await fetch(url, {
-      method: "HEAD",
-      signal: controller.signal,
+      headers: {
+        Authorization: `Client-ID ${UNSPLASH_ACCESS_KEY}`,
+        // Atribuição obrigatória pelos termos do Unsplash
+        "Accept-Version": "v1",
+      },
     });
-    clearTimeout(timeout);
 
-    if (res.ok || res.status === 200) {
-      return url;
+    if (!res.ok) {
+      console.warn("[gerarImagemReflexao] Unsplash retornou:", res.status);
+      return imagemCapaFallback;
     }
 
-    console.warn("[gerarImagemReflexao] Pollinations retornou status:", res.status);
-    return imagemCapaFallback;
-  } catch (err) {
-    console.warn("[gerarImagemReflexao] Falha ao verificar imagem, usando fallback:", err);
-    return imagemCapaFallback;
-  }
-}
+    const data = await res.json();
 
-/**
- * Hash numérico simples de uma string (djb2).
- * Usado como seed para tornar a imagem determinística por título.
- */
-function hashSimples(str: string): number {
-  let hash = 5381;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash * 33) ^ str.charCodeAt(i);
+    // Unsplash exige que disparemos o evento de download
+    // quando a foto é "usada" — fazemos isso de forma assíncrona
+    if (data.links?.download_location) {
+      fetch(`${data.links.download_location}&client_id=${UNSPLASH_ACCESS_KEY}`)
+        .catch(() => {}); // silencia erros do tracking
+    }
+
+    // Retorna a URL da imagem em tamanho regular (adequado para og:image)
+    // com parâmetros para forçar 1200x630
+    const imageUrl = data.urls?.regular ?? data.urls?.full ?? imagemCapaFallback;
+    return imageUrl;
+
+  } catch (err) {
+    console.warn("[gerarImagemReflexao] Erro ao buscar imagem:", err);
+    return imagemCapaFallback;
   }
-  return Math.abs(hash >>> 0);
 }
