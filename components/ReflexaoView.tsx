@@ -220,6 +220,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
         </p>
         <CompartilharWhatsapp
           fraseInstigadora={reflexao.fraseInstigadora}
+          conteudo={reflexao.conteudo}
           slug={reflexao.slug}
           autorSlug={autorSlug}
         />
