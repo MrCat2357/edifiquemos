@@ -14,9 +14,13 @@ import {
   arrayUnion,
   arrayRemove,
   increment,
+  deleteDoc,
 } from "firebase/firestore";
 import { useParams, useRouter } from "next/navigation";
 import { gerarPDF } from "@/lib/gerarPDF";
+import { getReflexoesPorAutor } from "@/lib/reflexoes";
+import type { Reflexao } from "@/lib/reflexoes";
+import CardReflexao from "@/components/reflexoes/CardReflexao";
 
 type User = {
   nome?: string;
@@ -25,6 +29,8 @@ type User = {
   slug?: string;
   fotoUrl?: string | null;
 };
+
+/* ── Helpers ────────────────────────────────────────── */
 
 function getInitials(name: string) {
   if (!name) return "?";
@@ -54,6 +60,8 @@ function Avatar({ src, name, size = 64 }: { src?: string | null; name: string; s
   );
 }
 
+/* ── SVG Icons ──────────────────────────────────────── */
+
 function IconHeart({ size = 13, filled = false }: { size?: number; filled?: boolean }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
@@ -81,18 +89,7 @@ function IconDownload({ size = 13 }: { size?: number }) {
   );
 }
 
-async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: User } | null> {
-  const qSlug = query(collection(db, "users"), where("slug", "==", idOuSlug));
-  const snapSlug = await getDocs(qSlug);
-  if (!snapSlug.empty) {
-    const docSnap = snapSlug.docs[0];
-    return { uid: docSnap.id, userData: docSnap.data() as User };
-  }
-  const docRef = doc(db, "users", idOuSlug);
-  const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) return { uid: docSnap.id, userData: docSnap.data() as User };
-  return null;
-}
+/* ── Toast ──────────────────────────────────────────── */
 
 function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   return (
@@ -111,11 +108,43 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   );
 }
 
+/* ── resolverUid ────────────────────────────────────── */
+
+async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: User } | null> {
+  const qSlug = query(collection(db, "users"), where("slug", "==", idOuSlug));
+  const snapSlug = await getDocs(qSlug);
+  if (!snapSlug.empty) {
+    const docSnap = snapSlug.docs[0];
+    return { uid: docSnap.id, userData: docSnap.data() as User };
+  }
+  const docRef = doc(db, "users", idOuSlug);
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) return { uid: docSnap.id, userData: docSnap.data() as User };
+  return null;
+}
+
 /* ── SerieCardPublico ────────────────────────────────── */
 
-function SerieCardPublico({ serie, index }: { serie: any; index: number }) {
+function SerieCardPublico({
+  serie, index, isOwner, onToast,
+}: {
+  serie: any; index: number; isOwner: boolean; onToast: (msg: string) => void;
+}) {
   const router = useRouter();
   const postCount = serie.postIds?.length ?? 0;
+
+  async function handleDeletar(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Tem certeza que deseja apagar esta série?")) return;
+    try {
+      await deleteDoc(doc(db, "series", serie.id));
+      onToast("Série apagada.");
+      router.refresh();
+    } catch (err) {
+      console.error(err);
+      onToast("Erro ao apagar série.");
+    }
+  }
 
   return (
     <article
@@ -147,7 +176,6 @@ function SerieCardPublico({ serie, index }: { serie: any; index: number }) {
             </span>
           </div>
         )}
-
         <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
           {serie.imagemUrl && (
             <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
@@ -159,14 +187,43 @@ function SerieCardPublico({ serie, index }: { serie: any; index: number }) {
           </h2>
           {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
         </div>
+        <div
+          className="card-footer-row"
+          style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Botões owner */}
+          {isOwner && (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
+                className="post-btn-edit"
+                style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+              >
+                ✏ Editar
+              </button>
+              <button
+                onClick={handleDeletar}
+                className="post-btn-delete"
+                style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+              >
+                🗑 Apagar
+              </button>
+            </>
+          )}
 
-        <div className="card-footer-row" style={{ display: "flex", alignItems: "center" }}
-          onClick={(e) => e.stopPropagation()}>
-          <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>
-            Coleção temática de sermões e artigos
-          </span>
-          <span className="read-link" style={{ marginLeft: "auto" }}
-            onClick={() => router.push(`/series/${serie.slug}`)}>
+          {/* Se não é owner: texto descritivo à esquerda */}
+          {!isOwner && (
+            <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>
+              Coleção temática de sermões e artigos
+            </span>
+          )}
+
+          <span
+            className="read-link"
+            style={{ marginLeft: "auto" }}
+            onClick={() => router.push(`/series/${serie.slug}`)}
+          >
             Ver série →
           </span>
         </div>
@@ -178,10 +235,10 @@ function SerieCardPublico({ serie, index }: { serie: any; index: number }) {
 /* ── PostCardPerfil ─────────────────────────────────── */
 
 function PostCardPerfil({
-  post, index, user, nomeExibicao, autorUid, onToast,
+  post, index, user, nomeExibicao, autorUid, isOwner, onToast,
 }: {
   post: any; index: number; user: User; nomeExibicao: string;
-  autorUid: string; onToast: (msg: string) => void;
+  autorUid: string; isOwner: boolean; onToast: (msg: string) => void;
 }) {
   const router = useRouter();
   const currentUid = auth.currentUser?.uid;
@@ -257,10 +314,49 @@ function PostCardPerfil({
     setGerandoPdf(false);
   }
 
+  async function handleDeletar(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Tem certeza que deseja apagar este post?")) return;
+    try {
+      await deleteDoc(doc(db, "posts", post.id));
+      onToast("Post apagado.");
+      router.refresh();
+    } catch (err) {
+      console.error(err);
+      onToast("Erro ao apagar post.");
+    }
+  }
+
+  const ownerButtons = isOwner ? (
+    <>
+      <button
+        onClick={(e) => { e.stopPropagation(); router.push(`/editar-post/${post.id}`); }}
+        className="post-btn-edit"
+        style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+      >
+        ✏ Editar
+      </button>
+      <button
+        onClick={handleDeletar}
+        className="post-btn-delete"
+        style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+      >
+        🗑 Apagar
+      </button>
+    </>
+  ) : null;
+
   const footerRow = (
     <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }}
       onClick={(e) => e.stopPropagation()}>
       <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+        {/* Ações owner ficam antes das ações públicas */}
+        {isOwner && (
+          <div style={{ display: "flex", gap: "0.5rem", marginRight: "4px" }}>
+            {ownerButtons}
+          </div>
+        )}
+
         <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike}
           disabled={loadingLike}
           title={currentUid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
@@ -269,7 +365,6 @@ function PostCardPerfil({
           Amei
           {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
         </button>
-
         <button className="action-btn" onClick={handleDownloadPdf} disabled={gerandoPdf}
           title="Baixar como PDF"
           style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
@@ -281,7 +376,6 @@ function PostCardPerfil({
             </span>
           )}
         </button>
-
         {viewCount > 0 && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}
             title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}>
@@ -350,6 +444,63 @@ function PostCardPerfil({
   );
 }
 
+/* ── CardReflexaoPublico ─────────────────────────────── */
+// Wrapper em torno do CardReflexao existente para adicionar botões owner
+
+function CardReflexaoComControles({
+  reflexao, index, isOwner, onToast,
+}: {
+  reflexao: Reflexao; index: number; isOwner: boolean; onToast: (msg: string) => void;
+}) {
+  const router = useRouter();
+
+  async function handleDeletar(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Tem certeza que deseja apagar esta reflexão?")) return;
+    try {
+      await deleteDoc(doc(db, "reflexoes", reflexao.id!));
+      onToast("Reflexão apagada.");
+      router.refresh();
+    } catch (err) {
+      console.error(err);
+      onToast("Erro ao apagar reflexão.");
+    }
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <CardReflexao reflexao={reflexao} />
+      {isOwner && (
+        <div
+          style={{
+            display: "flex",
+            gap: "0.5rem",
+            padding: "0 1.125rem 0.875rem",
+            // Fica logo abaixo do CardReflexao — usa margem negativa para grudar no card
+            marginTop: "-0.25rem",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={(e) => { e.stopPropagation(); router.push(`/editar-reflexao/${reflexao.id}`); }}
+            className="post-btn-edit"
+            style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+          >
+            ✏ Editar
+          </button>
+          <button
+            onClick={handleDeletar}
+            className="post-btn-delete"
+            style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+          >
+            🗑 Apagar
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── PerfilPublico ───────────────────────────────────── */
 
 export default function PerfilPublico() {
@@ -360,8 +511,13 @@ export default function PerfilPublico() {
   const [uid, setUid] = useState<string | null>(null);
   const [posts, setPosts] = useState<any[]>([]);
   const [series, setSeries] = useState<any[]>([]);
-  const [aba, setAba] = useState<"posts" | "series">("posts");
+  const [reflexoes, setReflexoes] = useState<Reflexao[]>([]);
+  const [aba, setAba] = useState<"posts" | "series" | "reflexoes">("posts");
   const [loading, setLoading] = useState(true);
+
+  // uid do visitante logado (pode ser null se não logado)
+  const [visitorUid, setVisitorUid] = useState<string | null>(null);
+
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -372,6 +528,11 @@ export default function PerfilPublico() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastVisible(false), 2200);
   }
+
+  useEffect(() => {
+    // Captura o uid do visitante assim que o componente monta
+    setVisitorUid(auth.currentUser?.uid ?? null);
+  }, []);
 
   useEffect(() => {
     async function carregar() {
@@ -387,10 +548,11 @@ export default function PerfilPublico() {
           router.replace(`/perfil/${resultado.userData.slug}`);
         }
 
-        const [postsSnap, seriesSnap] = await Promise.all([
+        const [postsSnap, seriesSnap, reflexoesData] = await Promise.all([
           getDocs(query(
             collection(db, "posts"),
             where("autorId", "==", resultado.uid),
+            where("tipo", "in", ["sermao", "artigo"]),
             orderBy("data", "desc")
           )),
           getDocs(query(
@@ -398,6 +560,7 @@ export default function PerfilPublico() {
             where("autorId", "==", resultado.uid),
             orderBy("criadoEm", "desc")
           )),
+          getReflexoesPorAutor(resultado.uid),
         ]);
 
         const listaP: any[] = [];
@@ -407,6 +570,8 @@ export default function PerfilPublico() {
         const listaS: any[] = [];
         seriesSnap.forEach((d) => listaS.push({ id: d.id, ...d.data() }));
         setSeries(listaS);
+
+        setReflexoes(reflexoesData);
       } catch (err) { console.error(err); }
       setLoading(false);
     }
@@ -420,6 +585,9 @@ export default function PerfilPublico() {
     user.titulo && user.nome
       ? `${user.titulo} ${user.nome}`
       : user.nome || "Usuário";
+
+  // O visitante é o dono do perfil?
+  const isOwner = !!visitorUid && visitorUid === uid;
 
   return (
     <>
@@ -440,14 +608,27 @@ export default function PerfilPublico() {
                 <span className="perfil-stat-num">{series.length}</span>
                 <span className="perfil-stat-label">série{series.length !== 1 ? "s" : ""}</span>
               </div>
+              <div className="perfil-stat">
+                <span className="perfil-stat-num">{reflexoes.length}</span>
+                <span className="perfil-stat-label">reflexões</span>
+              </div>
             </div>
           </div>
+
+          {/* Se é o dono, exibe atalho para o perfil de edição */}
+          {isOwner && (
+            <div style={{ alignSelf: "flex-start" }}>
+              <button className="post-btn-edit" onClick={() => router.push("/perfil")}>
+                ✏ Editar perfil
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="perfil-posts-section">
           {/* Abas */}
           <div style={{ display: "flex", gap: "0", borderBottom: "1px solid var(--border)", marginBottom: "1.5rem" }}>
-            {(["posts", "series"] as const).map((a) => (
+            {(["posts", "series", "reflexoes"] as const).map((a) => (
               <button
                 key={a}
                 onClick={() => setAba(a)}
@@ -464,9 +645,9 @@ export default function PerfilPublico() {
                   marginBottom: "-1px",
                 }}
               >
-                {a === "posts"
-                  ? `Publicações (${posts.length})`
-                  : `Séries (${series.length})`}
+                {a === "posts" && `Publicações (${posts.length})`}
+                {a === "series" && `Séries (${series.length})`}
+                {a === "reflexoes" && `Reflexões (${reflexoes.length})`}
               </button>
             ))}
           </div>
@@ -483,6 +664,7 @@ export default function PerfilPublico() {
                     user={user}
                     nomeExibicao={nomeExibicao}
                     autorUid={uid!}
+                    isOwner={isOwner}
                     onToast={showToast}
                   />
                 ))}
@@ -497,7 +679,32 @@ export default function PerfilPublico() {
               )}
               <div className="posts-list">
                 {series.map((serie, i) => (
-                  <SerieCardPublico key={serie.id} serie={serie} index={i} />
+                  <SerieCardPublico
+                    key={serie.id}
+                    serie={serie}
+                    index={i}
+                    isOwner={isOwner}
+                    onToast={showToast}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {aba === "reflexoes" && (
+            <>
+              {reflexoes.length === 0 && (
+                <div className="empty-state">Este autor ainda não criou nenhuma reflexão.</div>
+              )}
+              <div className="posts-list">
+                {reflexoes.map((r, i) => (
+                  <CardReflexaoComControles
+                    key={r.id ?? i}
+                    reflexao={r}
+                    index={i}
+                    isOwner={isOwner}
+                    onToast={showToast}
+                  />
                 ))}
               </div>
             </>
