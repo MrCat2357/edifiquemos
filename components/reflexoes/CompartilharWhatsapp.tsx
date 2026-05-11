@@ -20,22 +20,33 @@ function IconWhatsApp({ size = 16 }: { size?: number }) {
 
 type Props = {
   fraseInstigadora: string;
+  conteudo: string;
   slug: string;
   autorSlug: string;
 };
 
-export default function CompartilharWhatsapp({ fraseInstigadora, slug, autorSlug }: Props) {
+export default function CompartilharWhatsapp({
+  fraseInstigadora,
+  conteudo,
+  slug,
+  autorSlug,
+}: Props) {
   const [hovered, setHovered] = useState(false);
   const [copiado, setCopiado] = useState(false);
 
-  // A URL pública da reflexão — o WhatsApp vai puxar og:image e og:description automaticamente
   const urlReflexao =
     typeof window !== "undefined"
       ? `${window.location.origin}/${autorSlug}/reflexao/${slug}`
       : `https://edifiquemos.com.br/${autorSlug}/reflexao/${slug}`;
 
-  // Mensagem: frase instigadora + link (imagem vem pelo Open Graph do WhatsApp)
-  const mensagem = `${fraseInstigadora}\n\n${urlReflexao}`;
+  // Trecho de 200 caracteres do conteúdo terminando em "..."
+  const trecho =
+    conteudo.length > 200
+      ? conteudo.slice(0, 200).trimEnd() + "..."
+      : conteudo;
+
+  // Formato: frase instigadora + trecho + link
+  const mensagem = `${fraseInstigadora}\n\n${trecho}\n\n${urlReflexao}`;
 
   function handleCompartilhar() {
     const encoded = encodeURIComponent(mensagem);
@@ -54,7 +65,6 @@ export default function CompartilharWhatsapp({ fraseInstigadora, slug, autorSlug
 
   return (
     <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-      {/* Botão principal: abrir WhatsApp */}
       <button
         type="button"
         onClick={handleCompartilhar}
@@ -81,7 +91,6 @@ export default function CompartilharWhatsapp({ fraseInstigadora, slug, autorSlug
         Compartilhar no WhatsApp
       </button>
 
-      {/* Botão secundário: copiar mensagem */}
       <button
         type="button"
         onClick={handleCopiar}

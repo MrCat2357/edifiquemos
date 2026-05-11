@@ -56,31 +56,16 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
               style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
             />
           </div>
-
-          {/* Atribuição obrigatória do Unsplash */}
           {temAtribuicao && (
-            <p style={{
-              fontSize: "0.7rem",
-              color: "var(--text-3)",
-              margin: 0,
-              textAlign: "right",
-            }}>
+            <p style={{ fontSize: "0.7rem", color: "var(--text-3)", margin: 0, textAlign: "right" }}>
               Foto por{" "}
-              <a
-                href={reflexao.imagemFotografoUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: "var(--text-3)", textDecoration: "underline" }}
-              >
+              <a href={reflexao.imagemFotografoUrl} target="_blank" rel="noopener noreferrer"
+                style={{ color: "var(--text-3)", textDecoration: "underline" }}>
                 {reflexao.imagemFotografoNome}
               </a>
               {" "}no{" "}
-              <a
-                href={reflexao.imagemUnsplashUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: "var(--text-3)", textDecoration: "underline" }}
-              >
+              <a href={reflexao.imagemUnsplashUrl} target="_blank" rel="noopener noreferrer"
+                style={{ color: "var(--text-3)", textDecoration: "underline" }}>
                 Unsplash
               </a>
             </p>
@@ -103,7 +88,6 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
         }}>
           Reflexão
         </span>
-
         <h1 style={{
           fontSize: "clamp(1.5rem, 4vw, 2rem)",
           fontWeight: 800,
@@ -113,7 +97,6 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
         }}>
           {reflexao.titulo}
         </h1>
-
         <p style={{ fontSize: "0.85rem", color: "var(--text-3)", margin: 0 }}>
           Por{" "}
           <Link href={`/perfil/${autorSlug}`} style={{ color: "var(--emerald)", textDecoration: "none" }}>
@@ -201,6 +184,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
         </p>
         <CompartilharWhatsapp
           fraseInstigadora={reflexao.fraseInstigadora}
+          conteudo={reflexao.conteudo}
           slug={reflexao.slug}
           autorSlug={autorSlug}
         />
