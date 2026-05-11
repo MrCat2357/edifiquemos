@@ -2,14 +2,19 @@
  * lib/gerarImagemReflexao.ts
  *
  * Busca uma imagem de capa no Unsplash baseada no microtema da reflexão.
- * Gratuito até 50 requests/hora (Demo) ou 5.000/hora (Production).
- * Fallback: imagem de capa do sermão original.
+ * Retorna a URL da imagem + dados de atribuição do fotógrafo (obrigatório
+ * pelos termos do Unsplash).
  */
 
 const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY!;
 
-// Mapeia palavras-chave do título para termos de busca em inglês
-// que retornam fotos adequadas para conteúdo pastoral
+export interface ImagemReflexao {
+  url: string;
+  fotografoNome: string;
+  fotografoUrl: string;
+  unsplashUrl: string;
+}
+
 function extrairTermoBusca(tituloReflexao: string): string {
   const titulo = tituloReflexao.toLowerCase();
 
@@ -30,14 +35,13 @@ function extrairTermoBusca(tituloReflexao: string): string {
   if (titulo.match(/sabedoria|wisdom/)) return "ancient tree roots forest";
   if (titulo.match(/família|family|lar|home/)) return "warm home family light";
 
-  // Fallback genérico pastoral
   return "nature light spiritual peaceful";
 }
 
 export async function gerarImagemReflexao(
   tituloReflexao: string,
   imagemCapaFallback: string
-): Promise<string> {
+): Promise<ImagemReflexao> {
   try {
     const termo = extrairTermoBusca(tituloReflexao);
     const url = `https://api.unsplash.com/photos/random?query=${encodeURIComponent(termo)}&orientation=landscape&content_filter=high`;
@@ -45,32 +49,42 @@ export async function gerarImagemReflexao(
     const res = await fetch(url, {
       headers: {
         Authorization: `Client-ID ${UNSPLASH_ACCESS_KEY}`,
-        // Atribuição obrigatória pelos termos do Unsplash
         "Accept-Version": "v1",
       },
     });
 
     if (!res.ok) {
       console.warn("[gerarImagemReflexao] Unsplash retornou:", res.status);
-      return imagemCapaFallback;
+      return fallback(imagemCapaFallback);
     }
 
     const data = await res.json();
 
-    // Unsplash exige que disparemos o evento de download
-    // quando a foto é "usada" — fazemos isso de forma assíncrona
+    // Dispara o evento de download obrigatório pelos termos do Unsplash
     if (data.links?.download_location) {
       fetch(`${data.links.download_location}&client_id=${UNSPLASH_ACCESS_KEY}`)
-        .catch(() => {}); // silencia erros do tracking
+        .catch(() => {});
     }
 
-    // Retorna a URL da imagem em tamanho regular (adequado para og:image)
-    // com parâmetros para forçar 1200x630
-    const imageUrl = data.urls?.regular ?? data.urls?.full ?? imagemCapaFallback;
-    return imageUrl;
+    const appName = "Edifiquemos";
+    const fotografoNome: string = data.user?.name ?? "Unsplash";
+    const fotografoUrl: string =
+      `${data.user?.links?.html ?? "https://unsplash.com"}?utm_source=${appName}&utm_medium=referral`;
+    const unsplashUrl = `https://unsplash.com/?utm_source=${appName}&utm_medium=referral`;
+    const imageUrl: string = data.urls?.regular ?? data.urls?.full ?? imagemCapaFallback;
 
+    return { url: imageUrl, fotografoNome, fotografoUrl, unsplashUrl };
   } catch (err) {
-    console.warn("[gerarImagemReflexao] Erro ao buscar imagem:", err);
-    return imagemCapaFallback;
+    console.warn("[gerarImagemReflexao] Erro:", err);
+    return fallback(imagemCapaFallback);
   }
+}
+
+function fallback(imagemCapaFallback: string): ImagemReflexao {
+  return {
+    url: imagemCapaFallback,
+    fotografoNome: "",
+    fotografoUrl: "",
+    unsplashUrl: "",
+  };
 }

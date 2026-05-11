@@ -27,6 +27,10 @@ export interface Reflexao {
   perguntaReflexiva: string;
   ctaTexto: string;
   imagemCapa: string;
+  // Atribuição obrigatória do Unsplash
+  imagemFotografoNome?: string;
+  imagemFotografoUrl?: string;
+  imagemUnsplashUrl?: string;
   tipo: "reflexao";
   criadoEm: Timestamp | null;
 }
