@@ -23,28 +23,16 @@ export async function POST(req: NextRequest) {
       publicacaoOrigemSlug: string;
     } = await req.json();
 
-    // ── Validações ─────────────────────────────────────────────────────────
     if (!reflexoes || !Array.isArray(reflexoes) || reflexoes.length !== 3) {
-      return NextResponse.json(
-        { erro: "Envie exatamente 3 reflexões." },
-        { status: 400 }
-      );
+      return NextResponse.json({ erro: "Envie exatamente 3 reflexões." }, { status: 400 });
     }
     if (!autorId || !autorNome || !autorSlug || !publicacaoOrigemId || !publicacaoOrigemSlug) {
-      return NextResponse.json(
-        { erro: "Campos do autor e da publicação de origem são obrigatórios." },
-        { status: 400 }
-      );
+      return NextResponse.json({ erro: "Campos obrigatórios faltando." }, { status: 400 });
     }
 
-    // ── Busca post de origem via Admin SDK ────────────────────────────────
     const postSnap = await adminDb.collection("posts").doc(publicacaoOrigemId).get();
-
     if (!postSnap.exists) {
-      return NextResponse.json(
-        { erro: "Publicação de origem não encontrada." },
-        { status: 404 }
-      );
+      return NextResponse.json({ erro: "Publicação de origem não encontrada." }, { status: 404 });
     }
 
     const postData = postSnap.data()!;
@@ -52,18 +40,17 @@ export async function POST(req: NextRequest) {
     const publicacaoOrigemTipo: "sermao" | "artigo" =
       postData.tipo === "artigo" ? "artigo" : "sermao";
 
-    // ── Gera imagem única por reflexão (em paralelo) ──────────────────────
-    const imagensCapas = await Promise.all(
+    // Gera imagem única por reflexão em paralelo
+    const imagensGeradas = await Promise.all(
       reflexoes.map((r) => gerarImagemReflexao(r.titulo, imagemCapaOrigem))
     );
 
-    // ── Salva cada reflexão no Firestore via Admin SDK ────────────────────
     const slugsSalvos: string[] = [];
 
     for (let i = 0; i < reflexoes.length; i++) {
       const r = reflexoes[i];
+      const imagem = imagensGeradas[i];
       const slug = await gerarSlugUnico(autorNome, r.titulo);
-      const imagemCapa = imagensCapas[i] || imagemCapaOrigem;
 
       await adminDb.collection("posts").add({
         slug,
@@ -78,7 +65,10 @@ export async function POST(req: NextRequest) {
         fraseInstigadora: r.fraseInstigadora,
         perguntaReflexiva: r.perguntaReflexiva,
         ctaTexto: r.ctaTexto,
-        imagemCapa,
+        imagemCapa: imagem.url,
+        imagemFotografoNome: imagem.fotografoNome,
+        imagemFotografoUrl: imagem.fotografoUrl,
+        imagemUnsplashUrl: imagem.unsplashUrl,
         tipo: "reflexao",
         criadoEm: FieldValue.serverTimestamp(),
       });
