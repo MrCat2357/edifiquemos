@@ -39,10 +39,10 @@ export default function CompartilharWhatsapp({
       ? `${window.location.origin}/${autorSlug}/reflexao/${slug}`
       : `https://edifiquemos.com.br/${autorSlug}/reflexao/${slug}`;
 
-  // Trecho de 200 caracteres do conteúdo terminando em "..."
+  // Trecho de 100 caracteres do conteúdo terminando em "..."
   const trecho =
-    conteudo.length > 200
-      ? conteudo.slice(0, 200).trimEnd() + "..."
+    conteudo.length > 100
+      ? conteudo.slice(0, 100).trimEnd() + "..."
       : conteudo;
 
   // Formato: frase instigadora + trecho + link
