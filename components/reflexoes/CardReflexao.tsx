@@ -6,12 +6,16 @@ import type { Reflexao } from "@/lib/reflexoes";
 
 type Props = {
   reflexao: Reflexao;
+  /** Passa true quando renderizado dentro de um contexto que já cuida de editar/deletar (ex: feed). */
+  hideActions?: boolean;
 };
 
-export default function CardReflexao({ reflexao }: Props) {
+export default function CardReflexao({ reflexao, hideActions = false }: Props) {
   const [hovered, setHovered] = useState(false);
 
   const href = `/${reflexao.autorSlug}/reflexao/${reflexao.slug}`;
+
+  const borderColor = hovered ? "var(--emerald-dim)" : "var(--border-light)";
 
   return (
     <Link
@@ -23,9 +27,12 @@ export default function CardReflexao({ reflexao }: Props) {
         flexDirection: "column",
         gap: "0.75rem",
         padding: "1.125rem",
-        borderRadius: "var(--radius-lg)",
+        borderRadius: hideActions ? "var(--radius-lg) var(--radius-lg) 0 0" : "var(--radius-lg)",
         background: hovered ? "var(--bg-card)" : "var(--bg-elevated)",
-        border: `1px solid ${hovered ? "var(--emerald-dim)" : "var(--border-light)"}`,
+        borderTop: `1px solid ${borderColor}`,
+        borderRight: `1px solid ${borderColor}`,
+        borderLeft: `1px solid ${borderColor}`,
+        borderBottom: hideActions ? "none" : `1px solid ${borderColor}`,
         boxShadow: hovered ? "0 4px 20px rgba(0,0,0,0.08)" : "none",
         textDecoration: "none",
         transition: "all 0.2s cubic-bezier(0.4,0,0.2,1)",

@@ -9,14 +9,17 @@ import {
   orderBy,
   doc,
   updateDoc,
+  deleteDoc,
   arrayUnion,
   arrayRemove,
   increment,
+  where,
 } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
+import CardReflexao from "@/components/reflexoes/CardReflexao";
 
 const PAGE_SIZE = 8;
 
@@ -300,12 +303,84 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   );
 }
 
-function FeedItem({ item, index, onAuthorClick, onToast }: {
+// ─────────────────────────────────────────────────────────────
+// ReflexaoFeedCard — wrapper do CardReflexao para o feed
+// ─────────────────────────────────────────────────────────────
+function ReflexaoFeedCard({
+  reflexao,
+  index,
+  currentUid,
+  onDeleted,
+  onToast,
+}: {
+  reflexao: any;
+  index: number;
+  currentUid: string | null;
+  onDeleted: (id: string) => void;
+  onToast: (msg: string) => void;
+}) {
+  const isAutor = !!currentUid && currentUid === reflexao.autorId;
+
+  async function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Tem certeza que deseja excluir esta reflexão? Esta ação não pode ser desfeita.")) return;
+    try {
+      await deleteDoc(doc(db, "posts", reflexao.id));
+      onDeleted(reflexao.id);
+      onToast("Reflexão excluída.");
+    } catch (err) {
+      console.error(err);
+      onToast("Erro ao excluir reflexão.");
+    }
+  }
+
+  return (
+    <div style={{ position: "relative", animationDelay: `${index * 60}ms` }} className="reflexao-feed-item">
+      <CardReflexao reflexao={reflexao} />
+      {isAutor && (
+        <div
+          className="reflexao-owner-actions"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <a
+            href={`/${reflexao.autorSlug}/reflexao/${reflexao.slug}/editar`}
+            className="reflexao-action-btn reflexao-action-edit"
+            title="Editar reflexão"
+          >
+            ✏️ Editar
+          </a>
+          <button
+            className="reflexao-action-btn reflexao-action-delete"
+            onClick={handleDelete}
+            title="Excluir reflexão"
+          >
+            🗑️ Excluir
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeedItem({ item, index, onAuthorClick, onToast, currentUid, onReflexaoDeleted }: {
   item: any; index: number;
   onAuthorClick: (e: React.MouseEvent, id: string) => void;
   onToast: (msg: string) => void;
+  currentUid: string | null;
+  onReflexaoDeleted: (id: string) => void;
 }) {
   if (item._feedType === "serie") return <SerieCard serie={item} index={index} />;
+  if (item._feedType === "reflexao") {
+    return (
+      <ReflexaoFeedCard
+        reflexao={item}
+        index={index}
+        currentUid={currentUid}
+        onDeleted={onReflexaoDeleted}
+        onToast={onToast}
+      />
+    );
+  }
   return <PostCard post={item} index={index} onAuthorClick={onAuthorClick} onToast={onToast} />;
 }
 
@@ -329,21 +404,34 @@ function HomePageContent() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const feedRef = useRef<HTMLDivElement>(null);
 
+  const currentUid = auth.currentUser?.uid ?? null;
+
   useEffect(() => {
     async function fetchAll() {
       try {
-        const [postsSnap, seriesSnap] = await Promise.all([
-          getDocs(query(collection(db, "posts"), orderBy("data", "desc"))),
+        const [postsSnap, seriesSnap, reflexoesSnap] = await Promise.all([
+          getDocs(query(collection(db, "posts"), where("tipo", "in", ["sermao", "artigo"]), orderBy("data", "desc"))),
           getDocs(query(collection(db, "series"), orderBy("criadoEm", "desc"))),
+          getDocs(query(collection(db, "posts"), where("tipo", "==", "reflexao"), orderBy("criadoEm", "desc"))),
         ]);
+
         const posts: any[] = [];
         postsSnap.forEach((d) => posts.push({ id: d.id, _feedType: "post", ...d.data() }));
+
         const series: any[] = [];
         seriesSnap.forEach((d) => series.push({ id: d.id, _feedType: "serie", ...d.data() }));
-        const mixed = [...posts, ...series].sort((a, b) => getDataValor(b) - getDataValor(a));
+
+        const reflexoes: any[] = [];
+        reflexoesSnap.forEach((d) => reflexoes.push({ id: d.id, _feedType: "reflexao", ...d.data() }));
+
+        const mixed = [...posts, ...series, ...reflexoes].sort(
+          (a, b) => getDataValor(b) - getDataValor(a)
+        );
         setAllPosts(posts);
         setFeedItems(mixed);
-      } catch (error) { console.error("Erro ao buscar feed:", error); }
+      } catch (error) {
+        console.error("Erro ao buscar feed:", error);
+      }
       setLoading(false);
     }
     fetchAll();
@@ -352,7 +440,7 @@ function HomePageContent() {
   // Reset paginação ao mudar busca
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [buscaAtiva]);
 
-  // ✅ Scroll automático para o feed ao realizar pesquisa
+  // Scroll automático para o feed ao realizar pesquisa
   useEffect(() => {
     if (!buscaAtiva) return;
     const timer = setTimeout(() => {
@@ -388,6 +476,10 @@ function HomePageContent() {
     router.push(`/perfil/${autorId}`);
   }
 
+  function handleReflexaoDeleted(id: string) {
+    setFeedItems((prev) => prev.filter((item) => item.id !== id));
+  }
+
   function scrollToFeed(e: React.MouseEvent) {
     e.preventDefault();
     feedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -399,7 +491,8 @@ function HomePageContent() {
         return (
           normalizar(item.titulo || "").includes(termo) ||
           normalizar(item.autorNome || "").includes(termo) ||
-          normalizar(item.descricao || "").includes(termo)
+          normalizar(item.descricao || "").includes(termo) ||
+          normalizar(item.fraseInstigadora || "").includes(termo)
         );
       })
     : feedItems;
@@ -481,6 +574,8 @@ function HomePageContent() {
                     index={i}
                     onAuthorClick={handleAuthorClick}
                     onToast={showToast}
+                    currentUid={currentUid}
+                    onReflexaoDeleted={handleReflexaoDeleted}
                   />
                 ))}
               </div>
@@ -542,6 +637,44 @@ function HomePageContent() {
         .serie-card:hover .card-cover-img { transform: scale(1.025); }
         .card-cover-badge { position: absolute; top: 0.625rem; right: 0.75rem; backdrop-filter: blur(6px); background: rgba(10, 15, 10, 0.72) !important; }
         .card-image-content { display: flex; flex-direction: column; }
+
+        /* Reflexão no feed */
+        .reflexao-feed-item { position: relative; }
+        .reflexao-owner-actions {
+          display: flex;
+          gap: 0.5rem;
+          padding: 0.5rem 0.75rem;
+          border-top: 1px solid var(--border-light);
+          background: var(--bg-elevated);
+          border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+          margin-top: -1px;
+        }
+        .reflexao-action-btn {
+          font-size: 0.72rem;
+          font-weight: 600;
+          padding: 4px 10px;
+          border-radius: var(--radius-full);
+          border: 1px solid var(--border-light);
+          background: none;
+          cursor: pointer;
+          text-decoration: none;
+          transition: all 0.15s ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          color: var(--text-2);
+        }
+        .reflexao-action-edit:hover {
+          border-color: var(--emerald-dim);
+          color: var(--emerald);
+          background: var(--emerald-dim);
+        }
+        .reflexao-action-delete:hover {
+          border-color: rgba(239,68,68,0.3);
+          color: #ef4444;
+          background: rgba(239,68,68,0.08);
+        }
+
         @media (max-width: 640px) {
           .card-cover-wrapper { max-height: 320px; min-height: 120px; }
           .card-cover-img { max-height: 320px; }

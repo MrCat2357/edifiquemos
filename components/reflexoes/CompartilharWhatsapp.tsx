@@ -45,8 +45,8 @@ export default function CompartilharWhatsapp({
       ? conteudo.slice(0, 100).trimEnd() + "..."
       : conteudo;
 
-  // Formato: frase instigadora + trecho + link
-  const mensagem = `${fraseInstigadora}\n\n${trecho}\n\n${urlReflexao}`;
+  // Formato: cabeçalho + frase instigadora + trecho + link
+  const mensagem = `Para levar durante a semana\n\n${fraseInstigadora}\n\n${trecho}\n\n${urlReflexao}`;
 
   function handleCompartilhar() {
     const encoded = encodeURIComponent(mensagem);
