@@ -19,15 +19,15 @@ function formatData(data: any) {
 }
 
 function buildFrase(post: any, autorNomeFinal: string) {
-  const tipo = post.tipo;
+  const tipo   = post.tipo;
   const igreja = post.igreja?.trim();
-  const data = formatData(post.data);
-  const autor = autorNomeFinal || "Autor";
+  const data   = formatData(post.data);
+  const autor  = autorNomeFinal || "Autor";
 
   if (tipo === "sermao") {
     if (igreja && post.data) return `Sermão pregado na igreja ${igreja} em ${data}`;
-    if (igreja) return `Sermão pregado na igreja ${igreja}`;
-    if (post.data) return `Sermão pregado em ${data}`;
+    if (igreja)              return `Sermão pregado na igreja ${igreja}`;
+    if (post.data)           return `Sermão pregado em ${data}`;
     return `Sermão publicado em ${data}`;
   }
 
@@ -35,46 +35,32 @@ function buildFrase(post: any, autorNomeFinal: string) {
 }
 
 export default function PostPage() {
-  const { id } = useParams();
-  const router = useRouter();
+  const { id }   = useParams();
+  const router   = useRouter();
   const { user } = useAuth();
 
-  const [post, setPost] = useState<any>(null);
-  const [autor, setAutor] = useState<User | null>(null);
+  const [post,    setPost]    = useState<any>(null);
+  const [autor,   setAutor]   = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       if (!id) return;
-
       try {
-        const postRef = doc(db, "posts", id as string);
-        const snap = await getDoc(postRef);
-
-        if (!snap.exists()) {
-          setPost(null);
-          setLoading(false);
-          return;
-        }
-
+        const snap = await getDoc(doc(db, "posts", id as string));
+        if (!snap.exists()) { setPost(null); setLoading(false); return; }
         const data = snap.data();
         setPost(data);
-
         if (data.autorId) {
-          const userRef = doc(db, "users", data.autorId);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) {
-            setAutor(userSnap.data() as User);
-          }
+          const userSnap = await getDoc(doc(db, "users", data.autorId));
+          if (userSnap.exists()) setAutor(userSnap.data() as User);
         }
       } catch (err) {
         console.error("Erro ao carregar post:", err);
         setPost(null);
       }
-
       setLoading(false);
     }
-
     load();
   }, [id]);
 
@@ -90,7 +76,7 @@ export default function PostPage() {
   }
 
   if (loading) return <p className="p-4 text-neutral-400">Carregando...</p>;
-  if (!post) return <p className="p-4 text-red-400">Post não encontrado</p>;
+  if (!post)   return <p className="p-4 text-red-400">Post não encontrado</p>;
 
   const nomeExibicao =
     autor?.titulo && autor?.nome
@@ -102,52 +88,121 @@ export default function PostPage() {
   return (
     <article className="max-w-2xl mx-auto p-6 space-y-6">
 
-      {/* TÍTULO */}
-      <h1 className="text-3xl font-bold text-neutral-100">{post.titulo}</h1>
-
-      {/* META */}
-      <div className="text-sm text-neutral-400 flex gap-2 flex-wrap">
+      {/* TOPO: badge de tipo + botões de autor */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
         <span
-          className="text-emerald-400 hover:underline cursor-pointer"
+          className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}
+        >
+          {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+        </span>
+
+        {isAutor && (
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              onClick={() => router.push(`/editar/${id}`)}
+              className="post-btn-edit"
+            >
+              Editar
+            </button>
+            <button
+              onClick={handleDelete}
+              className="post-btn-delete"
+            >
+              Apagar
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* TÍTULO */}
+      <h1
+        style={{
+          fontSize: "clamp(1.5rem, 5vw, 2.25rem)",
+          fontWeight: 800,
+          color: "var(--text-1)",
+          lineHeight: 1.15,
+          letterSpacing: "-0.02em",
+        }}
+      >
+        {post.titulo}
+      </h1>
+
+      {/* META: autor + data */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.5rem",
+          flexWrap: "wrap",
+          fontSize: "0.85rem",
+          color: "var(--text-3)",
+        }}
+      >
+        <span
+          style={{ color: "var(--emerald)", fontWeight: 600, cursor: "pointer" }}
           onClick={() => { if (post.autorId) router.push(`/perfil/${post.autorId}`); }}
         >
           {nomeExibicao}
         </span>
-        <span>•</span>
+        <span>·</span>
         <span>{formatData(post.data)}</span>
-        <span>•</span>
-        <span className="text-emerald-400 capitalize">{post.tipo}</span>
       </div>
 
-      {/* CONTEÚDO */}
-      <div className="text-neutral-200 leading-relaxed whitespace-pre-line">
-        {post.conteudo}
-      </div>
-
-      <hr className="border-neutral-700 my-6" />
-
-      <p className="text-center text-sm text-emerald-400 italic opacity-80">
-        {buildFrase(post, nomeExibicao)}
-      </p>
-
-      {/* BOTÕES NO FINAL */}
-      {isAutor && (
-        <div className="flex gap-2 justify-end">
-          <button
-            onClick={() => router.push(`/editar/${id}`)}
-            className="px-3 py-1 text-sm rounded bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
-          >
-            Editar
-          </button>
-          <button
-            onClick={handleDelete}
-            className="px-3 py-1 text-sm rounded bg-red-600 hover:bg-red-500 text-white cursor-pointer"
-          >
-            Apagar
-          </button>
+      {/* IMAGEM DE CAPA — CORRIGIDA: contain + fundo neutro */}
+      {post.imagemUrl && (
+        <div
+          style={{
+            width: "100%",
+            borderRadius: "var(--radius-lg)",
+            overflow: "hidden",
+            border: "1px solid var(--border)",
+            /* Fundo neutro escuro para imagens que não preenchem toda a área */
+            background: "#0d1310",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <img
+            src={post.imagemUrl}
+            alt={`Imagem de capa: ${post.titulo}`}
+            style={{
+              width: "100%",
+              /* Altura máxima generosa; imagens verticais não serão cortadas */
+              maxHeight: "520px",
+              /* contain: exibe a imagem inteira sem cortar */
+              objectFit: "contain",
+              display: "block",
+            }}
+          />
         </div>
       )}
 
+      {/* CONTEÚDO */}
+      <div
+        style={{
+          color: "var(--text-2)",
+          lineHeight: 1.85,
+          whiteSpace: "pre-line",
+          fontSize: "0.975rem",
+        }}
+      >
+        {post.conteudo}
+      </div>
+
+      <hr style={{ borderColor: "var(--border)", margin: "1.5rem 0" }} />
+
+      <p
+        style={{
+          textAlign: "center",
+          fontSize: "0.82rem",
+          color: "var(--emerald)",
+          fontStyle: "italic",
+          opacity: 0.8,
+        }}
+      >
+        {buildFrase(post, nomeExibicao)}
+      </p>
     </article>
   );
 }

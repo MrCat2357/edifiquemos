@@ -7,7 +7,7 @@ import {
   increment, getDoc, deleteDoc,
   collection, query, orderBy, getDocs, where,
 } from "firebase/firestore";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
 import LinksReferencia from "@/components/LinksReferencia";
@@ -154,39 +154,114 @@ type PostNav = {
 
 type PostNavAutor = { nome: string; fotoUrl: string | null };
 
-// ✅ CORRIGIDO: recebe autorIdProp via prop em vez de ler da URL (searchParams)
-// Isso evita que o ?autorId= apareça na URL ao navegar entre posts
 function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const fromPerfil = searchParams.get("from") === "perfil";
+  const fromSerieParam = searchParams.get("from") === "serie";
+  const serieSlugParam = searchParams.get("serieSlug") ?? "";
 
   const [prev, setPrev] = useState<PostNav | null>(null);
   const [next, setNext] = useState<PostNav | null>(null);
   const [prevAutor, setPrevAutor] = useState<PostNavAutor | null>(null);
   const [nextAutor, setNextAutor] = useState<PostNavAutor | null>(null);
+  const [serieInfo, setSerieInfo] = useState<{ titulo: string; slug: string } | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Estado resolvido: pode vir dos query params OU ser detectado automaticamente
+  const [resolvedFromSerie, setResolvedFromSerie] = useState(false);
+  const [resolvedSerieSlug, setResolvedSerieSlug] = useState("");
 
   useEffect(() => {
     async function fetchNav() {
       try {
-        // Filtra por autor se vier do perfil, usando a prop em vez da URL
-        const q = autorIdProp
-          ? query(collection(db, "posts"), where("autorId", "==", autorIdProp), orderBy("data", "desc"))
-          : query(collection(db, "posts"), orderBy("data", "desc"));
+        let fromSerie = fromSerieParam;
+        let serieSlug = serieSlugParam;
 
-        const snap = await getDocs(q);
-        const all: PostNav[] = snap.docs.map((d) => ({
-          id: d.id,
-          titulo: d.data().titulo || "Sem título",
-          slug: d.data().slug,
-          tipo: d.data().tipo,
-          autorId: d.data().autorId,
-          autorNome: d.data().autorNome,
-        }));
+        // ── Detecção automática de série ──────────────────────────────────────
+        // Se não veio ?from=serie na URL, verifica se este post pertence a alguma
+        // série. Isso garante que a navegação funcione mesmo quando o usuário
+        // acessou o post diretamente (link externo, compartilhamento, etc.).
+        if (!fromSerie && !fromPerfil) {
+          const seriesSnap = await getDocs(
+            query(collection(db, "series"), where("postIds", "array-contains", postId))
+          );
+          if (!seriesSnap.empty) {
+            const serieDoc = seriesSnap.docs[0];
+            const serieData = serieDoc.data();
+            fromSerie = true;
+            serieSlug = serieData.slug ?? "";
+          }
+        }
+
+        setResolvedFromSerie(fromSerie);
+        setResolvedSerieSlug(serieSlug);
+
+        let all: PostNav[] = [];
+
+        if (fromSerie && serieSlug) {
+          // Busca a série pelo slug e respeita a ordem de postIds
+          const serieSnap = await getDocs(
+            query(collection(db, "series"), where("slug", "==", serieSlug))
+          );
+          if (!serieSnap.empty) {
+            const serieDoc = serieSnap.docs[0];
+            const serieData = serieDoc.data();
+            setSerieInfo({ titulo: serieData.titulo, slug: serieData.slug });
+
+            const postIds: string[] = serieData.postIds ?? [];
+            const postSnaps = await Promise.all(
+              postIds.map((id) => getDoc(doc(db, "posts", id)))
+            );
+            all = postSnaps
+              .filter((s) => s.exists())
+              .map((s) => ({
+                id: s.id,
+                titulo: s.data()?.titulo || "Sem título",
+                slug: s.data()?.slug,
+                tipo: s.data()?.tipo,
+                autorId: s.data()?.autorId,
+                autorNome: s.data()?.autorNome,
+              }));
+          }
+        } else if (fromPerfil && autorIdProp) {
+          // Navega só entre posts do mesmo autor
+          const snap = await getDocs(
+            query(
+              collection(db, "posts"),
+              where("autorId", "==", autorIdProp),
+              orderBy("data", "desc")
+            )
+          );
+          all = snap.docs.map((d) => ({
+            id: d.id,
+            titulo: d.data().titulo || "Sem título",
+            slug: d.data().slug,
+            tipo: d.data().tipo,
+            autorId: d.data().autorId,
+            autorNome: d.data().autorNome,
+          }));
+        } else {
+          // Navega entre todos os posts
+          const snap = await getDocs(
+            query(collection(db, "posts"), orderBy("data", "desc"))
+          );
+          all = snap.docs.map((d) => ({
+            id: d.id,
+            titulo: d.data().titulo || "Sem título",
+            slug: d.data().slug,
+            tipo: d.data().tipo,
+            autorId: d.data().autorId,
+            autorNome: d.data().autorNome,
+          }));
+        }
+
         const idx = all.findIndex((p) => p.id === postId);
         if (idx === -1) { setLoading(false); return; }
 
-        const p = idx + 1 < all.length ? all[idx + 1] : null;
-        const n = idx - 1 >= 0 ? all[idx - 1] : null;
+        const p = idx - 1 >= 0        ? all[idx - 1] : null;   // agora "anterior" = índice menor
+        const n = idx + 1 < all.length ? all[idx + 1] : null;  // agora "próximo"  = índice maior
         setPrev(p);
         setNext(n);
 
@@ -218,16 +293,19 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
       setLoading(false);
     }
     fetchNav();
-  }, [postId, autorIdProp]);
+  }, [postId, autorIdProp, fromPerfil, fromSerieParam, serieSlugParam]);
 
-  // ✅ CORRIGIDO: URL limpa, sem ?autorId= na query string
   function navUrl(p: PostNav) {
-    return p.slug
+    const base = p.slug
       ? `/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`
       : `/posts/${p.id}`;
+    // Preserva o contexto de série em todos os links de navegação
+    if (resolvedFromSerie && resolvedSerieSlug) return `${base}?from=serie&serieSlug=${resolvedSerieSlug}`;
+    if (fromPerfil) return `${base}?from=perfil`;
+    return base;
   }
 
-  if (loading || (!prev && !next)) return null;
+  if (loading || (!prev && !next && !serieInfo)) return null;
 
   const cardBase: React.CSSProperties = {
     display: "flex",
@@ -243,118 +321,152 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
   };
 
   return (
-    <nav
-      className="post-nav"
-      aria-label="Navegação entre publicações"
-      style={{
-        display: "grid",
-        gridTemplateColumns: prev && next ? "1fr 1fr" : prev ? "1fr auto" : "auto 1fr",
-        gap: "0.75rem",
-        marginTop: "2rem",
-      }}
-    >
-      {/* ← Anterior */}
-      {prev ? (
-        <button
-          onClick={() => router.push(navUrl(prev))}
-          className="post-nav-btn post-nav-btn--prev"
-          aria-label={`Publicação anterior: ${prev.titulo}`}
-          style={{ ...cardBase, alignItems: "flex-start", textAlign: "left" }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "var(--emerald-dim)";
-            e.currentTarget.style.background = "var(--bg-card)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "var(--border-light)";
-            e.currentTarget.style.background = "var(--bg-elevated)";
+    <div style={{ marginTop: "2rem" }}>
+      {/* Banner da série */}
+      {serieInfo && (
+        <div
+          onClick={() => router.push(`/series/${serieInfo.slug}`)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            marginBottom: "0.75rem",
+            padding: "0.5rem 0.875rem",
+            background: "var(--emerald-dim)",
+            border: "1px solid var(--emerald-dim)",
+            borderRadius: "var(--radius-lg)",
+            cursor: "pointer",
+            fontSize: "0.8rem",
+            color: "var(--emerald)",
+            fontWeight: 600,
           }}
         >
-          <span style={{
-            display: "flex", alignItems: "center", gap: "4px",
-            fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.08em",
-            textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8,
-          }}>
-            <IconArrowLeft size={12} />
-            {prev.tipo === "sermao" ? "Sermão anterior" : "Artigo anterior"}
+          <span>📚</span>
+          <span>
+            Você está lendo a série <strong>{serieInfo.titulo}</strong>
           </span>
-
-          <span style={{
-            fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
-            lineHeight: 1.3, overflow: "hidden",
-            display: "-webkit-box", WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical", wordBreak: "break-word",
-          }}>
-            {prev.titulo}
+          <span style={{ marginLeft: "auto", fontSize: "0.72rem", opacity: 0.8 }}>
+            Ver série →
           </span>
-
-          {prevAutor && (
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
-              <AuthorAvatar src={prevAutor.fotoUrl} name={prevAutor.nome} size={22} />
-              <span style={{
-                fontSize: "0.72rem", color: "var(--text-3)",
-                fontStyle: "italic", overflow: "hidden",
-                textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {prevAutor.nome}
-              </span>
-            </div>
-          )}
-        </button>
-      ) : (
-        <span />
+        </div>
       )}
 
-      {/* → Próximo */}
-      {next ? (
-        <button
-          onClick={() => router.push(navUrl(next))}
-          className="post-nav-btn post-nav-btn--next"
-          aria-label={`Próxima publicação: ${next.titulo}`}
-          style={{ ...cardBase, alignItems: "flex-end", textAlign: "right" }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "var(--emerald-dim)";
-            e.currentTarget.style.background = "var(--bg-card)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "var(--border-light)";
-            e.currentTarget.style.background = "var(--bg-elevated)";
-          }}
-        >
-          <span style={{
-            display: "flex", alignItems: "center", gap: "4px",
-            fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.08em",
-            textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8,
-          }}>
-            {next.tipo === "sermao" ? "Próximo sermão" : "Próximo artigo"}
-            <IconArrowRight size={12} />
-          </span>
+      <nav
+        className="post-nav"
+        aria-label="Navegação entre publicações"
+        style={{
+          display: "grid",
+          gridTemplateColumns: prev && next ? "1fr 1fr" : prev ? "1fr auto" : "auto 1fr",
+          gap: "0.75rem",
+        }}
+      >
+        {/* ← Anterior */}
+        {prev ? (
+          <button
+            onClick={() => router.push(navUrl(prev))}
+            className="post-nav-btn post-nav-btn--prev"
+            aria-label={`Publicação anterior: ${prev.titulo}`}
+            style={{ ...cardBase, alignItems: "flex-start", textAlign: "left" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "var(--emerald-dim)";
+              e.currentTarget.style.background = "var(--bg-card)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "var(--border-light)";
+              e.currentTarget.style.background = "var(--bg-elevated)";
+            }}
+          >
+            <span style={{
+              display: "flex", alignItems: "center", gap: "4px",
+              fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.08em",
+              textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8,
+            }}>
+              <IconArrowLeft size={12} />
+              {resolvedFromSerie
+                ? "Anterior na série"
+                : prev.tipo === "sermao" ? "Sermão anterior" : "Artigo anterior"}
+            </span>
 
-          <span style={{
-            fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
-            lineHeight: 1.3, overflow: "hidden",
-            display: "-webkit-box", WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical", wordBreak: "break-word",
-          }}>
-            {next.titulo}
-          </span>
+            <span style={{
+              fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
+              lineHeight: 1.3, overflow: "hidden",
+              display: "-webkit-box", WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical", wordBreak: "break-word",
+            }}>
+              {prev.titulo}
+            </span>
 
-          {nextAutor && (
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
-              <span style={{
-                fontSize: "0.72rem", color: "var(--text-3)",
-                fontStyle: "italic", overflow: "hidden",
-                textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {nextAutor.nome}
-              </span>
-              <AuthorAvatar src={nextAutor.fotoUrl} name={nextAutor.nome} size={22} />
-            </div>
-          )}
-        </button>
-      ) : (
-        <span />
-      )}
-    </nav>
+            {prevAutor && (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                <AuthorAvatar src={prevAutor.fotoUrl} name={prevAutor.nome} size={22} />
+                <span style={{
+                  fontSize: "0.72rem", color: "var(--text-3)",
+                  fontStyle: "italic", overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {prevAutor.nome}
+                </span>
+              </div>
+            )}
+          </button>
+        ) : (
+          <span />
+        )}
+
+        {/* → Próximo */}
+        {next ? (
+          <button
+            onClick={() => router.push(navUrl(next))}
+            className="post-nav-btn post-nav-btn--next"
+            aria-label={`Próxima publicação: ${next.titulo}`}
+            style={{ ...cardBase, alignItems: "flex-end", textAlign: "right" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "var(--emerald-dim)";
+              e.currentTarget.style.background = "var(--bg-card)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "var(--border-light)";
+              e.currentTarget.style.background = "var(--bg-elevated)";
+            }}
+          >
+            <span style={{
+              display: "flex", alignItems: "center", gap: "4px",
+              fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.08em",
+              textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8,
+            }}>
+              {resolvedFromSerie
+                ? "Próximo na série"
+                : next.tipo === "sermao" ? "Próximo sermão" : "Próximo artigo"}
+              <IconArrowRight size={12} />
+            </span>
+
+            <span style={{
+              fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
+              lineHeight: 1.3, overflow: "hidden",
+              display: "-webkit-box", WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical", wordBreak: "break-word",
+            }}>
+              {next.titulo}
+            </span>
+
+            {nextAutor && (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                <span style={{
+                  fontSize: "0.72rem", color: "var(--text-3)",
+                  fontStyle: "italic", overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {nextAutor.nome}
+                </span>
+                <AuthorAvatar src={nextAutor.fotoUrl} name={nextAutor.nome} size={22} />
+              </div>
+            )}
+          </button>
+        ) : (
+          <span />
+        )}
+      </nav>
+    </div>
   );
 }
 
@@ -998,6 +1110,35 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         <hr className="post-detail-divider" />
 
+        {/* Imagem de capa */}
+        {post.imagemUrl && (
+          <div
+            className="post-detail-cover-wrapper"
+            style={{
+              width: "100%",
+              borderRadius: "var(--radius-lg)",
+              overflow: "hidden",
+              border: "1px solid var(--border)",
+              marginBottom: "1.5rem",
+              background: "#0d1310",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <img
+              src={post.imagemUrl}
+              alt={`Imagem de capa: ${post.titulo}`}
+              style={{
+                width: "100%",
+                maxHeight: "520px",
+                objectFit: "contain",
+                display: "block",
+              }}
+            />
+          </div>
+        )}
+
         {/* Conteúdo */}
         <div
           ref={conteudoRef}
@@ -1024,14 +1165,14 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           </p>
         )}
 
-        {/* ── Links de Referência ── */}
+        {/* Links de Referência */}
         {post.links && post.links.length > 0 && (
           <LinksReferencia links={post.links} />
         )}
 
         <hr className="post-detail-divider" />
 
-        {/* ── Barra de ações ── */}
+        {/* Barra de ações */}
         <div className="post-detail-actions">
 
           {/* Amei */}
@@ -1092,7 +1233,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             )}
           </button>
 
-          {/* Visualizações — chip passivo */}
+          {/* Visualizações */}
           <div
             style={{
               display: "inline-flex", alignItems: "center", gap: "5px",
@@ -1111,10 +1252,17 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         </div>
 
-        {/* ── Navegação entre posts ── */}
-        {/* ✅ CORRIGIDO: passa autorId via prop, não pela URL */}
+        {/* Navegação entre posts */}
         <PostNavigation postId={postId} autorIdProp={post.autorId} />
       </article>
+
+      <style>{`
+        @media (max-width: 640px) {
+          .post-detail-cover-wrapper img {
+            max-height: 360px !important;
+          }
+        }
+      `}</style>
     </>
   );
 }
