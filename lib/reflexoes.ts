@@ -33,6 +33,7 @@ export interface Reflexao {
   imagemUnsplashUrl?: string;
   tipo: "reflexao";
   criadoEm: Timestamp | null;
+  editadoEm?: Timestamp | Date | null;
 }
 
 export interface ReflexaoGerada {
