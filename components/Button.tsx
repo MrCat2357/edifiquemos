@@ -2,7 +2,7 @@
 
 /**
  * FileImportButton
- * Lê .txt, .md, .rtf, .doc, .docx, .odt, .odf e injeta o texto
+ * Lê .txt, .md, .rtf, .doc, .docx, .odt, .odf, .pdf e injeta o texto
  * no campo de conteúdo do formulário de criação/edição de post.
  *
  * Uso:
@@ -12,6 +12,7 @@
  */
 
 import { useRef, useState } from "react";
+import { importarArquivo, FORMATOS_ACEITOS } from "@/lib/importarArquivo";
 
 function IconPaperclip({ size = 14 }: { size?: number }) {
   return (
@@ -35,35 +36,6 @@ function IconPaperclip({ size = 14 }: { size?: number }) {
   );
 }
 
-const ACCEPT = ".txt,.md,.rtf,.doc,.docx,.odt,.odf";
-
-async function extractText(file: File): Promise<string> {
-  const name = file.name.toLowerCase();
-
-  if (
-    name.endsWith(".docx") ||
-    name.endsWith(".doc") ||
-    name.endsWith(".odt") ||
-    name.endsWith(".odf")
-  ) {
-    try {
-      const mammoth = await import("mammoth");
-      const arrayBuffer = await file.arrayBuffer();
-      const result = await mammoth.extractRawText({ arrayBuffer });
-      if (result.value.trim()) return result.value;
-    } catch (_) {
-      // fallback para leitura de texto simples
-    }
-  }
-
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve((e.target?.result as string) ?? "");
-    reader.onerror = () => reject(new Error("Não foi possível ler o arquivo."));
-    reader.readAsText(file, "utf-8");
-  });
-}
-
 type Props = {
   onImport: (texto: string) => void;
 };
@@ -72,6 +44,7 @@ export default function FileImportButton({ onImport }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  const [hovered, setHovered] = useState(false);
 
   async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -79,8 +52,9 @@ export default function FileImportButton({ onImport }: Props) {
     e.target.value = "";
     setErro(null);
     setLoading(true);
+
     try {
-      const texto = await extractText(file);
+      const texto = await importarArquivo(file);
       if (!texto.trim()) {
         setErro("Arquivo vazio ou não pôde ser lido.");
         setLoading(false);
@@ -90,6 +64,7 @@ export default function FileImportButton({ onImport }: Props) {
     } catch (err: any) {
       setErro(err?.message ?? "Erro ao importar.");
     }
+
     setLoading(false);
   }
 
@@ -105,7 +80,7 @@ export default function FileImportButton({ onImport }: Props) {
       <input
         ref={inputRef}
         type="file"
-        accept={ACCEPT}
+        accept={FORMATOS_ACEITOS}
         onChange={handleChange}
         style={{ display: "none" }}
         aria-label="Importar arquivo de texto"
@@ -114,33 +89,36 @@ export default function FileImportButton({ onImport }: Props) {
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={loading}
-        className="file-import-btn"
-        title="Importar conteúdo de arquivo (.txt, .doc, .docx, .odt…)"
+        title="Importar conteúdo de arquivo (.txt, .md, .doc, .docx, .pdf, .odt, .rtf…)"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         style={{
-          opacity: loading ? 0.65 : 1,
+          opacity: loading ? 0.7 : 1,
           display: "inline-flex",
           alignItems: "center",
           gap: "6px",
-          minHeight: 40,
-          padding: "8px 14px",
-          fontSize: "0.85rem",
+          minHeight: 36,
+          padding: "7px 14px",
+          fontSize: "0.82rem",
           fontWeight: 600,
           cursor: loading ? "not-allowed" : "pointer",
-          background: "var(--bg-elevated)",
-          border: "1px solid var(--border-light)",
-          borderRadius: "var(--radius-md)",
-          color: "var(--text-2)",
-          transition: "border-color 0.15s, background 0.15s",
-        }}
-        onMouseEnter={(e) => {
-          if (!loading) {
-            e.currentTarget.style.borderColor = "var(--emerald-dim)";
-            e.currentTarget.style.background = "var(--bg-card)";
-          }
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = "var(--border-light)";
-          e.currentTarget.style.background = "var(--bg-elevated)";
+          fontFamily: "inherit",
+          borderRadius: "var(--radius-full)",
+          transition: "all 0.18s ease",
+
+          // Borda esmeralda visível + fundo levemente tingido de verde
+          border: hovered
+            ? "1px solid var(--emerald)"
+            : "1px solid var(--emerald-dim)",
+          background: hovered
+            ? "var(--emerald-dim)"
+            : "rgba(6, 78, 53, 0.22)",
+          color: hovered ? "var(--emerald)" : "var(--text-2)",
+
+          // Sombra esmeralda leve que o levanta do fundo escuro
+          boxShadow: hovered
+            ? "0 0 0 3px var(--emerald-dim), 0 2px 8px rgba(16,185,129,0.15)"
+            : "0 1px 4px rgba(0,0,0,0.3)",
         }}
       >
         {loading ? (
@@ -155,10 +133,9 @@ export default function FileImportButton({ onImport }: Props) {
           </>
         )}
       </button>
+
       {erro && (
-        <span
-          style={{ fontSize: "0.72rem", color: "#f87171", paddingLeft: 2 }}
-        >
+        <span style={{ fontSize: "0.72rem", color: "#f87171", paddingLeft: 2 }}>
           {erro}
         </span>
       )}
