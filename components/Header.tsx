@@ -76,7 +76,7 @@ function HeaderContent() {
   async function handleLogout() {
     setMenuAberto(false);
     await signOut(auth);
-    router.push("/login");
+    router.push("/entrar");
   }
 
   function fecharMenu() { setMenuAberto(false); }
@@ -217,7 +217,7 @@ function HeaderContent() {
         <div className="header-inner">
           <Link href="/" className="header-logo" onClick={fecharMenu}>
             <span className="header-logo-dot" />
-            Voz da Fé
+            Edifiquemos
           </Link>
 
           <nav className="header-nav-desktop">
@@ -245,8 +245,7 @@ function HeaderContent() {
               </>
             ) : (
               <>
-                <Link href="/login" className="header-user-btn" style={{ border: "none", background: "none" }}>Entrar</Link>
-                <Link href="/cadastro" className="header-btn-primary">Cadastrar</Link>
+                <Link href="/entrar" className="header-btn-primary">Entrar</Link>
               </>
             )}
           </div>
@@ -271,7 +270,7 @@ function HeaderContent() {
 
       <nav className={`mobile-drawer${menuAberto ? " is-open" : ""}`} aria-hidden={!menuAberto}>
         <div className="mobile-drawer-header">
-          <span className="header-logo"><span className="header-logo-dot" />Voz da Fé</span>
+          <span className="header-logo"><span className="header-logo-dot" />Edifiquemos</span>
         </div>
 
         {searchBarMobile}
@@ -304,8 +303,7 @@ function HeaderContent() {
             </>
           ) : (
             <>
-              <Link href="/login" className="mobile-nav-link" onClick={fecharMenu}>Entrar</Link>
-              <Link href="/cadastro" className="mobile-nav-cta" onClick={fecharMenu}>Cadastrar</Link>
+              <Link href="/entrar" className="mobile-nav-cta" onClick={fecharMenu}>Entrar</Link>
             </>
           )}
         </div>
@@ -324,7 +322,7 @@ export default function Header() {
         <div className="header-inner">
           <span className="header-logo">
             <span className="header-logo-dot" />
-            Voz da Fé
+            Edifiquemos
           </span>
         </div>
       </header>
