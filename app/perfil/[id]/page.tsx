@@ -21,6 +21,7 @@ import { gerarPDF } from "@/lib/gerarPDF";
 import { getReflexoesPorAutor } from "@/lib/reflexoes";
 import type { Reflexao } from "@/lib/reflexoes";
 import CardReflexao from "@/components/reflexoes/CardReflexao";
+import BannerLogin from "@/components/BannerLogin";
 
 type User = {
   nome?: string;
@@ -192,7 +193,6 @@ function SerieCardPublico({
           style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Botões owner */}
           {isOwner && (
             <>
               <button
@@ -212,7 +212,6 @@ function SerieCardPublico({
             </>
           )}
 
-          {/* Se não é owner: texto descritivo à esquerda */}
           {!isOwner && (
             <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>
               Coleção temática de sermões e artigos
@@ -250,6 +249,7 @@ function PostCardPerfil({
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
 
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
@@ -274,7 +274,7 @@ function PostCardPerfil({
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!currentUid) { onToast("Faça login para curtir"); return; }
+    if (!currentUid) { setShowLoginBanner(true); return; }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
@@ -350,7 +350,6 @@ function PostCardPerfil({
     <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }}
       onClick={(e) => e.stopPropagation()}>
       <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-        {/* Ações owner ficam antes das ações públicas */}
         {isOwner && (
           <div style={{ display: "flex", gap: "0.5rem", marginRight: "4px" }}>
             {ownerButtons}
@@ -359,7 +358,7 @@ function PostCardPerfil({
 
         <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike}
           disabled={loadingLike}
-          title={currentUid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
+          title={currentUid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
           style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
           <IconHeart size={13} filled={liked} />
           Amei
@@ -414,6 +413,11 @@ function PostCardPerfil({
             <h2 className="card-title" style={{ fontSize: "1rem" }}>{post.titulo}</h2>
             {post.resumo && <p className="card-frase">{post.resumo}</p>}
           </div>
+          {showLoginBanner && (
+            <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+              <BannerLogin onClose={() => setShowLoginBanner(false)} />
+            </div>
+          )}
           {footerRow}
         </div>
       </article>
@@ -439,13 +443,17 @@ function PostCardPerfil({
         <h2 className="card-title">{post.titulo}</h2>
         {post.resumo && <p className="card-frase">{post.resumo}</p>}
       </div>
+      {showLoginBanner && (
+        <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+          <BannerLogin onClose={() => setShowLoginBanner(false)} />
+        </div>
+      )}
       {footerRow}
     </article>
   );
 }
 
-/* ── CardReflexaoPublico ─────────────────────────────── */
-// Wrapper em torno do CardReflexao existente para adicionar botões owner
+/* ── CardReflexaoComControles ─────────────────────────── */
 
 function CardReflexaoComControles({
   reflexao, index, isOwner, onToast,
@@ -476,7 +484,6 @@ function CardReflexaoComControles({
             display: "flex",
             gap: "0.5rem",
             padding: "0 1.125rem 0.875rem",
-            // Fica logo abaixo do CardReflexao — usa margem negativa para grudar no card
             marginTop: "-0.25rem",
           }}
           onClick={(e) => e.stopPropagation()}
@@ -515,7 +522,6 @@ export default function PerfilPublico() {
   const [aba, setAba] = useState<"posts" | "series" | "reflexoes">("posts");
   const [loading, setLoading] = useState(true);
 
-  // uid do visitante logado (pode ser null se não logado)
   const [visitorUid, setVisitorUid] = useState<string | null>(null);
 
   const [toastMsg, setToastMsg] = useState("");
@@ -530,7 +536,6 @@ export default function PerfilPublico() {
   }
 
   useEffect(() => {
-    // Captura o uid do visitante assim que o componente monta
     setVisitorUid(auth.currentUser?.uid ?? null);
   }, []);
 
@@ -586,7 +591,6 @@ export default function PerfilPublico() {
       ? `${user.titulo} ${user.nome}`
       : user.nome || "Usuário";
 
-  // O visitante é o dono do perfil?
   const isOwner = !!visitorUid && visitorUid === uid;
 
   return (
@@ -615,7 +619,6 @@ export default function PerfilPublico() {
             </div>
           </div>
 
-          {/* Se é o dono, exibe atalho para o perfil de edição */}
           {isOwner && (
             <div style={{ alignSelf: "flex-start" }}>
               <button className="post-btn-edit" onClick={() => router.push("/perfil")}>
@@ -626,7 +629,6 @@ export default function PerfilPublico() {
         </div>
 
         <div className="perfil-posts-section">
-          {/* Abas */}
           <div style={{ display: "flex", gap: "0", borderBottom: "1px solid var(--border)", marginBottom: "1.5rem" }}>
             {(["posts", "series", "reflexoes"] as const).map((a) => (
               <button
