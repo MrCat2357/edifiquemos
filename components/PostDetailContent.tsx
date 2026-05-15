@@ -12,6 +12,7 @@ import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
 import LinksReferencia from "@/components/LinksReferencia";
 import BannerLogin from "@/components/BannerLogin";
+import CommentSection from "@/components/comments/CommentSection";
 
 /* ── helpers ─────────────────────────────────────────── */
 
@@ -1250,6 +1251,9 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         {/* Navegação entre posts */}
         <PostNavigation postId={postId} autorIdProp={post.autorId} />
+
+        {/* ── Sistema de comentários ── */}
+        <CommentSection postId={postId} />
       </article>
 
       <style>{`
