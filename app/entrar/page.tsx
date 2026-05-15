@@ -6,7 +6,6 @@ import {
   createUserWithEmailAndPassword,
   updateProfile,
   signInWithPopup,
-  linkWithPopup,
   GoogleAuthProvider,
   fetchSignInMethodsForEmail,
 } from "firebase/auth";
@@ -48,7 +47,15 @@ async function emailExisteNoFirestore(email: string): Promise<boolean> {
 
 // ─── tipos ──────────────────────────────────────────────────────────────────
 
-type Etapa = "email" | "senha" | "cadastro";
+type Etapa = "email" | "senha" | "cadastro" | "termos-google";
+
+// Dados temporários do usuário Google enquanto aguarda aceite dos termos
+type DadosGoogle = {
+  uid: string;
+  nome: string;
+  email: string;
+  fotoUrl: string | null;
+};
 
 // ─── componente interno (usa useSearchParams) ────────────────────────────────
 
@@ -64,6 +71,9 @@ function EntrarForm() {
   const [nome, setNome] = useState("");
   const [aceitouTermos, setAceitouTermos] = useState(false);
   const [showSenha, setShowSenha] = useState(false);
+
+  // dados do Google pendentes de aceite
+  const [dadosGoogle, setDadosGoogle] = useState<DadosGoogle | null>(null);
 
   // estado
   const [loading, setLoading] = useState(false);
@@ -124,7 +134,7 @@ function EntrarForm() {
     setLoading(false);
   }
 
-  // ── passo 2b: cadastro ───────────────────────────────────────────────────
+  // ── passo 2b: cadastro por email ─────────────────────────────────────────
 
   async function handleCadastro(e: React.FormEvent) {
     e.preventDefault();
@@ -155,8 +165,6 @@ function EntrarForm() {
       redirecionarAposAuth();
     } catch (err: any) {
       if (err.code === "auth/email-already-in-use") {
-        // Raro: email não estava no Firestore mas já existe no Auth.
-        // Isso indica conta Auth órfã — manda pro fluxo de senha.
         setEtapa("senha");
         setError("Este email já tem uma senha cadastrada. Entre com ela abaixo.");
       } else {
@@ -168,15 +176,6 @@ function EntrarForm() {
   }
 
   // ── Google ───────────────────────────────────────────────────────────────
-  //
-  // Estratégia:
-  //   1. Tenta signInWithPopup normalmente.
-  //   2. Se o Firebase retornar auth/account-exists-with-different-credential
-  //      significa que o email já tem conta por senha → usa linkWithPopup
-  //      para vincular Google ao mesmo uid (account linking).
-  //   3. Se o uid já tem doc no Firestore → login bem-sucedido.
-  //   4. Se não tem doc → primeiro acesso com Google → cria o doc
-  //      usando o displayName do Google como nome.
 
   async function handleGoogle() {
     setError("");
@@ -192,15 +191,11 @@ function EntrarForm() {
         result = await signInWithPopup(auth, provider);
       } catch (popupErr: any) {
         if (popupErr.code === "auth/account-exists-with-different-credential") {
-          // Email já tem conta com senha → vincula Google ao uid existente
           const methods = await fetchSignInMethodsForEmail(
             auth,
             popupErr.customData?.email ?? email
           );
-
           if (methods.includes("password")) {
-            // Precisa que o usuário esteja logado para fazer link.
-            // Como ele ainda não está, pedimos a senha primeiro.
             setEtapa("senha");
             setError(
               "Sua conta usa senha. Entre com sua senha e depois poderá " +
@@ -224,29 +219,58 @@ function EntrarForm() {
       const userSnap = await getDoc(userRef);
 
       if (userSnap.exists()) {
-        // Conta já existe → login direto
+        // Conta já existe → login direto, sem pedir termos de novo
         redirecionarAposAuth();
         return;
       }
 
-      // Primeiro login com Google → cria doc automaticamente
-      const nomeGoogle = user.displayName ?? user.email?.split("@")[0] ?? "Usuário";
-      const slug = await gerarSlugUnico(nomeGoogle, user.uid);
-
-      await setDoc(userRef, {
-        nome: nomeGoogle,
-        titulo: "",
-        email: user.email,
+      // Primeiro acesso com Google → guardar dados e pedir aceite dos termos
+      setDadosGoogle({
+        uid: user.uid,
+        nome: user.displayName ?? user.email?.split("@")[0] ?? "Usuário",
+        email: user.email ?? "",
         fotoUrl: user.photoURL ?? null,
-        slug,
-        criadoEm: new Date(),
-        aceitouTermos: true, // aceite implícito no fluxo Google
       });
-
-      redirecionarAposAuth();
+      setAceitouTermos(false);
+      setEtapa("termos-google");
     } catch (err: any) {
       console.error(err);
       setError("Erro ao entrar com Google. Tente novamente.");
+    }
+
+    setLoading(false);
+  }
+
+  // ── passo final: confirmar termos e criar doc (Google) ───────────────────
+
+  async function handleConfirmarTermosGoogle(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+
+    if (!aceitouTermos) {
+      setError("Você precisa aceitar os termos de uso para continuar.");
+      return;
+    }
+
+    if (!dadosGoogle) return;
+    setLoading(true);
+
+    try {
+      const slug = await gerarSlugUnico(dadosGoogle.nome, dadosGoogle.uid);
+      await setDoc(doc(db, "users", dadosGoogle.uid), {
+        nome: dadosGoogle.nome,
+        titulo: "",
+        email: dadosGoogle.email,
+        fotoUrl: dadosGoogle.fotoUrl,
+        slug,
+        criadoEm: new Date(),
+        aceitouTermos: true,
+      });
+
+      redirecionarAposAuth();
+    } catch (err) {
+      console.error(err);
+      setError("Erro ao finalizar o cadastro. Tente novamente.");
     }
 
     setLoading(false);
@@ -258,6 +282,7 @@ function EntrarForm() {
     email: "Bem-vindo! Digite seu email para começar.",
     senha: "Encontramos sua conta. Digite sua senha.",
     cadastro: "Email novo por aqui! Vamos criar sua conta.",
+    "termos-google": `Olá, ${dadosGoogle?.nome ?? ""}! Só falta aceitar os termos.`,
   };
 
   return (
@@ -271,7 +296,9 @@ function EntrarForm() {
         </div>
 
         <h1 className="auth-title">
-          {etapa === "cadastro" ? "Criar sua conta" : "Entrar na sua conta"}
+          {etapa === "cadastro" || etapa === "termos-google"
+            ? "Criar sua conta"
+            : "Entrar na sua conta"}
         </h1>
         <p className="auth-subtitle">{subtitulos[etapa]}</p>
 
@@ -297,12 +324,10 @@ function EntrarForm() {
               {loading ? "Verificando..." : "Continuar"}
             </button>
 
-            {/* DIVISOR */}
             <div className="auth-divider">
               <span /><p>ou continue com</p><span />
             </div>
 
-            {/* GOOGLE */}
             <GoogleBtn onClick={handleGoogle} loading={loading} />
           </form>
         )}
@@ -310,7 +335,6 @@ function EntrarForm() {
         {/* ── ETAPA: SENHA (login) ── */}
         {etapa === "senha" && (
           <form onSubmit={handleLogin} className="auth-form">
-            {/* email somente leitura com opção de trocar */}
             <div className="auth-field">
               <label className="auth-label">Email</label>
               <div className="auth-email-readonly">
@@ -361,10 +385,9 @@ function EntrarForm() {
           </form>
         )}
 
-        {/* ── ETAPA: CADASTRO ── */}
+        {/* ── ETAPA: CADASTRO (email) ── */}
         {etapa === "cadastro" && (
           <form onSubmit={handleCadastro} className="auth-form">
-            {/* email somente leitura */}
             <div className="auth-field">
               <label className="auth-label">Email</label>
               <div className="auth-email-readonly">
@@ -434,11 +457,72 @@ function EntrarForm() {
               {loading ? "Criando conta..." : "Criar conta"}
             </button>
 
-            {/* Divisor + Google também no cadastro */}
             <div className="auth-divider">
               <span /><p>ou cadastre-se com</p><span />
             </div>
             <GoogleBtn onClick={handleGoogle} loading={loading} />
+          </form>
+        )}
+
+        {/* ── ETAPA: TERMOS (Google — primeiro acesso) ── */}
+        {etapa === "termos-google" && dadosGoogle && (
+          <form onSubmit={handleConfirmarTermosGoogle} className="auth-form">
+
+            {/* Avatar + nome do Google para contextualizar */}
+            <div style={{
+              display: "flex", alignItems: "center", gap: "0.75rem",
+              padding: "0.75rem 1rem",
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border-light)",
+              borderRadius: "var(--radius-lg)",
+              marginBottom: "0.25rem",
+            }}>
+              {dadosGoogle.fotoUrl && (
+                <img
+                  src={dadosGoogle.fotoUrl}
+                  alt={dadosGoogle.nome}
+                  style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
+                />
+              )}
+              <div>
+                <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-1)", margin: 0 }}>
+                  {dadosGoogle.nome}
+                </p>
+                <p style={{ fontSize: "0.78rem", color: "var(--text-3)", margin: 0 }}>
+                  {dadosGoogle.email}
+                </p>
+              </div>
+            </div>
+
+            <label className="auth-terms">
+              <input
+                type="checkbox"
+                checked={aceitouTermos}
+                onChange={(e) => setAceitouTermos(e.target.checked)}
+                className="auth-checkbox"
+              />
+              <span>
+                Li e aceito os{" "}
+                <Link href="/termos" className="auth-link" target="_blank">
+                  Termos de Uso
+                </Link>
+              </span>
+            </label>
+
+            {error && <div className="auth-error"><p>{error}</p></div>}
+
+            <button type="submit" disabled={loading} className="auth-btn-primary">
+              {loading ? "Finalizando..." : "Concluir cadastro"}
+            </button>
+
+            <button
+              type="button"
+              className="auth-link"
+              style={{ marginTop: "0.5rem", fontSize: "0.8rem", textAlign: "center" }}
+              onClick={() => { setEtapa("email"); setDadosGoogle(null); setAceitouTermos(false); setError(""); }}
+            >
+              Cancelar e voltar
+            </button>
           </form>
         )}
 
