@@ -286,7 +286,6 @@ a { color: inherit; text-decoration: none; }
   mask-image: radial-gradient(ellipse at center, black 30%, transparent 80%);
 }
 
-/* ✅ PATCH: margin-top era -3rem, agora 2rem para dar espaço do header */
 .hero-content {
   position: relative;
   z-index: 1;
@@ -443,7 +442,6 @@ a { color: inherit; text-decoration: none; }
   align-items: start;
 }
 
-/* ✅ PATCH: adicionado flex-wrap e gap para o "Limpar" caber ao lado do título */
 .feed-main-header {
   display: flex;
   align-items: center;
@@ -852,7 +850,7 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ============================================================
-   AUTH (login / cadastro)
+   AUTH (entrar — fluxo unificado)
    ============================================================ */
 
 .auth-page {
@@ -940,6 +938,19 @@ a { color: inherit; text-decoration: none; }
   font-size: 1rem; line-height: 1; color: var(--text-3); padding: 2px;
 }
 
+/* Email somente leitura com link "Trocar" */
+.auth-email-readonly {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  color: var(--text-2);
+  background: var(--bg-elevated);
+}
+
 .auth-btn-primary {
   width: 100%;
   background: var(--emerald);
@@ -999,6 +1010,99 @@ a { color: inherit; text-decoration: none; }
 .auth-link { font-size: 0.82rem; color: var(--emerald); font-weight: 600; transition: opacity 0.15s; }
 .auth-link:hover { opacity: 0.75; }
 .auth-link-sep { color: var(--border-light); font-size: 0.82rem; }
+
+/* ============================================================
+   BANNER LOGIN (convidar não-logados a se cadastrar)
+   ============================================================ */
+
+.login-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.875rem 1rem;
+  background: linear-gradient(135deg, #0d3320, #134d2e);
+  border: 1px solid var(--emerald-dim);
+  border-radius: var(--radius-lg);
+  animation: fadeUp 0.3s ease both;
+  position: relative;
+}
+
+.login-banner-icon {
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.login-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.login-banner-title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text-1);
+  line-height: 1.3;
+}
+
+.login-banner-sub {
+  font-size: 0.78rem;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
+.login-banner-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  background: var(--emerald);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 7px 16px;
+  border-radius: var(--radius-full);
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.login-banner-btn:hover {
+  background: var(--emerald-dark);
+  transform: translateY(-1px);
+}
+
+.login-banner-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.625rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-3);
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 2px 4px;
+  transition: color 0.15s;
+}
+
+.login-banner-close:hover { color: var(--text-2); }
+
+@media (max-width: 640px) {
+  .login-banner {
+    flex-wrap: wrap;
+    gap: 0.625rem;
+  }
+
+  .login-banner-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
 
 /* ============================================================
    SELECTION SHARE MENU
@@ -1114,7 +1218,6 @@ a { color: inherit; text-decoration: none; }
   .header-actions-desktop { display: none; }
   .header-hamburger { display: flex; }
 
-  /* ✅ PATCH: oculta barra de busca do header em mobile (drawer tem a sua própria) */
   .header-search-desktop { display: none; }
 
   /* Overlay */
@@ -1251,7 +1354,6 @@ a { color: inherit; text-decoration: none; }
     padding-bottom: 2rem;
   }
 
-  /* ✅ PATCH: margin-top menor no mobile para não ficar longe demais do topo */
   .hero-content { padding: 0 1.25rem 1.5rem; max-width: 100%; margin-top: -1rem; }
   .hero-eyebrow { font-size: 0.65rem; padding: 4px 10px; margin-bottom: 1rem; }
   .hero-title { font-size: clamp(1.7rem, 8vw, 2.4rem); margin-bottom: 0.75rem; }
