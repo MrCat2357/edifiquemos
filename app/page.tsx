@@ -20,6 +20,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
 import CardReflexao from "@/components/reflexoes/CardReflexao";
+import BannerLogin from "@/components/BannerLogin";
 
 const PAGE_SIZE = 8;
 
@@ -183,6 +184,8 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
+
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
   const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
@@ -190,7 +193,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!uid) { onToast("Faça login para curtir"); return; }
+    if (!uid) { setShowLoginBanner(true); return; }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
@@ -230,7 +233,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
     <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }} onClick={(e) => e.stopPropagation()}>
       <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
         <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike} disabled={loadingLike}
-          title={uid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
+          title={uid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
           style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
           <IconHeart size={13} filled={liked} />Amei
           {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
@@ -274,6 +277,11 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
             <h2 className="card-title" style={{ fontSize: "1rem" }}>{post.titulo}</h2>
             {post.resumo && <p className="card-frase">{post.resumo}</p>}
           </div>
+          {showLoginBanner && (
+            <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+              <BannerLogin onClose={() => setShowLoginBanner(false)} />
+            </div>
+          )}
           {footerRow}
         </div>
       </article>
@@ -298,6 +306,11 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
         <h2 className="card-title">{post.titulo}</h2>
         {post.resumo && <p className="card-frase">{post.resumo}</p>}
       </div>
+      {showLoginBanner && (
+        <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+          <BannerLogin onClose={() => setShowLoginBanner(false)} />
+        </div>
+      )}
       {footerRow}
     </article>
   );
@@ -531,7 +544,7 @@ function HomePageContent() {
             {user ? (
               <Link href="/criar-post" className="btn-hero-secondary">Publicar Sermão ou Artigo</Link>
             ) : (
-              <Link href="/login" className="btn-hero-secondary">Entrar para Publicar</Link>
+              <Link href="/entrar" className="btn-hero-secondary">Entrar para Publicar</Link>
             )}
           </div>
         </div>

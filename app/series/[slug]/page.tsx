@@ -17,6 +17,7 @@ import {
 } from "firebase/firestore";
 import { useParams, useRouter } from "next/navigation";
 import { gerarPDF } from "@/lib/gerarPDF";
+import BannerLogin from "@/components/BannerLogin";
 
 function getInitials(name: string) {
   if (!name) return "?";
@@ -72,7 +73,6 @@ function IconDownload({ size = 13 }: { size?: number }) {
 }
 
 // ─── PostCardSerie ────────────────────────────────────────────────────────────
-// Recebe o serieSlug para construir URLs com ?from=serie&serieSlug=...
 
 function PostCardSerie({
   post,
@@ -93,12 +93,12 @@ function PostCardSerie({
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
+
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
-  // URL base do post
   const postBasePath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
-  // URL com contexto de série — usado para navegação e para o PDF
   const postPathSerie = `${postBasePath}?from=serie&serieSlug=${serieSlug}`;
   const fullUrl = typeof window !== "undefined" ? `${window.location.origin}${postBasePath}` : postBasePath;
 
@@ -115,7 +115,7 @@ function PostCardSerie({
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!uid) { onToast("Faça login para curtir"); return; }
+    if (!uid) { setShowLoginBanner(true); return; }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
@@ -155,6 +155,7 @@ function PostCardSerie({
     <div className="card-footer-row" style={{ display: "flex", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
       <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
         <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike} disabled={loadingLike}
+          title={uid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
           style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
           <IconHeart size={13} filled={liked} />Amei
           {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
@@ -170,7 +171,6 @@ function PostCardSerie({
           </span>
         )}
       </div>
-      {/* ← CORREÇÃO: link "Ler completo" agora inclui contexto da série */}
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPathSerie)}>
         Ler completo →
       </span>
@@ -179,7 +179,6 @@ function PostCardSerie({
 
   if (temImagem) {
     return (
-      // ← CORREÇÃO: onClick do card usa postPathSerie
       <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }} onClick={() => router.push(postPathSerie)}>
         <div className="card-cover-wrapper">
           <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
@@ -199,6 +198,11 @@ function PostCardSerie({
             <h2 className="card-title" style={{ fontSize: "1rem" }}>{post.titulo}</h2>
             {post.resumo && <p className="card-frase">{post.resumo}</p>}
           </div>
+          {showLoginBanner && (
+            <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+              <BannerLogin onClose={() => setShowLoginBanner(false)} />
+            </div>
+          )}
           {footerRow}
         </div>
       </article>
@@ -207,7 +211,6 @@ function PostCardSerie({
 
   return (
     <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
-      {/* ← CORREÇÃO: onClick usa postPathSerie */}
       <div className="card-header-row" onClick={() => router.push(postPathSerie)} style={{ cursor: "pointer" }}>
         <Avatar src={post.autorFoto} name={post.autorNome || "Autor"} size={36} />
         <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
@@ -220,11 +223,15 @@ function PostCardSerie({
           {post.tipo === "sermao" ? "Sermão" : "Artigo"}
         </span>
       </div>
-      {/* ← CORREÇÃO: onClick usa postPathSerie */}
       <div className="card-body-area" onClick={() => router.push(postPathSerie)} style={{ cursor: "pointer" }}>
         <h2 className="card-title">{post.titulo}</h2>
         {post.resumo && <p className="card-frase">{post.resumo}</p>}
       </div>
+      {showLoginBanner && (
+        <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+          <BannerLogin onClose={() => setShowLoginBanner(false)} />
+        </div>
+      )}
       {footerRow}
     </article>
   );
@@ -381,7 +388,7 @@ export default function SeriePage() {
 
         <hr style={{ border: "none", borderTop: "1px solid var(--border)", marginBottom: "1.5rem" }} />
 
-        {/* Posts — passa serieSlug para cada card */}
+        {/* Posts */}
         {posts.length === 0 ? (
           <div className="empty-state">Esta série ainda não tem publicações.</div>
         ) : (
@@ -391,7 +398,7 @@ export default function SeriePage() {
                 key={post.id}
                 post={post}
                 index={i}
-                serieSlug={serieSlug}   // ← NOVO: prop que carrega o slug da série
+                serieSlug={serieSlug}
                 onToast={showToast}
               />
             ))}
