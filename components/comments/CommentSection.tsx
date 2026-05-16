@@ -188,14 +188,6 @@ export default function CommentSection({ postId, onCountChange }: Props) {
         )}
       </ul>
 
-      {/* Banner de login inline — aparece também quando "Responder" é clicado
-          sem login, enquanto o showBanner estiver ativo */}
-      {showBanner && !effectiveUser && (
-        <div style={{ marginTop: "1rem" }}>
-          <BannerLogin onClose={() => setShowBanner(false)} />
-        </div>
-      )}
-
       {/* Paginação */}
       {hasMore && !loading && (
         <div style={{ marginTop: "1.5rem", textAlign: "center" }}>

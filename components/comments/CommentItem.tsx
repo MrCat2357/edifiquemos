@@ -381,11 +381,14 @@ export default function CommentItem({
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [showReplies, setShowReplies] = useState(false);
   const [editing, setEditing] = useState(false);
+  // Nudge inline para usuários não logados que clicam em Responder
+  const [showLoginNudge, setShowLoginNudge] = useState(false);
 
   const directReplies = replies.filter((r) => r.parentId === comment.id);
   const effectiveRootId = rootId ?? comment.id;
+
+  // Tamanho de avatar: root = 36, replies = 28 (independente da profundidade)
   const avatarSize = depth === 0 ? 36 : 28;
-  const lineLeftOffset = Math.floor(avatarSize / 2);
 
   async function handleReplySubmit(text: string) {
     await onReply(text, comment.id, effectiveRootId);
@@ -398,12 +401,14 @@ export default function CommentItem({
     setEditing(false);
   }
 
-  // Clique no botão Responder: abre formulário se logado, convida ao login se não
+  // Clique no botão Responder: abre formulário se logado; nudge inline se não
   function handleReplyClick() {
     if (currentUser) {
       setShowReplyForm((v) => !v);
+      setShowLoginNudge(false);
     } else {
-      onLoginRequired();
+      onLoginRequired(); // sobe o banner no topo dos comentários
+      setShowLoginNudge(true); // e mostra o nudge aqui perto do botão
     }
   }
 
@@ -412,7 +417,7 @@ export default function CommentItem({
   return (
     <Wrapper style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", position: "relative" }}>
       {/* Avatar */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+      <div style={{ flexShrink: 0 }}>
         <AuthorAvatar src={comment.authorPhoto || null} name={comment.authorName} size={avatarSize} />
       </div>
 
@@ -475,7 +480,7 @@ export default function CommentItem({
               {comment.likes > 0 && <span>{comment.likes}</span>}
             </button>
 
-            {/* Responder — visível para todos; não logados são convidados ao login */}
+            {/* Responder — visível para todos */}
             <button
               onClick={handleReplyClick}
               onMouseEnter={() => setReplyHovered(true)}
@@ -491,6 +496,33 @@ export default function CommentItem({
             >
               <IconReply size={13} />
               Responder
+            </button>
+          </div>
+        )}
+
+        {/* Nudge inline para usuário não logado — aparece logo abaixo das ações */}
+        {showLoginNudge && !currentUser && (
+          <div
+            style={{
+              display: "inline-flex", alignItems: "center", gap: "8px",
+              marginTop: "0.5rem", padding: "6px 12px",
+              background: "var(--emerald-dim, rgba(52,211,153,0.12))",
+              border: "1px solid var(--emerald)",
+              borderRadius: "var(--radius-full)",
+              fontSize: "0.78rem", color: "var(--emerald)", fontWeight: 600,
+            }}
+          >
+            <span>👆</span>
+            <span>Entre para responder — veja o convite acima</span>
+            <button
+              onClick={() => setShowLoginNudge(false)}
+              style={{
+                background: "none", border: "none", color: "var(--emerald)",
+                cursor: "pointer", fontSize: "0.75rem", padding: "0 2px", lineHeight: 1,
+              }}
+              aria-label="Fechar"
+            >
+              ✕
             </button>
           </div>
         )}
@@ -528,32 +560,84 @@ export default function CommentItem({
           </button>
         )}
 
-        {/* Lista de replies */}
+        {/*
+          ── Lista de replies — estilo YouTube ───────────────────────────────
+          Linha vertical no container que conecta todos os filhos.
+          Cada filho intermediário tem um braço horizontal saindo da linha.
+          O último filho tem um gancho curvo que "fecha" a linha.
+        */}
         {showReplies && directReplies.length > 0 && (
           <div
             role="list"
             style={{
-              marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "1rem",
-              paddingLeft: `${lineLeftOffset + 12}px`, position: "relative",
+              marginTop: "0.75rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.875rem",
+              paddingLeft: "20px",
+              position: "relative",
             }}
           >
             {directReplies.map((reply, idx) => {
               const isLastReply = idx === directReplies.length - 1;
-              const replyAvatarSize = 28;
-              const curveHeight = Math.floor(replyAvatarSize / 2) + 4;
-              const curveWidth = lineLeftOffset + 8;
-              const curveLeft = lineLeftOffset + 12;
 
               return (
                 <div key={reply.id} role="listitem" style={{ position: "relative" }}>
-                  <div
-                    style={{
-                      position: "absolute", left: `-${curveLeft}px`, top: 0,
-                      width: `${curveWidth}px`, height: `${curveHeight}px`,
-                      borderLeft: "2px solid var(--border)", borderBottom: "2px solid var(--border)",
-                      borderBottomLeftRadius: "10px", pointerEvents: "none",
-                    }}
-                  />
+                  {isLastReply ? (
+                    /*
+                      Último filho: curva em L que fecha a linha vertical.
+                      height cobre até o centro do avatar (≈14px = metade de 28px).
+                    */
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        position: "absolute",
+                        left: "-20px",
+                        top: 0,
+                        width: "16px",
+                        height: "15px",
+                        borderLeft: "1.5px solid var(--border)",
+                        borderBottom: "1.5px solid var(--border)",
+                        borderBottomLeftRadius: "6px",
+                        pointerEvents: "none",
+                      }}
+                    />
+                  ) : (
+                    /*
+                      Filhos intermediários:
+                      - Linha vertical que vai do topo até o fundo do item
+                        (conecta com o próximo irmão)
+                      - Braço horizontal que sai da linha até o avatar
+                    */
+                    <>
+                      {/* Linha vertical contínua para o próximo irmão */}
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          position: "absolute",
+                          left: "-20px",
+                          top: 0,
+                          bottom: `-0.875rem`, // cobre o gap entre itens
+                          width: "1.5px",
+                          background: "var(--border)",
+                          pointerEvents: "none",
+                        }}
+                      />
+                      {/* Braço horizontal até o avatar */}
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          position: "absolute",
+                          left: "-20px",
+                          top: "15px",
+                          width: "16px",
+                          height: "1.5px",
+                          background: "var(--border)",
+                          pointerEvents: "none",
+                        }}
+                      />
+                    </>
+                  )}
                   <CommentItem
                     comment={reply}
                     currentUserId={currentUserId}
