@@ -199,21 +199,38 @@ export function useComments(postId: string) {
   }
 
   /**
-   * Exclui um comentário.
-   * Não exclui as replies em cascata — elas continuam existindo no Firestore
-   * mas ficam órfãs (parentId aponta para um doc inexistente).
-   * Se quiser ocultar orphans no futuro, filtre no getReplies.
+   * Exclui um comentário e todas as suas replies em cascata.
+   * As replies são deletadas do Firestore e o contador é decrementado
+   * pelo total removido (comentário + replies).
    */
   async function deleteComment(commentId: string, userId: string) {
     const ref = doc(db, "posts", postId, "comments", commentId);
     const snap = await getDoc(ref);
     if (!snap.exists() || snap.data().authorId !== userId) return;
 
+    // Identifica todas as replies atreladas a este comentário
+    const repliesAtreladas = comments.filter(
+      (c) => c.rootId === commentId || c.parentId === commentId
+    );
+
+    // Deleta o comentário principal
     await deleteDoc(ref);
 
-    // Mantém o contador desnormalizado no doc do post sincronizado
+    // Deleta todas as replies em paralelo
+    if (repliesAtreladas.length > 0) {
+      await Promise.all(
+        repliesAtreladas.map((r) =>
+          deleteDoc(doc(db, "posts", postId, "comments", r.id))
+        )
+      );
+    }
+
+    // Decrementa o contador pelo total removido (comentário + replies)
+    const totalRemovido = 1 + repliesAtreladas.length;
     try {
-      await updateDoc(doc(db, "posts", postId), { commentCount: increment(-1) });
+      await updateDoc(doc(db, "posts", postId), {
+        commentCount: increment(-totalRemovido),
+      });
     } catch {}
   }
 
