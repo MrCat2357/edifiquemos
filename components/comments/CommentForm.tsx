@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AuthorAvatar } from "@/components/AuthorAvatar";
 
 type Props = {
@@ -7,7 +7,8 @@ type Props = {
   onCancel?: () => void;
   placeholder?: string;
   autoFocus?: boolean;
-  compact?: boolean; // modo compacto para replies (sem avatar grande)
+  compact?: boolean;
+  mentionName?: string | null; // nome da pessoa sendo respondida
 };
 
 export default function CommentForm({
@@ -17,10 +18,21 @@ export default function CommentForm({
   placeholder = "Adicione um comentário...",
   autoFocus = false,
   compact = false,
+  mentionName = null,
 }: Props) {
-  const [text, setText] = useState("");
+  const mention = mentionName ? `@${mentionName} ` : "";
+  const [text, setText] = useState(mention);
   const [focused, setFocused] = useState(autoFocus);
   const [loading, setLoading] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Posiciona o cursor após a menção ao montar
+  useEffect(() => {
+    if (autoFocus && textareaRef.current) {
+      const len = mention.length;
+      textareaRef.current.setSelectionRange(len, len);
+    }
+  }, []);
 
   async function handleSubmit() {
     if (!text.trim() || loading) return;
@@ -44,6 +56,7 @@ export default function CommentForm({
       )}
       <div style={{ flex: 1 }}>
         <textarea
+          ref={textareaRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onFocus={() => setFocused(true)}
