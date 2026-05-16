@@ -1,23 +1,97 @@
 import { useAuth } from "@/lib/useAuth";
-import { auth } from "@/lib/firebase";
-import { useComments } from "@/hooks/useComments";
+import { auth, db } from "@/lib/firebase";
+import { useComments, CommentUser } from "@/hooks/useComments";
 import CommentForm from "./CommentForm";
 import CommentItem from "./CommentItem";
 import BannerLogin from "@/components/BannerLogin";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { doc, getDoc } from "firebase/firestore";
 
-type Props = { postId: string };
+type Props = { postId: string; onCountChange?: (n: number) => void };
 
-export default function CommentSection({ postId }: Props) {
+export default function CommentSection({ postId, onCountChange }: Props) {
   const { user } = useAuth();
-  const { comments, rootComments, getReplies, loading, addComment, toggleLike } =
-    useComments(postId);
+  const {
+    comments,
+    rootComments,
+    getReplies,
+    loading,
+    loadingMore,
+    hasMore,
+    loadMore,
+    addComment,
+    editComment,
+    deleteComment,
+    toggleLike,
+  } = useComments(postId);
   const [showBanner, setShowBanner] = useState(false);
   const currentUserId = auth.currentUser?.uid ?? null;
 
-  async function handleReply(text: string, parentId: string) {
-    if (!user) return;
-    await addComment(text, user, parentId);
+  // Notifica o pai sempre que o total de comentários mudar
+  useEffect(() => {
+    if (!loading) onCountChange?.(comments.length);
+  }, [comments.length, loading]);
+
+  // Busca dados da plataforma (/users/{uid}) para enriquecer o usuário
+  const [platformUser, setPlatformUser] = useState<CommentUser | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setPlatformUser(null);
+      return;
+    }
+
+    async function fetchPlatformData() {
+      const userDoc = await getDoc(doc(db, "users", user!.uid));
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        setPlatformUser({
+          uid: user!.uid,
+          displayName: user!.displayName,
+          photoURL: user!.photoURL,
+          platformName: data.nome || null,
+          platformSlug: data.slug || null,
+          platformPhoto: data.fotoUrl || null,
+        });
+      } else {
+        setPlatformUser({
+          uid: user!.uid,
+          displayName: user!.displayName,
+          photoURL: user!.photoURL,
+        });
+      }
+    }
+
+    fetchPlatformData();
+  }, [user]);
+
+  const effectiveUser: CommentUser | null = platformUser ?? (user
+    ? { uid: user.uid, displayName: user.displayName, photoURL: user.photoURL }
+    : null);
+
+  // Salva a URL atual e exibe o banner de login.
+  // Chamado tanto pelo botão "Adicione um comentário..." quanto pelo
+  // botão "Responder" em CommentItem quando o usuário não está logado.
+  function requestLogin() {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("redirect-after-auth", window.location.href);
+    }
+    setShowBanner(true);
+  }
+
+  async function handleReply(text: string, parentId: string, rootId: string) {
+    if (!effectiveUser) return;
+    await addComment(text, effectiveUser, parentId, rootId);
+  }
+
+  async function handleEdit(commentId: string, newText: string) {
+    if (!currentUserId) return;
+    await editComment(commentId, newText, currentUserId);
+  }
+
+  async function handleDelete(commentId: string) {
+    if (!currentUserId) return;
+    await deleteComment(commentId, currentUserId);
   }
 
   return (
@@ -40,11 +114,11 @@ export default function CommentSection({ postId }: Props) {
           : `${comments.length} Comentário${comments.length !== 1 ? "s" : ""}`}
       </h2>
 
-      {/* Formulário ou convite para login */}
-      {user ? (
+      {/* Formulário principal ou convite para login */}
+      {effectiveUser ? (
         <CommentForm
-          user={user}
-          onSubmit={(text) => addComment(text, user, null)}
+          user={effectiveUser}
+          onSubmit={(text) => addComment(text, effectiveUser, null, null)}
         />
       ) : (
         <div style={{ marginBottom: "1rem" }}>
@@ -52,7 +126,7 @@ export default function CommentSection({ postId }: Props) {
             <BannerLogin onClose={() => setShowBanner(false)} />
           ) : (
             <button
-              onClick={() => setShowBanner(true)}
+              onClick={requestLogin}
               style={{
                 width: "100%",
                 textAlign: "left",
@@ -85,20 +159,11 @@ export default function CommentSection({ postId }: Props) {
       >
         {loading ? (
           <li style={{ color: "var(--text-3)", fontSize: "0.85rem" }}>
-            <div
-              className="spinner"
-              style={{ display: "inline-block", marginRight: "0.5rem" }}
-            />
+            <div className="spinner" style={{ display: "inline-block", marginRight: "0.5rem" }} />
             Carregando comentários...
           </li>
         ) : rootComments.length === 0 ? (
-          <li
-            style={{
-              color: "var(--text-3)",
-              fontSize: "0.85rem",
-              fontStyle: "italic",
-            }}
-          >
+          <li style={{ color: "var(--text-3)", fontSize: "0.85rem", fontStyle: "italic" }}>
             Seja o primeiro a comentar.
           </li>
         ) : (
@@ -107,17 +172,52 @@ export default function CommentSection({ postId }: Props) {
               key={comment.id}
               comment={comment}
               currentUserId={currentUserId}
-              currentUser={user ?? null}
+              currentUser={effectiveUser}
               onLike={(id, currentLikes, alreadyLiked) =>
                 toggleLike(id, currentUserId!, currentLikes, alreadyLiked)
               }
               onReply={handleReply}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              onLoginRequired={requestLogin}
               replies={getReplies(comment.id)}
               depth={0}
+              rootId={comment.id}
             />
           ))
         )}
       </ul>
+
+      {/* Banner de login inline — aparece também quando "Responder" é clicado
+          sem login, enquanto o showBanner estiver ativo */}
+      {showBanner && !effectiveUser && (
+        <div style={{ marginTop: "1rem" }}>
+          <BannerLogin onClose={() => setShowBanner(false)} />
+        </div>
+      )}
+
+      {/* Paginação */}
+      {hasMore && !loading && (
+        <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            style={{
+              padding: "8px 24px",
+              borderRadius: "var(--radius-full)",
+              border: "1px solid var(--border)",
+              background: "transparent",
+              color: loadingMore ? "var(--text-3)" : "var(--text-2)",
+              cursor: loadingMore ? "default" : "pointer",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+              transition: "all 0.15s",
+            }}
+          >
+            {loadingMore ? "Carregando..." : "Ver mais comentários"}
+          </button>
+        </div>
+      )}
     </section>
   );
 }

@@ -49,7 +49,6 @@ async function emailExisteNoFirestore(email: string): Promise<boolean> {
 
 type Etapa = "email" | "senha" | "cadastro" | "termos-google";
 
-// Dados temporários do usuário Google enquanto aguarda aceite dos termos
 type DadosGoogle = {
   uid: string;
   nome: string;
@@ -65,27 +64,39 @@ function EntrarForm() {
 
   const [etapa, setEtapa] = useState<Etapa>("email");
 
-  // campos
   const [email, setEmail] = useState(searchParams.get("email") ?? "");
   const [senha, setSenha] = useState("");
   const [nome, setNome] = useState("");
   const [aceitouTermos, setAceitouTermos] = useState(false);
   const [showSenha, setShowSenha] = useState(false);
 
-  // dados do Google pendentes de aceite
   const [dadosGoogle, setDadosGoogle] = useState<DadosGoogle | null>(null);
 
-  // estado
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   // ── utilitário de redirecionamento pós-auth ──────────────────────────────
+  //
+  // Lê "redirect-after-auth" do sessionStorage, que pode ser:
+  //   • um pathname+search  (ex: "/posts/artigos/meu-post")
+  //   • uma URL completa    (ex: "https://site.com/posts/artigos/meu-post")
+  //
+  // Em ambos os casos extraímos apenas o pathname+search+hash para o
+  // router.push funcionar corretamente dentro do Next.js.
 
   function redirecionarAposAuth() {
-    const redirect = sessionStorage.getItem("redirect-after-auth");
-    if (redirect) {
-      sessionStorage.removeItem("redirect-after-auth");
-      router.push(redirect);
+    const raw = sessionStorage.getItem("redirect-after-auth");
+    sessionStorage.removeItem("redirect-after-auth");
+
+    if (raw) {
+      try {
+        // Tenta parsear como URL completa
+        const url = new URL(raw);
+        router.push(url.pathname + url.search + url.hash);
+      } catch {
+        // Era só um pathname — usa diretamente
+        router.push(raw);
+      }
     } else {
       router.push("/");
     }
@@ -219,12 +230,10 @@ function EntrarForm() {
       const userSnap = await getDoc(userRef);
 
       if (userSnap.exists()) {
-        // Conta já existe → login direto, sem pedir termos de novo
         redirecionarAposAuth();
         return;
       }
 
-      // Primeiro acesso com Google → guardar dados e pedir aceite dos termos
       setDadosGoogle({
         uid: user.uid,
         nome: user.displayName ?? user.email?.split("@")[0] ?? "Usuário",
@@ -468,7 +477,6 @@ function EntrarForm() {
         {etapa === "termos-google" && dadosGoogle && (
           <form onSubmit={handleConfirmarTermosGoogle} className="auth-form">
 
-            {/* Avatar + nome do Google para contextualizar */}
             <div style={{
               display: "flex", alignItems: "center", gap: "0.75rem",
               padding: "0.75rem 1rem",
