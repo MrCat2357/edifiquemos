@@ -15,9 +15,14 @@ export default function CommentSection({ postId }: Props) {
   const [showBanner, setShowBanner] = useState(false);
   const currentUserId = auth.currentUser?.uid ?? null;
 
-  async function handleReply(text: string, parentId: string) {
+  /**
+   * Chamado pelo CommentItem ao submeter uma reply.
+   * parentId = id do comentário sendo respondido (pode ser qualquer nível)
+   * rootId   = id do comentário raiz do grupo (para manter tudo agrupado)
+   */
+  async function handleReply(text: string, parentId: string, rootId: string) {
     if (!user) return;
-    await addComment(text, user, parentId);
+    await addComment(text, user, parentId, rootId);
   }
 
   return (
@@ -40,11 +45,11 @@ export default function CommentSection({ postId }: Props) {
           : `${comments.length} Comentário${comments.length !== 1 ? "s" : ""}`}
       </h2>
 
-      {/* Formulário ou convite para login */}
+      {/* Formulário principal ou convite para login */}
       {user ? (
         <CommentForm
           user={user}
-          onSubmit={(text) => addComment(text, user, null)}
+          onSubmit={(text) => addComment(text, user, null, null)}
         />
       ) : (
         <div style={{ marginBottom: "1rem" }}>
@@ -114,6 +119,7 @@ export default function CommentSection({ postId }: Props) {
               onReply={handleReply}
               replies={getReplies(comment.id)}
               depth={0}
+              rootId={comment.id}
             />
           ))
         )}

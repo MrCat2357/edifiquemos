@@ -15,7 +15,8 @@ export type Comment = {
   authorPhoto: string;
   likes: number;
   likedBy: string[];
-  parentId: string | null; // null = comentário raiz; string = reply a outro comentário
+  parentId: string | null;
+  rootId: string | null;
   createdAt: Timestamp | null;
 };
 
@@ -25,6 +26,8 @@ export function useComments(postId: string) {
 
   useEffect(() => {
     if (!postId) return;
+    // Busca todos ordenados por data asc — a ordenação de relevância é feita no cliente
+    // para não exigir índice composto no Firestore
     const q = query(
       collection(db, "posts", postId, "comments"),
       orderBy("createdAt", "asc")
@@ -41,7 +44,8 @@ export function useComments(postId: string) {
   async function addComment(
     text: string,
     user: { uid: string; displayName?: string | null; photoURL?: string | null },
-    parentId: string | null = null
+    parentId: string | null = null,
+    rootId: string | null = null
   ) {
     await addDoc(collection(db, "posts", postId, "comments"), {
       text,
@@ -51,6 +55,7 @@ export function useComments(postId: string) {
       likes: 0,
       likedBy: [],
       parentId,
+      rootId: rootId ?? parentId,
       createdAt: serverTimestamp(),
     });
   }
@@ -68,10 +73,35 @@ export function useComments(postId: string) {
     });
   }
 
-  // Retorna comentários raiz + replies organizados
-  const rootComments = comments.filter((c) => !c.parentId);
-  const getReplies = (commentId: string) =>
-    comments.filter((c) => c.parentId === commentId);
+  // Comentários raiz ordenados por relevância:
+  // 1º likes desc — mais curtidos aparecem primeiro
+  // 2º replyCount desc — comentários com mais respostas têm mais engajamento
+  // 3º createdAt desc — desempate pelo mais recente
+  const allReplies = comments.filter((c) => c.parentId !== null);
+
+  const replyCount = (commentId: string) =>
+    allReplies.filter((r) => r.rootId === commentId || r.parentId === commentId).length;
+
+  const rootComments = comments
+    .filter((c) => !c.parentId)
+    .sort((a, b) => {
+      const likesDiff = (b.likes ?? 0) - (a.likes ?? 0);
+      if (likesDiff !== 0) return likesDiff;
+
+      const replyDiff = replyCount(b.id) - replyCount(a.id);
+      if (replyDiff !== 0) return replyDiff;
+
+      // createdAt mais recente primeiro como desempate final
+      const aTime = a.createdAt?.toMillis() ?? 0;
+      const bTime = b.createdAt?.toMillis() ?? 0;
+      return bTime - aTime;
+    });
+
+  // Replies mantêm ordem cronológica (asc) — faz sentido seguir o fio da conversa
+  const getReplies = (rootCommentId: string): Comment[] =>
+    allReplies.filter(
+      (c) => c.rootId === rootCommentId || c.parentId === rootCommentId
+    );
 
   return { comments, rootComments, getReplies, loading, addComment, toggleLike };
 }
