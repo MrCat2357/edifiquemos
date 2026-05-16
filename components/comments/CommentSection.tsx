@@ -7,9 +7,9 @@ import BannerLogin from "@/components/BannerLogin";
 import { useState, useEffect } from "react";
 import { doc, getDoc } from "firebase/firestore";
 
-type Props = { postId: string };
+type Props = { postId: string; onCountChange?: (n: number) => void };
 
-export default function CommentSection({ postId }: Props) {
+export default function CommentSection({ postId, onCountChange }: Props) {
   const { user } = useAuth();
   const {
     comments,
@@ -26,6 +26,11 @@ export default function CommentSection({ postId }: Props) {
   } = useComments(postId);
   const [showBanner, setShowBanner] = useState(false);
   const currentUserId = auth.currentUser?.uid ?? null;
+
+  // Notifica o pai sempre que o total de comentários mudar
+  useEffect(() => {
+    if (!loading) onCountChange?.(comments.length);
+  }, [comments.length, loading]);
 
   // Busca dados da plataforma (/users/{uid}) para enriquecer o usuário
   const [platformUser, setPlatformUser] = useState<CommentUser | null>(null);
@@ -63,6 +68,16 @@ export default function CommentSection({ postId }: Props) {
   const effectiveUser: CommentUser | null = platformUser ?? (user
     ? { uid: user.uid, displayName: user.displayName, photoURL: user.photoURL }
     : null);
+
+  // Salva a URL atual e exibe o banner de login.
+  // Chamado tanto pelo botão "Adicione um comentário..." quanto pelo
+  // botão "Responder" em CommentItem quando o usuário não está logado.
+  function requestLogin() {
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("redirect-after-auth", window.location.href);
+    }
+    setShowBanner(true);
+  }
 
   async function handleReply(text: string, parentId: string, rootId: string) {
     if (!effectiveUser) return;
@@ -111,7 +126,7 @@ export default function CommentSection({ postId }: Props) {
             <BannerLogin onClose={() => setShowBanner(false)} />
           ) : (
             <button
-              onClick={() => setShowBanner(true)}
+              onClick={requestLogin}
               style={{
                 width: "100%",
                 textAlign: "left",
@@ -164,6 +179,7 @@ export default function CommentSection({ postId }: Props) {
               onReply={handleReply}
               onEdit={handleEdit}
               onDelete={handleDelete}
+              onLoginRequired={requestLogin}
               replies={getReplies(comment.id)}
               depth={0}
               rootId={comment.id}
@@ -171,6 +187,14 @@ export default function CommentSection({ postId }: Props) {
           ))
         )}
       </ul>
+
+      {/* Banner de login inline — aparece também quando "Responder" é clicado
+          sem login, enquanto o showBanner estiver ativo */}
+      {showBanner && !effectiveUser && (
+        <div style={{ marginTop: "1rem" }}>
+          <BannerLogin onClose={() => setShowBanner(false)} />
+        </div>
+      )}
 
       {/* Paginação */}
       {hasMore && !loading && (

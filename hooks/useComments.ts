@@ -171,6 +171,11 @@ export function useComments(postId: string) {
       createdAt: serverTimestamp(),
       editedAt: null,
     });
+
+    // Mantém o contador desnormalizado no doc do post sincronizado
+    try {
+      await updateDoc(doc(db, "posts", postId), { commentCount: increment(1) });
+    } catch {}
   }
 
   /**
@@ -205,6 +210,11 @@ export function useComments(postId: string) {
     if (!snap.exists() || snap.data().authorId !== userId) return;
 
     await deleteDoc(ref);
+
+    // Mantém o contador desnormalizado no doc do post sincronizado
+    try {
+      await updateDoc(doc(db, "posts", postId), { commentCount: increment(-1) });
+    } catch {}
   }
 
   /**
