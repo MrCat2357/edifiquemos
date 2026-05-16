@@ -456,7 +456,7 @@ a { color: inherit; text-decoration: none; }
   color: var(--text-1);
 }
 
-.posts-list { display: flex; flex-direction: column; gap: 0.875rem; }
+.posts-list { display: flex; flex-direction: column; gap: 0.875rem; min-width: 0; }
 
 /* ============================================================
    POST CARD
@@ -470,6 +470,9 @@ a { color: inherit; text-decoration: none; }
   cursor: pointer;
   transition: all 0.2s ease;
   animation: cardIn 0.4s ease both;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
 }
 
 .post-card:hover {
@@ -1377,10 +1380,47 @@ a { color: inherit; text-decoration: none; }
   .feed-wrapper { padding: 1rem 0.75rem; }
   .feed-main-title { font-size: 1rem; }
 
+  .posts-list { min-width: 0; }
+
+  .post-card {
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .post-card-image,
+  .serie-card {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .card-cover-wrapper {
+    width: 100%;
+    max-width: 100%;
+  }
+
   .card-header-row { padding: 0.875rem 1rem 0.4rem; }
   .card-body-area  { padding: 0.2rem 1rem 0.75rem; }
-  .card-footer-row { padding: 0.4rem 1rem; }
-  .card-title { font-size: 0.97rem; }
+
+  .card-footer-row {
+    padding: 0.4rem 1rem;
+    flex-wrap: wrap;
+    gap: 0.375rem 0.5rem;
+    overflow: hidden;
+  }
+
+  .card-title {
+    font-size: 0.97rem;
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+
+  .action-btn,
+  .read-link {
+    flex-shrink: 1;
+    min-width: 0;
+  }
 
   /* Post detail */
   .post-detail-wrapper {

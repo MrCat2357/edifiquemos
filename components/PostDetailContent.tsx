@@ -12,6 +12,7 @@ import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
 import LinksReferencia from "@/components/LinksReferencia";
 import BannerLogin from "@/components/BannerLogin";
+import CommentSection from "@/components/comments/CommentSection";
 
 /* ── helpers ─────────────────────────────────────────── */
 
@@ -343,13 +344,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
       )}
 
       <nav
-        className="post-nav"
+        className={`post-nav post-nav-grid ${prev && next ? "post-nav-grid--both" : prev ? "post-nav-grid--prev" : "post-nav-grid--next"}`}
         aria-label="Navegação entre publicações"
-        style={{
-          display: "grid",
-          gridTemplateColumns: prev && next ? "1fr 1fr" : prev ? "1fr auto" : "auto 1fr",
-          gap: "0.75rem",
-        }}
       >
         {prev ? (
           <button
@@ -930,9 +926,10 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   async function handleLike() {
     const uid = auth.currentUser?.uid;
     if (!uid) {
-      setShowLoginBanner(true); // ← era: showToast("Faça login para curtir")
-      return;
-    }
+  sessionStorage.setItem("redirect-after-auth", window.location.href);
+  setShowLoginBanner(true);
+  return;
+}
     if (loadingLike) return;
     setLoadingLike(true);
     try {
@@ -1250,6 +1247,9 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         {/* Navegação entre posts */}
         <PostNavigation postId={postId} autorIdProp={post.autorId} />
+
+        {/* ── Sistema de comentários ── */}
+        <CommentSection postId={postId} />
       </article>
 
       <style>{`
@@ -1257,6 +1257,19 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           .post-detail-cover-wrapper img {
             max-height: 360px !important;
           }
+        }
+        /* Nav cards — two columns on desktop, stacked on mobile */
+        .post-nav-grid {
+          display: grid;
+          gap: 0.75rem;
+        }
+        .post-nav-grid--both      { grid-template-columns: 1fr 1fr; }
+        .post-nav-grid--prev      { grid-template-columns: 1fr auto; }
+        .post-nav-grid--next      { grid-template-columns: auto 1fr; }
+        @media (max-width: 480px) {
+          .post-nav-grid--both,
+          .post-nav-grid--prev,
+          .post-nav-grid--next { grid-template-columns: 1fr; }
         }
       `}</style>
     </>
