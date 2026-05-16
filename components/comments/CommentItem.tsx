@@ -59,18 +59,32 @@ export function tempoRelativo(timestamp: any): string {
 }
 
 /**
- * Renderiza o texto do comentário, transformando @menções no início em links.
- * Só linka a primeira @menção contígua no início do texto.
+ * CORREÇÃO 3 — CommentText agora recebe o authorSlug diretamente do documento
+ * do comentário pai (quem está sendo mencionado), em vez de derivar o slug
+ * a partir do nome exibido.
+ *
+ * Problema anterior: o slug era gerado fazendo toLowerCase + replace de espaços
+ * no authorName. Se o authorName fosse o nome do Google ("Catulo Axel"), o slug
+ * gerado era "catulo-axel", mas o perfil na plataforma é "/perfil/mrcat" —
+ * levando a "Usuário não encontrado".
+ *
+ * Solução: passamos o mentionSlug (slug do comentário pai) ao renderizar
+ * o formulário de reply, e salvamos no texto da menção via CommentText.
+ * O link usa esse slug diretamente.
  */
-function CommentText({ text }: { text: string }) {
+function CommentText({
+  text,
+  mentionSlug,
+}: {
+  text: string;
+  mentionSlug?: string | null;
+}) {
   // Detecta @menção no início: "@Nome Sobrenome " seguido do restante
   const mentionMatch = text.match(/^(@[\w\s\-\.]+?)\s([\s\S]*)$/);
 
-  if (mentionMatch) {
+  if (mentionMatch && mentionSlug) {
     const mention = mentionMatch[1]; // ex: "@Catulo Axel"
     const rest = mentionMatch[2];
-    // Transforma o nome em slug para o link de perfil
-    const slug = mention.replace("@", "").trim().toLowerCase().replace(/\s+/g, "-");
 
     return (
       <p
@@ -83,7 +97,7 @@ function CommentText({ text }: { text: string }) {
         }}
       >
         <a
-          href={`/perfil/${slug}`}
+          href={`/perfil/${mentionSlug}`}
           style={{
             color: "var(--emerald)",
             fontWeight: 600,
@@ -103,6 +117,7 @@ function CommentText({ text }: { text: string }) {
     );
   }
 
+  // Sem menção reconhecida: texto puro
   return (
     <p
       style={{
@@ -121,7 +136,14 @@ function CommentText({ text }: { text: string }) {
 type Props = {
   comment: Comment;
   currentUserId: string | null;
-  currentUser: { uid: string; displayName?: string | null; photoURL?: string | null } | null;
+  currentUser: {
+    uid: string;
+    displayName?: string | null;
+    photoURL?: string | null;
+    platformName?: string | null;
+    platformSlug?: string | null;
+    platformPhoto?: string | null;
+  } | null;
   onLike: (commentId: string, currentLikes: number, alreadyLiked: boolean) => void;
   onReply: (text: string, parentId: string, rootId: string) => Promise<void>;
   // replies é toda a lista "achatada" de replies do rootId — cada item decide sua posição
@@ -129,6 +151,8 @@ type Props = {
   depth?: number;
   rootId?: string; // id do comentário raiz para manter a cadeia no mesmo grupo
   isLast?: boolean; // último item da lista (para cortar a linha vertical)
+  // NOVO: slug do comentário pai (de quem este comentário é reply), para linkar a menção
+  parentAuthorSlug?: string | null;
 };
 
 export default function CommentItem({
@@ -141,6 +165,7 @@ export default function CommentItem({
   depth = 0,
   rootId,
   isLast = false,
+  parentAuthorSlug = null,
 }: Props) {
   const alreadyLiked = !!currentUserId && comment.likedBy.includes(currentUserId);
   const [likeHovered, setLikeHovered] = useState(false);
@@ -210,8 +235,12 @@ export default function CommentItem({
           </span>
         </div>
 
-        {/* Texto com @menção linkada */}
-        <CommentText text={comment.text} />
+        {/*
+          CORREÇÃO 3 — Passa o slug do autor do comentário PAI (parentAuthorSlug)
+          para que o link da @menção aponte para o perfil correto na plataforma,
+          e não para um slug derivado do nome do Google.
+        */}
+        <CommentText text={comment.text} mentionSlug={parentAuthorSlug} />
 
         {/* Ações */}
         <div
@@ -366,6 +395,10 @@ export default function CommentItem({
                       pointerEvents: "none",
                     }}
                   />
+                  {/*
+                    CORREÇÃO 3 — Passa comment.authorSlug como parentAuthorSlug
+                    para que o reply saiba o slug de quem está sendo mencionado.
+                  */}
                   <CommentItem
                     comment={reply}
                     currentUserId={currentUserId}
@@ -376,6 +409,7 @@ export default function CommentItem({
                     depth={depth + 1}
                     rootId={effectiveRootId}
                     isLast={isLastReply}
+                    parentAuthorSlug={comment.authorSlug || null}
                   />
                 </div>
               );

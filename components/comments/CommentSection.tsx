@@ -1,28 +1,80 @@
 import { useAuth } from "@/lib/useAuth";
-import { auth } from "@/lib/firebase";
-import { useComments } from "@/hooks/useComments";
+import { auth, db } from "@/lib/firebase";
+import { useComments, CommentUser } from "@/hooks/useComments";
 import CommentForm from "./CommentForm";
 import CommentItem from "./CommentItem";
 import BannerLogin from "@/components/BannerLogin";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { doc, getDoc } from "firebase/firestore";
 
 type Props = { postId: string };
 
 export default function CommentSection({ postId }: Props) {
   const { user } = useAuth();
-  const { comments, rootComments, getReplies, loading, addComment, toggleLike } =
-    useComments(postId);
+  const {
+    comments,
+    rootComments,
+    getReplies,
+    loading,
+    loadingMore,
+    hasMore,
+    loadMore,
+    addComment,
+    toggleLike,
+  } = useComments(postId);
   const [showBanner, setShowBanner] = useState(false);
   const currentUserId = auth.currentUser?.uid ?? null;
 
-  /**
-   * Chamado pelo CommentItem ao submeter uma reply.
-   * parentId = id do comentário sendo respondido (pode ser qualquer nível)
-   * rootId   = id do comentário raiz do grupo (para manter tudo agrupado)
+  /*
+   * CORREÇÃO 3 — Buscar dados da plataforma (/users/{uid}) para enriquecer
+   * o usuário antes de criar comentários.
+   *
+   * Problema anterior: addComment usava user.displayName (nome do Google) e
+   * user.photoURL (foto do Google), ignorando o nome/slug/foto cadastrados
+   * na plataforma. Isso fazia o comentário aparecer com o nome errado e
+   * o link da @menção levar para um perfil inexistente.
    */
+  const [platformUser, setPlatformUser] = useState<CommentUser | null>(null);
+
+  useEffect(() => {
+    if (!user) {
+      setPlatformUser(null);
+      return;
+    }
+
+    async function fetchPlatformData() {
+      const userDoc = await getDoc(doc(db, "users", user!.uid));
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        setPlatformUser({
+          uid: user!.uid,
+          displayName: user!.displayName,
+          photoURL: user!.photoURL,
+          platformName: data.nome || null,
+          platformSlug: data.slug || null,
+          platformPhoto: data.fotoUrl || null,
+        });
+      } else {
+        // Usuário ainda não tem documento na plataforma — usa dados do Google
+        setPlatformUser({
+          uid: user!.uid,
+          displayName: user!.displayName,
+          photoURL: user!.photoURL,
+        });
+      }
+    }
+
+    fetchPlatformData();
+  }, [user]);
+
+  // O CommentUser efetivo: prioriza dados da plataforma, cai no Google como fallback
+  const effectiveUser: CommentUser | null = platformUser ?? (user
+    ? { uid: user.uid, displayName: user.displayName, photoURL: user.photoURL }
+    : null);
+
   async function handleReply(text: string, parentId: string, rootId: string) {
-    if (!user) return;
-    await addComment(text, user, parentId, rootId);
+    if (!effectiveUser) return;
+    await addComment(text, effectiveUser, parentId, rootId);
   }
 
   return (
@@ -46,10 +98,10 @@ export default function CommentSection({ postId }: Props) {
       </h2>
 
       {/* Formulário principal ou convite para login */}
-      {user ? (
+      {effectiveUser ? (
         <CommentForm
-          user={user}
-          onSubmit={(text) => addComment(text, user, null, null)}
+          user={effectiveUser}
+          onSubmit={(text) => addComment(text, effectiveUser, null, null)}
         />
       ) : (
         <div style={{ marginBottom: "1rem" }}>
@@ -112,7 +164,7 @@ export default function CommentSection({ postId }: Props) {
               key={comment.id}
               comment={comment}
               currentUserId={currentUserId}
-              currentUser={user ?? null}
+              currentUser={effectiveUser}
               onLike={(id, currentLikes, alreadyLiked) =>
                 toggleLike(id, currentUserId!, currentLikes, alreadyLiked)
               }
@@ -124,6 +176,29 @@ export default function CommentSection({ postId }: Props) {
           ))
         )}
       </ul>
+
+      {/* CORREÇÃO 2 — Botão de paginação */}
+      {hasMore && !loading && (
+        <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            style={{
+              padding: "8px 24px",
+              borderRadius: "var(--radius-full)",
+              border: "1px solid var(--border)",
+              background: "transparent",
+              color: loadingMore ? "var(--text-3)" : "var(--text-2)",
+              cursor: loadingMore ? "default" : "pointer",
+              fontSize: "0.85rem",
+              fontWeight: 600,
+              transition: "all 0.15s",
+            }}
+          >
+            {loadingMore ? "Carregando..." : "Ver mais comentários"}
+          </button>
+        </div>
+      )}
     </section>
   );
 }
