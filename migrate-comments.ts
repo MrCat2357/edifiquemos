@@ -1,21 +1,24 @@
 import { adminDb } from "./lib/firebaseAdmin";
 
 /**
- * Script de migração em duas etapas:
+ * Script de migração em três etapas:
  *
  * ETAPA 1 (original) — preenche rootId nos comentários que eram replies
  * mas não tinham esse campo (comentários criados antes da feature de threading).
  *
- * ETAPA 2 (nova) — preenche authorSlug nos comentários que não têm esse campo.
- * O authorSlug é o slug do perfil do autor na plataforma (/users/{authorId}.slug).
- * Sem ele, os links de @menção derivavam o slug do nome do Google, levando
- * a perfis inexistentes (ex: "catulo-axel" em vez de "mrcat").
+ * ETAPA 2 (anterior) — preenche authorSlug ausente em qualquer comentário.
+ *
+ * ETAPA 3 (nova) — preenche commentCount no doc do post com o total real de
+ * comentários da subcoleção. Necessário para exibir o contador no feed sem
+ * precisar abrir o painel. A partir daqui useComments.ts mantém o campo
+ * sincronizado via increment(±1) a cada addComment/deleteComment.
  */
 async function migrate() {
   const postsSnap = await adminDb.collection("posts").get();
   let total = 0;
   let updatedRootId = 0;
   let updatedSlug = 0;
+  let updatedCommentCount = 0;
 
   // Cache de slugs: evita buscar o mesmo usuário várias vezes
   const slugCache: Record<string, string> = {};
@@ -86,13 +89,20 @@ async function migrate() {
     }
 
     if (batchCount > 0) await batch.commit();
-    console.log(`Post ${postDoc.id}: done`);
+
+    // ETAPA 3: atualiza commentCount no doc do post com o total real
+    const realCount = commentsSnap.size;
+    await adminDb.collection("posts").doc(postDoc.id).update({ commentCount: realCount });
+    updatedCommentCount++;
+
+    console.log(`Post ${postDoc.id}: done (${realCount} comentários)`);
   }
 
   console.log(`\nConcluído:`);
   console.log(`  ${updatedRootId} comentários com rootId preenchido`);
   console.log(`  ${updatedSlug} comentários com authorSlug preenchido`);
-  console.log(`  Total processado: ${total}`);
+  console.log(`  ${updatedCommentCount} posts com commentCount atualizado`);
+  console.log(`  Total de comentários processado: ${total}`);
 }
 
 migrate().catch(console.error);

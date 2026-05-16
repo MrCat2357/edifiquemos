@@ -931,9 +931,10 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   async function handleLike() {
     const uid = auth.currentUser?.uid;
     if (!uid) {
-      setShowLoginBanner(true); // ← era: showToast("Faça login para curtir")
-      return;
-    }
+  sessionStorage.setItem("redirect-after-auth", window.location.href);
+  setShowLoginBanner(true);
+  return;
+}
     if (loadingLike) return;
     setLoadingLike(true);
     try {

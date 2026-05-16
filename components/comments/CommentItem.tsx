@@ -116,7 +116,6 @@ function ActionsMenu({ onEdit, onDelete }: ActionsMenuProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Fecha ao clicar fora
   useEffect(() => {
     if (!open) return;
     function handleClick(e: MouseEvent) {
@@ -131,10 +130,8 @@ function ActionsMenu({ onEdit, onDelete }: ActionsMenuProps) {
 
   function handleDeleteClick() {
     if (!confirmDelete) {
-      // Primeiro clique: pede confirmação
       setConfirmDelete(true);
     } else {
-      // Segundo clique: executa
       setOpen(false);
       setConfirmDelete(false);
       onDelete();
@@ -352,6 +349,8 @@ type Props = {
   onReply: (text: string, parentId: string, rootId: string) => Promise<void>;
   onEdit: (commentId: string, newText: string) => Promise<void>;
   onDelete: (commentId: string) => Promise<void>;
+  // Chamado quando um usuário não logado clica em "Responder"
+  onLoginRequired: () => void;
   replies?: Comment[];
   depth?: number;
   rootId?: string;
@@ -367,6 +366,7 @@ export default function CommentItem({
   onReply,
   onEdit,
   onDelete,
+  onLoginRequired,
   replies = [],
   depth = 0,
   rootId,
@@ -398,6 +398,15 @@ export default function CommentItem({
     setEditing(false);
   }
 
+  // Clique no botão Responder: abre formulário se logado, convida ao login se não
+  function handleReplyClick() {
+    if (currentUser) {
+      setShowReplyForm((v) => !v);
+    } else {
+      onLoginRequired();
+    }
+  }
+
   const Wrapper = depth === 0 ? "li" : "div";
 
   return (
@@ -417,13 +426,11 @@ export default function CommentItem({
           <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>
             {tempoRelativo(comment.createdAt)}
           </span>
-          {/* Indicador de edição */}
           {comment.editedAt && (
             <span style={{ fontSize: "0.68rem", color: "var(--text-3)", fontStyle: "italic" }}>
               (editado)
             </span>
           )}
-          {/* Menu de ações — só para o autor, empurrado para a direita */}
           {isOwner && !editing && (
             <div style={{ marginLeft: "auto" }}>
               <ActionsMenu
@@ -468,28 +475,27 @@ export default function CommentItem({
               {comment.likes > 0 && <span>{comment.likes}</span>}
             </button>
 
-            {/* Responder */}
-            {currentUser && (
-              <button
-                onClick={() => setShowReplyForm((v) => !v)}
-                onMouseEnter={() => setReplyHovered(true)}
-                onMouseLeave={() => setReplyHovered(false)}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: "4px",
-                  padding: "4px 8px", borderRadius: "var(--radius-full)", border: "none",
-                  background: replyHovered ? "var(--emerald-dim)" : "transparent",
-                  color: showReplyForm ? "var(--emerald)" : "var(--text-3)",
-                  cursor: "pointer", fontSize: "0.78rem", fontWeight: 600, transition: "all 0.15s",
-                }}
-              >
-                <IconReply size={13} />
-                Responder
-              </button>
-            )}
+            {/* Responder — visível para todos; não logados são convidados ao login */}
+            <button
+              onClick={handleReplyClick}
+              onMouseEnter={() => setReplyHovered(true)}
+              onMouseLeave={() => setReplyHovered(false)}
+              title={currentUser ? "Responder" : "Faça login para responder"}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: "4px",
+                padding: "4px 8px", borderRadius: "var(--radius-full)", border: "none",
+                background: replyHovered ? "var(--emerald-dim)" : "transparent",
+                color: showReplyForm ? "var(--emerald)" : "var(--text-3)",
+                cursor: "pointer", fontSize: "0.78rem", fontWeight: 600, transition: "all 0.15s",
+              }}
+            >
+              <IconReply size={13} />
+              Responder
+            </button>
           </div>
         )}
 
-        {/* Formulário de reply */}
+        {/* Formulário de reply — só abre se logado */}
         {showReplyForm && currentUser && (
           <div style={{ marginTop: "0.75rem" }}>
             <CommentForm
@@ -556,6 +562,7 @@ export default function CommentItem({
                     onReply={onReply}
                     onEdit={onEdit}
                     onDelete={onDelete}
+                    onLoginRequired={onLoginRequired}
                     replies={replies}
                     depth={depth + 1}
                     rootId={effectiveRootId}
