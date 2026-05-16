@@ -45,11 +45,15 @@ export default function CommentSection({ postId, onCountChange }: Props) {
       const userDoc = await getDoc(doc(db, "users", user!.uid));
       if (userDoc.exists()) {
         const data = userDoc.data();
+        const titulo = data.titulo?.trim() || "";
+        const nome = data.nome?.trim() || "";
+        const nomeCompleto = titulo && nome ? `${titulo} ${nome}` : nome || titulo || null;
+
         setPlatformUser({
           uid: user!.uid,
           displayName: user!.displayName,
           photoURL: user!.photoURL,
-          platformName: data.nome || null,
+          platformName: nomeCompleto,
           platformSlug: data.slug || null,
           platformPhoto: data.fotoUrl || null,
         });
