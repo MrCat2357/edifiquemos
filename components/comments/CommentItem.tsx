@@ -561,12 +561,10 @@ export default function CommentItem({
         )}
 
         {/*
-          ── Lista de replies ────────────────────────────────────────────────
-          Recuo fixo e pequeno (24px) a cada nível — perceptível mas discreto.
-          O gancho curvo aparece em TODOS os níveis para manter o fluxo visual.
-          Como o paddingLeft fica no container e não acumula via props, a
-          profundidade não espreme o texto: cada nível sempre recua só +24px
-          em relação ao seu pai imediato.
+          ── Lista de replies — estilo YouTube ───────────────────────────────
+          Linha vertical no container que conecta todos os filhos.
+          Cada filho intermediário tem um braço horizontal saindo da linha.
+          O último filho tem um gancho curvo que "fecha" a linha.
         */}
         {showReplies && directReplies.length > 0 && (
           <div
@@ -575,43 +573,89 @@ export default function CommentItem({
               marginTop: "0.75rem",
               display: "flex",
               flexDirection: "column",
-              gap: "1rem",
-              paddingLeft: "24px",
+              gap: "0.875rem",
+              paddingLeft: "20px",
+              position: "relative",
             }}
           >
-            {directReplies.map((reply, idx) => (
-              <div key={reply.id} role="listitem" style={{ position: "relative" }}>
-                {/* Gancho curvo em todos os níveis */}
-                <div
-                  style={{
-                    position: "absolute",
-                    left: "-16px",
-                    top: 0,
-                    width: "12px",
-                    height: "16px",
-                    borderLeft: "1.5px solid var(--border)",
-                    borderBottom: "1.5px solid var(--border)",
-                    borderBottomLeftRadius: "6px",
-                    pointerEvents: "none",
-                  }}
-                />
-                <CommentItem
-                  comment={reply}
-                  currentUserId={currentUserId}
-                  currentUser={currentUser}
-                  onLike={onLike}
-                  onReply={onReply}
-                  onEdit={onEdit}
-                  onDelete={onDelete}
-                  onLoginRequired={onLoginRequired}
-                  replies={replies}
-                  depth={depth + 1}
-                  rootId={effectiveRootId}
-                  isLast={idx === directReplies.length - 1}
-                  parentAuthorSlug={comment.authorSlug || null}
-                />
-              </div>
-            ))}
+            {directReplies.map((reply, idx) => {
+              const isLastReply = idx === directReplies.length - 1;
+
+              return (
+                <div key={reply.id} role="listitem" style={{ position: "relative" }}>
+                  {isLastReply ? (
+                    /*
+                      Último filho: curva em L que fecha a linha vertical.
+                      height cobre até o centro do avatar (≈14px = metade de 28px).
+                    */
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        position: "absolute",
+                        left: "-20px",
+                        top: 0,
+                        width: "16px",
+                        height: "15px",
+                        borderLeft: "1.5px solid var(--border)",
+                        borderBottom: "1.5px solid var(--border)",
+                        borderBottomLeftRadius: "6px",
+                        pointerEvents: "none",
+                      }}
+                    />
+                  ) : (
+                    /*
+                      Filhos intermediários:
+                      - Linha vertical que vai do topo até o fundo do item
+                        (conecta com o próximo irmão)
+                      - Braço horizontal que sai da linha até o avatar
+                    */
+                    <>
+                      {/* Linha vertical contínua para o próximo irmão */}
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          position: "absolute",
+                          left: "-20px",
+                          top: 0,
+                          bottom: `-0.875rem`, // cobre o gap entre itens
+                          width: "1.5px",
+                          background: "var(--border)",
+                          pointerEvents: "none",
+                        }}
+                      />
+                      {/* Braço horizontal até o avatar */}
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          position: "absolute",
+                          left: "-20px",
+                          top: "15px",
+                          width: "16px",
+                          height: "1.5px",
+                          background: "var(--border)",
+                          pointerEvents: "none",
+                        }}
+                      />
+                    </>
+                  )}
+                  <CommentItem
+                    comment={reply}
+                    currentUserId={currentUserId}
+                    currentUser={currentUser}
+                    onLike={onLike}
+                    onReply={onReply}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
+                    onLoginRequired={onLoginRequired}
+                    replies={replies}
+                    depth={depth + 1}
+                    rootId={effectiveRootId}
+                    isLast={isLastReply}
+                    parentAuthorSlug={comment.authorSlug || null}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
