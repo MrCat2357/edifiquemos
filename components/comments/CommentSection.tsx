@@ -20,20 +20,14 @@ export default function CommentSection({ postId }: Props) {
     hasMore,
     loadMore,
     addComment,
+    editComment,
+    deleteComment,
     toggleLike,
   } = useComments(postId);
   const [showBanner, setShowBanner] = useState(false);
   const currentUserId = auth.currentUser?.uid ?? null;
 
-  /*
-   * CORREÇÃO 3 — Buscar dados da plataforma (/users/{uid}) para enriquecer
-   * o usuário antes de criar comentários.
-   *
-   * Problema anterior: addComment usava user.displayName (nome do Google) e
-   * user.photoURL (foto do Google), ignorando o nome/slug/foto cadastrados
-   * na plataforma. Isso fazia o comentário aparecer com o nome errado e
-   * o link da @menção levar para um perfil inexistente.
-   */
+  // Busca dados da plataforma (/users/{uid}) para enriquecer o usuário
   const [platformUser, setPlatformUser] = useState<CommentUser | null>(null);
 
   useEffect(() => {
@@ -55,7 +49,6 @@ export default function CommentSection({ postId }: Props) {
           platformPhoto: data.fotoUrl || null,
         });
       } else {
-        // Usuário ainda não tem documento na plataforma — usa dados do Google
         setPlatformUser({
           uid: user!.uid,
           displayName: user!.displayName,
@@ -67,7 +60,6 @@ export default function CommentSection({ postId }: Props) {
     fetchPlatformData();
   }, [user]);
 
-  // O CommentUser efetivo: prioriza dados da plataforma, cai no Google como fallback
   const effectiveUser: CommentUser | null = platformUser ?? (user
     ? { uid: user.uid, displayName: user.displayName, photoURL: user.photoURL }
     : null);
@@ -75,6 +67,16 @@ export default function CommentSection({ postId }: Props) {
   async function handleReply(text: string, parentId: string, rootId: string) {
     if (!effectiveUser) return;
     await addComment(text, effectiveUser, parentId, rootId);
+  }
+
+  async function handleEdit(commentId: string, newText: string) {
+    if (!currentUserId) return;
+    await editComment(commentId, newText, currentUserId);
+  }
+
+  async function handleDelete(commentId: string) {
+    if (!currentUserId) return;
+    await deleteComment(commentId, currentUserId);
   }
 
   return (
@@ -142,20 +144,11 @@ export default function CommentSection({ postId }: Props) {
       >
         {loading ? (
           <li style={{ color: "var(--text-3)", fontSize: "0.85rem" }}>
-            <div
-              className="spinner"
-              style={{ display: "inline-block", marginRight: "0.5rem" }}
-            />
+            <div className="spinner" style={{ display: "inline-block", marginRight: "0.5rem" }} />
             Carregando comentários...
           </li>
         ) : rootComments.length === 0 ? (
-          <li
-            style={{
-              color: "var(--text-3)",
-              fontSize: "0.85rem",
-              fontStyle: "italic",
-            }}
-          >
+          <li style={{ color: "var(--text-3)", fontSize: "0.85rem", fontStyle: "italic" }}>
             Seja o primeiro a comentar.
           </li>
         ) : (
@@ -169,6 +162,8 @@ export default function CommentSection({ postId }: Props) {
                 toggleLike(id, currentUserId!, currentLikes, alreadyLiked)
               }
               onReply={handleReply}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
               replies={getReplies(comment.id)}
               depth={0}
               rootId={comment.id}
@@ -177,7 +172,7 @@ export default function CommentSection({ postId }: Props) {
         )}
       </ul>
 
-      {/* CORREÇÃO 2 — Botão de paginação */}
+      {/* Paginação */}
       {hasMore && !loading && (
         <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
           <button
