@@ -1,25 +1,17 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { AuthorAvatar } from "@/components/AuthorAvatar";
 import { Comment } from "@/hooks/useComments";
 import CommentForm from "./CommentForm";
 
+// ── Ícones ───────────────────────────────────────────────────────────────────
+
 function IconThumbsUp({ size = 14, filled = false }: { size?: number; filled?: boolean }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      style={{ flexShrink: 0 }}
-    >
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
       <path
         d="M5 14H3a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h2m0 7V7m0 7h6.5a1 1 0 0 0 .97-.757l1-4A1 1 0 0 0 13.5 7H10V4a2 2 0 0 0-2-2L5 7"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"
         fill={filled ? "currentColor" : "none"}
       />
     </svg>
@@ -28,25 +20,46 @@ function IconThumbsUp({ size = 14, filled = false }: { size?: number; filled?: b
 
 function IconReply({ size = 13 }: { size?: number }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-      style={{ flexShrink: 0 }}
-    >
-      <path
-        d="M1.5 5.5L6 1.5V4C10.5 4 14 6.5 14 11C12.5 8.5 10 7.5 6 7.5V10L1.5 5.5Z"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-        fill="none"
-      />
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M1.5 5.5L6 1.5V4C10.5 4 14 6.5 14 11C12.5 8.5 10 7.5 6 7.5V10L1.5 5.5Z"
+        stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" fill="none" />
     </svg>
   );
 }
+
+function IconDots({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <circle cx="3" cy="8" r="1.3" fill="currentColor" />
+      <circle cx="8" cy="8" r="1.3" fill="currentColor" />
+      <circle cx="13" cy="8" r="1.3" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconEdit({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M11.5 2.5l2 2-8 8H3.5v-2l8-8z"
+        stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconTrash({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M2 4h12M5 4V2.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 .5.5V4M6 7v5M10 7v5M3 4l1 9.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5L13 4"
+        stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ── Utilitários ──────────────────────────────────────────────────────────────
 
 export function tempoRelativo(timestamp: any): string {
   if (!timestamp?.toDate) return "";
@@ -58,80 +71,271 @@ export function tempoRelativo(timestamp: any): string {
   return timestamp.toDate().toLocaleDateString("pt-BR");
 }
 
-/**
- * CORREÇÃO 3 — CommentText agora recebe o authorSlug diretamente do documento
- * do comentário pai (quem está sendo mencionado), em vez de derivar o slug
- * a partir do nome exibido.
- *
- * Problema anterior: o slug era gerado fazendo toLowerCase + replace de espaços
- * no authorName. Se o authorName fosse o nome do Google ("Catulo Axel"), o slug
- * gerado era "catulo-axel", mas o perfil na plataforma é "/perfil/mrcat" —
- * levando a "Usuário não encontrado".
- *
- * Solução: passamos o mentionSlug (slug do comentário pai) ao renderizar
- * o formulário de reply, e salvamos no texto da menção via CommentText.
- * O link usa esse slug diretamente.
- */
-function CommentText({
-  text,
-  mentionSlug,
-}: {
-  text: string;
-  mentionSlug?: string | null;
-}) {
-  // Detecta @menção no início: "@Nome Sobrenome " seguido do restante
+// ── CommentText ──────────────────────────────────────────────────────────────
+
+function CommentText({ text, mentionSlug }: { text: string; mentionSlug?: string | null }) {
   const mentionMatch = text.match(/^(@[\w\s\-\.]+?)\s([\s\S]*)$/);
 
-  if (mentionMatch && mentionSlug) {
-    const mention = mentionMatch[1]; // ex: "@Catulo Axel"
-    const rest = mentionMatch[2];
+  const pStyle: React.CSSProperties = {
+    fontSize: "0.9rem",
+    color: "var(--text-2)",
+    lineHeight: 1.6,
+    wordBreak: "break-word",
+    margin: 0,
+  };
 
+  if (mentionMatch && mentionSlug) {
+    const mention = mentionMatch[1];
+    const rest = mentionMatch[2];
     return (
-      <p
-        style={{
-          fontSize: "0.9rem",
-          color: "var(--text-2)",
-          lineHeight: 1.6,
-          wordBreak: "break-word",
-          margin: 0,
-        }}
-      >
+      <p style={pStyle}>
         <a
           href={`/perfil/${mentionSlug}`}
-          style={{
-            color: "var(--emerald)",
-            fontWeight: 600,
-            textDecoration: "none",
-          }}
-          onMouseEnter={(e) =>
-            ((e.target as HTMLAnchorElement).style.textDecoration = "underline")
-          }
-          onMouseLeave={(e) =>
-            ((e.target as HTMLAnchorElement).style.textDecoration = "none")
-          }
+          style={{ color: "var(--emerald)", fontWeight: 600, textDecoration: "none" }}
+          onMouseEnter={(e) => ((e.target as HTMLAnchorElement).style.textDecoration = "underline")}
+          onMouseLeave={(e) => ((e.target as HTMLAnchorElement).style.textDecoration = "none")}
         >
           {mention}
-        </a>{" "}
-        {rest}
+        </a>{" "}{rest}
       </p>
     );
   }
 
-  // Sem menção reconhecida: texto puro
+  return <p style={pStyle}>{text}</p>;
+}
+
+// ── Menu de ações (⋯) ────────────────────────────────────────────────────────
+
+type ActionsMenuProps = {
+  onEdit: () => void;
+  onDelete: () => void;
+};
+
+function ActionsMenu({ onEdit, onDelete }: ActionsMenuProps) {
+  const [open, setOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Fecha ao clicar fora
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setConfirmDelete(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  function handleDeleteClick() {
+    if (!confirmDelete) {
+      // Primeiro clique: pede confirmação
+      setConfirmDelete(true);
+    } else {
+      // Segundo clique: executa
+      setOpen(false);
+      setConfirmDelete(false);
+      onDelete();
+    }
+  }
+
   return (
-    <p
-      style={{
-        fontSize: "0.9rem",
-        color: "var(--text-2)",
-        lineHeight: 1.6,
-        wordBreak: "break-word",
-        margin: 0,
-      }}
-    >
-      {text}
-    </p>
+    <div ref={menuRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => { setOpen((v) => !v); setConfirmDelete(false); }}
+        title="Opções"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          padding: "4px 6px",
+          borderRadius: "var(--radius-full)",
+          border: "none",
+          background: open ? "var(--surface-2, rgba(255,255,255,0.06))" : "transparent",
+          color: "var(--text-3)",
+          cursor: "pointer",
+          transition: "all 0.15s",
+        }}
+      >
+        <IconDots size={15} />
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            zIndex: 50,
+            minWidth: 140,
+            background: "var(--bg-elevated, #1a1a1a)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-lg, 10px)",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+            overflow: "hidden",
+          }}
+        >
+          {/* Editar */}
+          <button
+            onClick={() => { setOpen(false); onEdit(); }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              width: "100%",
+              padding: "9px 14px",
+              border: "none",
+              background: "none",
+              color: "var(--text-2)",
+              fontSize: "0.82rem",
+              fontWeight: 600,
+              cursor: "pointer",
+              textAlign: "left",
+              transition: "background 0.12s",
+            }}
+            onMouseEnter={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.background =
+                "var(--surface-2, rgba(255,255,255,0.06))")
+            }
+            onMouseLeave={(e) =>
+              ((e.currentTarget as HTMLButtonElement).style.background = "none")
+            }
+          >
+            <IconEdit size={13} />
+            Editar
+          </button>
+
+          <div style={{ height: 1, background: "var(--border)", margin: "0 10px" }} />
+
+          {/* Excluir — dois cliques para confirmar */}
+          <button
+            onClick={handleDeleteClick}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              width: "100%",
+              padding: "9px 14px",
+              border: "none",
+              background: confirmDelete ? "rgba(239,68,68,0.12)" : "none",
+              color: confirmDelete ? "#f87171" : "var(--text-2)",
+              fontSize: "0.82rem",
+              fontWeight: 600,
+              cursor: "pointer",
+              textAlign: "left",
+              transition: "all 0.12s",
+            }}
+            onMouseEnter={(e) => {
+              if (!confirmDelete)
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  "var(--surface-2, rgba(255,255,255,0.06))";
+            }}
+            onMouseLeave={(e) => {
+              if (!confirmDelete)
+                (e.currentTarget as HTMLButtonElement).style.background = "none";
+            }}
+          >
+            <IconTrash size={13} />
+            {confirmDelete ? "Confirmar exclusão" : "Excluir"}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
+
+// ── InlineEditForm ────────────────────────────────────────────────────────────
+
+function InlineEditForm({
+  initialText,
+  onSave,
+  onCancel,
+}: {
+  initialText: string;
+  onSave: (text: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState(initialText);
+  const [saving, setSaving] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    textareaRef.current?.focus();
+    const len = text.length;
+    textareaRef.current?.setSelectionRange(len, len);
+  }, []);
+
+  async function handleSave() {
+    if (!text.trim() || saving || text.trim() === initialText.trim()) {
+      onCancel();
+      return;
+    }
+    setSaving(true);
+    await onSave(text.trim());
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ marginTop: "0.25rem" }}>
+      <textarea
+        ref={textareaRef}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        rows={3}
+        style={{
+          width: "100%",
+          background: "transparent",
+          border: "none",
+          borderBottom: "1px solid var(--emerald)",
+          color: "var(--text-1)",
+          fontSize: "0.9rem",
+          resize: "none",
+          outline: "none",
+          padding: "4px 0",
+          fontFamily: "inherit",
+          lineHeight: 1.6,
+        }}
+      />
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.5rem" }}>
+        <button
+          onClick={onCancel}
+          style={{
+            padding: "5px 14px",
+            borderRadius: "var(--radius-full)",
+            border: "none",
+            background: "none",
+            color: "var(--text-3)",
+            cursor: "pointer",
+            fontSize: "0.8rem",
+            fontWeight: 600,
+          }}
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={!text.trim() || saving}
+          style={{
+            padding: "5px 14px",
+            borderRadius: "var(--radius-full)",
+            border: "none",
+            background: text.trim() ? "var(--emerald)" : "var(--border)",
+            color: text.trim() ? "#fff" : "var(--text-3)",
+            cursor: text.trim() ? "pointer" : "default",
+            fontSize: "0.8rem",
+            fontWeight: 600,
+            transition: "all 0.15s",
+          }}
+        >
+          {saving ? "Salvando…" : "Salvar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── CommentItem ──────────────────────────────────────────────────────────────
 
 type Props = {
   comment: Comment;
@@ -146,12 +350,12 @@ type Props = {
   } | null;
   onLike: (commentId: string, currentLikes: number, alreadyLiked: boolean) => void;
   onReply: (text: string, parentId: string, rootId: string) => Promise<void>;
-  // replies é toda a lista "achatada" de replies do rootId — cada item decide sua posição
+  onEdit: (commentId: string, newText: string) => Promise<void>;
+  onDelete: (commentId: string) => Promise<void>;
   replies?: Comment[];
   depth?: number;
-  rootId?: string; // id do comentário raiz para manter a cadeia no mesmo grupo
-  isLast?: boolean; // último item da lista (para cortar a linha vertical)
-  // NOVO: slug do comentário pai (de quem este comentário é reply), para linkar a menção
+  rootId?: string;
+  isLast?: boolean;
   parentAuthorSlug?: string | null;
 };
 
@@ -161,25 +365,26 @@ export default function CommentItem({
   currentUser,
   onLike,
   onReply,
+  onEdit,
+  onDelete,
   replies = [],
   depth = 0,
   rootId,
   isLast = false,
   parentAuthorSlug = null,
 }: Props) {
+  const isOwner = !!currentUserId && comment.authorId === currentUserId;
   const alreadyLiked = !!currentUserId && comment.likedBy.includes(currentUserId);
+
   const [likeHovered, setLikeHovered] = useState(false);
   const [replyHovered, setReplyHovered] = useState(false);
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [showReplies, setShowReplies] = useState(false);
+  const [editing, setEditing] = useState(false);
 
-  // Replies diretas deste comentário (parentId === comment.id)
   const directReplies = replies.filter((r) => r.parentId === comment.id);
-  // O rootId efetivo para toda a cadeia: se este já é uma reply, pega o rootId dele, senão é o próprio id
   const effectiveRootId = rootId ?? comment.id;
-
   const avatarSize = depth === 0 ? 36 : 28;
-  // A linha vertical conecta o avatar ao primeiro reply — tamanho do avatar + padding
   const lineLeftOffset = Math.floor(avatarSize / 2);
 
   async function handleReplySubmit(text: string) {
@@ -188,134 +393,105 @@ export default function CommentItem({
     setShowReplies(true);
   }
 
-  // Quando é reply (depth > 0) usa div para evitar <li> dentro de <li>
+  async function handleEditSave(newText: string) {
+    await onEdit(comment.id, newText);
+    setEditing(false);
+  }
+
   const Wrapper = depth === 0 ? "li" : "div";
 
   return (
-    <Wrapper
-      style={{
-        display: "flex",
-        gap: "0.75rem",
-        alignItems: "flex-start",
-        position: "relative",
-      }}
-    >
-      {/* Coluna esquerda: avatar */}
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          flexShrink: 0,
-        }}
-      >
-        <AuthorAvatar
-          src={comment.authorPhoto || null}
-          name={comment.authorName}
-          size={avatarSize}
-        />
+    <Wrapper style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", position: "relative" }}>
+      {/* Avatar */}
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+        <AuthorAvatar src={comment.authorPhoto || null} name={comment.authorName} size={avatarSize} />
       </div>
 
       {/* Conteúdo */}
       <div style={{ flex: 1, minWidth: 0 }}>
         {/* Cabeçalho */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.5rem",
-            marginBottom: "0.25rem",
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
           <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--text-1)" }}>
             {comment.authorName}
           </span>
           <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>
             {tempoRelativo(comment.createdAt)}
           </span>
-        </div>
-
-        {/*
-          CORREÇÃO 3 — Passa o slug do autor do comentário PAI (parentAuthorSlug)
-          para que o link da @menção aponte para o perfil correto na plataforma,
-          e não para um slug derivado do nome do Google.
-        */}
-        <CommentText text={comment.text} mentionSlug={parentAuthorSlug} />
-
-        {/* Ações */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.25rem",
-            marginTop: "0.375rem",
-          }}
-        >
-          {/* Like */}
-          <button
-            onClick={() =>
-              currentUserId && onLike(comment.id, comment.likes, alreadyLiked)
-            }
-            disabled={!currentUserId}
-            onMouseEnter={() => setLikeHovered(true)}
-            onMouseLeave={() => setLikeHovered(false)}
-            title={
-              currentUserId
-                ? alreadyLiked
-                  ? "Remover curtida"
-                  : "Curtir"
-                : "Faça login para curtir"
-            }
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "4px",
-              padding: "4px 8px",
-              borderRadius: "var(--radius-full)",
-              border: "none",
-              background:
-                likeHovered && currentUserId ? "var(--emerald-dim)" : "transparent",
-              color: alreadyLiked ? "var(--emerald)" : "var(--text-3)",
-              cursor: currentUserId ? "pointer" : "default",
-              fontSize: "0.78rem",
-              fontWeight: 600,
-              transition: "all 0.15s",
-            }}
-          >
-            <IconThumbsUp size={13} filled={alreadyLiked} />
-            {comment.likes > 0 && <span>{comment.likes}</span>}
-          </button>
-
-          {/* Responder — disponível para qualquer profundidade */}
-          {currentUser && (
-            <button
-              onClick={() => setShowReplyForm((v) => !v)}
-              onMouseEnter={() => setReplyHovered(true)}
-              onMouseLeave={() => setReplyHovered(false)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "4px",
-                padding: "4px 8px",
-                borderRadius: "var(--radius-full)",
-                border: "none",
-                background: replyHovered ? "var(--emerald-dim)" : "transparent",
-                color: showReplyForm ? "var(--emerald)" : "var(--text-3)",
-                cursor: "pointer",
-                fontSize: "0.78rem",
-                fontWeight: 600,
-                transition: "all 0.15s",
-              }}
-            >
-              <IconReply size={13} />
-              Responder
-            </button>
+          {/* Indicador de edição */}
+          {comment.editedAt && (
+            <span style={{ fontSize: "0.68rem", color: "var(--text-3)", fontStyle: "italic" }}>
+              (editado)
+            </span>
+          )}
+          {/* Menu de ações — só para o autor, empurrado para a direita */}
+          {isOwner && !editing && (
+            <div style={{ marginLeft: "auto" }}>
+              <ActionsMenu
+                onEdit={() => setEditing(true)}
+                onDelete={() => onDelete(comment.id)}
+              />
+            </div>
           )}
         </div>
 
-        {/* Formulário de reply — a curva vem da linha vertical do avatar acima */}
+        {/* Texto ou formulário de edição inline */}
+        {editing ? (
+          <InlineEditForm
+            initialText={comment.text}
+            onSave={handleEditSave}
+            onCancel={() => setEditing(false)}
+          />
+        ) : (
+          <CommentText text={comment.text} mentionSlug={parentAuthorSlug} />
+        )}
+
+        {/* Ações (like / responder) — ocultas durante edição */}
+        {!editing && (
+          <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", marginTop: "0.375rem" }}>
+            {/* Like */}
+            <button
+              onClick={() => currentUserId && onLike(comment.id, comment.likes, alreadyLiked)}
+              disabled={!currentUserId}
+              onMouseEnter={() => setLikeHovered(true)}
+              onMouseLeave={() => setLikeHovered(false)}
+              title={currentUserId ? (alreadyLiked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: "4px",
+                padding: "4px 8px", borderRadius: "var(--radius-full)", border: "none",
+                background: likeHovered && currentUserId ? "var(--emerald-dim)" : "transparent",
+                color: alreadyLiked ? "var(--emerald)" : "var(--text-3)",
+                cursor: currentUserId ? "pointer" : "default",
+                fontSize: "0.78rem", fontWeight: 600, transition: "all 0.15s",
+              }}
+            >
+              <IconThumbsUp size={13} filled={alreadyLiked} />
+              {comment.likes > 0 && <span>{comment.likes}</span>}
+            </button>
+
+            {/* Responder */}
+            {currentUser && (
+              <button
+                onClick={() => setShowReplyForm((v) => !v)}
+                onMouseEnter={() => setReplyHovered(true)}
+                onMouseLeave={() => setReplyHovered(false)}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: "4px",
+                  padding: "4px 8px", borderRadius: "var(--radius-full)", border: "none",
+                  background: replyHovered ? "var(--emerald-dim)" : "transparent",
+                  color: showReplyForm ? "var(--emerald)" : "var(--text-3)",
+                  cursor: "pointer", fontSize: "0.78rem", fontWeight: 600, transition: "all 0.15s",
+                }}
+              >
+                <IconReply size={13} />
+                Responder
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Formulário de reply */}
         {showReplyForm && currentUser && (
-          <div style={{ marginTop: "0.75rem", position: "relative" }}>
+          <div style={{ marginTop: "0.75rem" }}>
             <CommentForm
               user={currentUser}
               onSubmit={handleReplySubmit}
@@ -328,24 +504,17 @@ export default function CommentItem({
           </div>
         )}
 
-        {/* Botão expandir/recolher replies */}
+        {/* Expandir/recolher replies */}
         {directReplies.length > 0 && (
           <button
             onClick={() => setShowReplies((v) => !v)}
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              marginTop: "0.6rem",
-              padding: "4px 10px",
-              borderRadius: "var(--radius-full)",
-              border: "none",
+              display: "inline-flex", alignItems: "center", gap: "6px",
+              marginTop: "0.6rem", padding: "4px 10px",
+              borderRadius: "var(--radius-full)", border: "none",
               background: "var(--emerald-dim, rgba(52,211,153,0.1))",
-              color: "var(--emerald)",
-              cursor: "pointer",
-              fontSize: "0.78rem",
-              fontWeight: 700,
-              transition: "all 0.15s",
+              color: "var(--emerald)", cursor: "pointer",
+              fontSize: "0.78rem", fontWeight: 700, transition: "all 0.15s",
             }}
           >
             {showReplies ? "▲" : "▼"}{" "}
@@ -353,23 +522,13 @@ export default function CommentItem({
           </button>
         )}
 
-        {/*
-          Lista de replies diretas.
-          Usamos <div role="list"> para evitar <li> dentro de <li>.
-          Cada reply é um <div role="listitem"> com position: relative para ancorar a curva.
-          A curva conectora fica dentro do próprio wrapper, não dentro do CommentItem.
-        */}
+        {/* Lista de replies */}
         {showReplies && directReplies.length > 0 && (
           <div
             role="list"
             style={{
-              marginTop: "0.75rem",
-              display: "flex",
-              flexDirection: "column",
-              gap: "1rem",
-              // paddingLeft abre espaço para a curva + gap até o avatar do reply
-              paddingLeft: `${lineLeftOffset + 12}px`,
-              position: "relative",
+              marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "1rem",
+              paddingLeft: `${lineLeftOffset + 12}px`, position: "relative",
             }}
           >
             {directReplies.map((reply, idx) => {
@@ -381,30 +540,22 @@ export default function CommentItem({
 
               return (
                 <div key={reply.id} role="listitem" style={{ position: "relative" }}>
-                  {/* Curva individual estilo YouTube: linha vertical + cotovelo horizontal */}
                   <div
                     style={{
-                      position: "absolute",
-                      left: `-${curveLeft}px`,
-                      top: 0,
-                      width: `${curveWidth}px`,
-                      height: `${curveHeight}px`,
-                      borderLeft: "2px solid var(--border)",
-                      borderBottom: "2px solid var(--border)",
-                      borderBottomLeftRadius: "10px",
-                      pointerEvents: "none",
+                      position: "absolute", left: `-${curveLeft}px`, top: 0,
+                      width: `${curveWidth}px`, height: `${curveHeight}px`,
+                      borderLeft: "2px solid var(--border)", borderBottom: "2px solid var(--border)",
+                      borderBottomLeftRadius: "10px", pointerEvents: "none",
                     }}
                   />
-                  {/*
-                    CORREÇÃO 3 — Passa comment.authorSlug como parentAuthorSlug
-                    para que o reply saiba o slug de quem está sendo mencionado.
-                  */}
                   <CommentItem
                     comment={reply}
                     currentUserId={currentUserId}
                     currentUser={currentUser}
                     onLike={onLike}
                     onReply={onReply}
+                    onEdit={onEdit}
+                    onDelete={onDelete}
                     replies={replies}
                     depth={depth + 1}
                     rootId={effectiveRootId}
