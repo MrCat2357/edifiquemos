@@ -381,11 +381,14 @@ export default function CommentItem({
   const [showReplyForm, setShowReplyForm] = useState(false);
   const [showReplies, setShowReplies] = useState(false);
   const [editing, setEditing] = useState(false);
+  // Nudge inline para usuários não logados que clicam em Responder
+  const [showLoginNudge, setShowLoginNudge] = useState(false);
 
   const directReplies = replies.filter((r) => r.parentId === comment.id);
   const effectiveRootId = rootId ?? comment.id;
+
+  // Tamanho de avatar: root = 36, replies = 28 (independente da profundidade)
   const avatarSize = depth === 0 ? 36 : 28;
-  const lineLeftOffset = Math.floor(avatarSize / 2);
 
   async function handleReplySubmit(text: string) {
     await onReply(text, comment.id, effectiveRootId);
@@ -398,12 +401,14 @@ export default function CommentItem({
     setEditing(false);
   }
 
-  // Clique no botão Responder: abre formulário se logado, convida ao login se não
+  // Clique no botão Responder: abre formulário se logado; nudge inline se não
   function handleReplyClick() {
     if (currentUser) {
       setShowReplyForm((v) => !v);
+      setShowLoginNudge(false);
     } else {
-      onLoginRequired();
+      onLoginRequired(); // sobe o banner no topo dos comentários
+      setShowLoginNudge(true); // e mostra o nudge aqui perto do botão
     }
   }
 
@@ -412,7 +417,7 @@ export default function CommentItem({
   return (
     <Wrapper style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", position: "relative" }}>
       {/* Avatar */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+      <div style={{ flexShrink: 0 }}>
         <AuthorAvatar src={comment.authorPhoto || null} name={comment.authorName} size={avatarSize} />
       </div>
 
@@ -475,7 +480,7 @@ export default function CommentItem({
               {comment.likes > 0 && <span>{comment.likes}</span>}
             </button>
 
-            {/* Responder — visível para todos; não logados são convidados ao login */}
+            {/* Responder — visível para todos */}
             <button
               onClick={handleReplyClick}
               onMouseEnter={() => setReplyHovered(true)}
@@ -491,6 +496,33 @@ export default function CommentItem({
             >
               <IconReply size={13} />
               Responder
+            </button>
+          </div>
+        )}
+
+        {/* Nudge inline para usuário não logado — aparece logo abaixo das ações */}
+        {showLoginNudge && !currentUser && (
+          <div
+            style={{
+              display: "inline-flex", alignItems: "center", gap: "8px",
+              marginTop: "0.5rem", padding: "6px 12px",
+              background: "var(--emerald-dim, rgba(52,211,153,0.12))",
+              border: "1px solid var(--emerald)",
+              borderRadius: "var(--radius-full)",
+              fontSize: "0.78rem", color: "var(--emerald)", fontWeight: 600,
+            }}
+          >
+            <span>👆</span>
+            <span>Entre para responder — veja o convite acima</span>
+            <button
+              onClick={() => setShowLoginNudge(false)}
+              style={{
+                background: "none", border: "none", color: "var(--emerald)",
+                cursor: "pointer", fontSize: "0.75rem", padding: "0 2px", lineHeight: 1,
+              }}
+              aria-label="Fechar"
+            >
+              ✕
             </button>
           </div>
         )}
@@ -528,50 +560,58 @@ export default function CommentItem({
           </button>
         )}
 
-        {/* Lista de replies */}
+        {/*
+          ── Lista de replies ────────────────────────────────────────────────
+          Recuo fixo e pequeno (24px) a cada nível — perceptível mas discreto.
+          O gancho curvo aparece em TODOS os níveis para manter o fluxo visual.
+          Como o paddingLeft fica no container e não acumula via props, a
+          profundidade não espreme o texto: cada nível sempre recua só +24px
+          em relação ao seu pai imediato.
+        */}
         {showReplies && directReplies.length > 0 && (
           <div
             role="list"
             style={{
-              marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "1rem",
-              paddingLeft: `${lineLeftOffset + 12}px`, position: "relative",
+              marginTop: "0.75rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "1rem",
+              paddingLeft: "24px",
             }}
           >
-            {directReplies.map((reply, idx) => {
-              const isLastReply = idx === directReplies.length - 1;
-              const replyAvatarSize = 28;
-              const curveHeight = Math.floor(replyAvatarSize / 2) + 4;
-              const curveWidth = lineLeftOffset + 8;
-              const curveLeft = lineLeftOffset + 12;
-
-              return (
-                <div key={reply.id} role="listitem" style={{ position: "relative" }}>
-                  <div
-                    style={{
-                      position: "absolute", left: `-${curveLeft}px`, top: 0,
-                      width: `${curveWidth}px`, height: `${curveHeight}px`,
-                      borderLeft: "2px solid var(--border)", borderBottom: "2px solid var(--border)",
-                      borderBottomLeftRadius: "10px", pointerEvents: "none",
-                    }}
-                  />
-                  <CommentItem
-                    comment={reply}
-                    currentUserId={currentUserId}
-                    currentUser={currentUser}
-                    onLike={onLike}
-                    onReply={onReply}
-                    onEdit={onEdit}
-                    onDelete={onDelete}
-                    onLoginRequired={onLoginRequired}
-                    replies={replies}
-                    depth={depth + 1}
-                    rootId={effectiveRootId}
-                    isLast={isLastReply}
-                    parentAuthorSlug={comment.authorSlug || null}
-                  />
-                </div>
-              );
-            })}
+            {directReplies.map((reply, idx) => (
+              <div key={reply.id} role="listitem" style={{ position: "relative" }}>
+                {/* Gancho curvo em todos os níveis */}
+                <div
+                  style={{
+                    position: "absolute",
+                    left: "-16px",
+                    top: 0,
+                    width: "12px",
+                    height: "16px",
+                    borderLeft: "1.5px solid var(--border)",
+                    borderBottom: "1.5px solid var(--border)",
+                    borderBottomLeftRadius: "6px",
+                    pointerEvents: "none",
+                  }}
+                />
+                <CommentItem
+                  comment={reply}
+                  currentUserId={currentUserId}
+                  currentUser={currentUser}
+                  onLike={onLike}
+                  onReply={onReply}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                  onLoginRequired={onLoginRequired}
+                  replies={replies}
+                  depth={depth + 1}
+                  rootId={effectiveRootId}
+                  isLast={idx === directReplies.length - 1}
+                  parentAuthorSlug={comment.authorSlug || null}
+                />
+              </div>
+            ))}
           </div>
         )}
       </div>
