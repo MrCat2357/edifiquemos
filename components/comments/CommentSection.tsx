@@ -115,7 +115,7 @@ export default function CommentSection({ postId, onCountChange }: Props) {
         💬{" "}
         {loading
           ? "Comentários"
-          : `${comments.length} Comentário${comments.length !== 1 ? "s" : ""}`}
+          : `${rootComments.length} Comentário${rootComments.length !== 1 ? "s" : ""}`}
       </h2>
 
       {/* Formulário principal ou convite para login */}
