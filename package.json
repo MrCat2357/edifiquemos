@@ -10,10 +10,13 @@
   },
   "dependencies": {
     "firebase": "^12.12.1",
+    "firebase-admin": "^13.9.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
+    "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
     "next": "16.2.4",
+    "pdfjs-dist": "^4.9.155",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -22,10 +25,12 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv-cli": "^11.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "fontkit": "^2.0.4",
     "tailwindcss": "^4",
+    "tsx": "^4.22.0",
     "typescript": "^5"
   }
 }

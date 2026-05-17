@@ -9,14 +9,25 @@ import {
   orderBy,
   doc,
   updateDoc,
+  deleteDoc,
   arrayUnion,
   arrayRemove,
   increment,
+  where,
 } from "firebase/firestore";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
+import CardReflexao from "@/components/reflexoes/CardReflexao";
+import BannerLogin from "@/components/BannerLogin";
+import dynamic from "next/dynamic";
+
+// Carrega o CommentSection apenas quando o usuário abre o painel
+const CommentSection = dynamic(
+  () => import("@/components/comments/CommentSection"),
+  { ssr: false, loading: () => null }
+);
 
 const PAGE_SIZE = 8;
 
@@ -81,6 +92,20 @@ function IconEye({ size = 13 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
       <path d="M1.5 8C3 4.5 5.3 3 8 3s5 1.5 6.5 5C13 11.5 10.7 13 8 13S3 11.5 1.5 8Z" stroke="currentColor" strokeWidth="1.4" />
       <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function IconComment({ size = 13, active = false }: { size?: number; active?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path
+        d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H9l-3 3v-3H3.5A1.5 1.5 0 0 1 2 9.5v-6Z"
+        stroke="currentColor"
+        strokeWidth="1.35"
+        strokeLinejoin="round"
+        fill={active ? "currentColor" : "none"}
+      />
     </svg>
   );
 }
@@ -180,6 +205,9 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
   const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
@@ -187,7 +215,11 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!uid) { onToast("Faça login para curtir"); return; }
+    if (!uid) {
+      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      setShowLoginBanner(true);
+      return;
+    }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
@@ -227,11 +259,41 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
     <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }} onClick={(e) => e.stopPropagation()}>
       <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
         <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike} disabled={loadingLike}
-          title={uid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
+          title={uid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
           style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
           <IconHeart size={13} filled={liked} />Amei
           {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
         </button>
+
+        {/* Botão de comentários */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!uid) {
+              sessionStorage.setItem("redirect-after-auth", window.location.href);
+              setShowLoginBanner(true);
+              return;
+            }
+            setShowComments((v) => !v);
+          }}
+          title="Ver comentários"
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "4px",
+            padding: 0, background: "none", border: "none",
+            color: showComments ? "var(--emerald)" : "var(--text-3)",
+            cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
+            transition: "color 0.15s",
+          }}
+        >
+          <IconComment size={13} active={showComments} />
+          Comentários
+          {(post.commentCount ?? 0) > 0 && (
+            <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>
+              {post.commentCount}
+            </span>
+          )}
+        </button>
+
         <button className="action-btn" onClick={handleDownloadPdf} disabled={gerandoPdf}
           title="Baixar como PDF"
           style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
@@ -245,6 +307,21 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
         )}
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(url)}>Ler completo →</span>
+    </div>
+  );
+
+  // Painel de comentários colapsável — compartilhado entre os dois layouts
+  const commentsPanel = showComments && (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        borderTop: "1px solid var(--border-light)",
+        padding: "1.25rem 1.125rem 1.5rem",
+        background: "var(--bg-elevated)",
+        borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
+      }}
+    >
+      <CommentSection postId={post.id} />
     </div>
   );
 
@@ -271,8 +348,14 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
             <h2 className="card-title" style={{ fontSize: "1rem" }}>{post.titulo}</h2>
             {post.resumo && <p className="card-frase">{post.resumo}</p>}
           </div>
+          {showLoginBanner && (
+            <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+              <BannerLogin onClose={() => setShowLoginBanner(false)} />
+            </div>
+          )}
           {footerRow}
         </div>
+        {commentsPanel}
       </article>
     );
   }
@@ -295,17 +378,95 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
         <h2 className="card-title">{post.titulo}</h2>
         {post.resumo && <p className="card-frase">{post.resumo}</p>}
       </div>
+      {showLoginBanner && (
+        <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+          <BannerLogin onClose={() => setShowLoginBanner(false)} />
+        </div>
+      )}
       {footerRow}
+      {commentsPanel}
     </article>
   );
 }
 
-function FeedItem({ item, index, onAuthorClick, onToast }: {
+// ─────────────────────────────────────────────────────────────
+// ReflexaoFeedCard — wrapper do CardReflexao para o feed
+// ─────────────────────────────────────────────────────────────
+function ReflexaoFeedCard({
+  reflexao,
+  index,
+  currentUid,
+  onDeleted,
+  onToast,
+}: {
+  reflexao: any;
+  index: number;
+  currentUid: string | null;
+  onDeleted: (id: string) => void;
+  onToast: (msg: string) => void;
+}) {
+  const isAutor = !!currentUid && currentUid === reflexao.autorId;
+
+  async function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Tem certeza que deseja excluir esta reflexão? Esta ação não pode ser desfeita.")) return;
+    try {
+      await deleteDoc(doc(db, "posts", reflexao.id));
+      onDeleted(reflexao.id);
+      onToast("Reflexão excluída.");
+    } catch (err) {
+      console.error(err);
+      onToast("Erro ao excluir reflexão.");
+    }
+  }
+
+  return (
+    <div style={{ position: "relative", animationDelay: `${index * 60}ms` }} className="reflexao-feed-item">
+      <CardReflexao reflexao={reflexao} />
+      {isAutor && (
+        <div
+          className="reflexao-owner-actions"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <a
+            href={`/${reflexao.autorSlug}/reflexao/${reflexao.slug}/editar`}
+            className="reflexao-action-btn reflexao-action-edit"
+            title="Editar reflexão"
+          >
+            ✏️ Editar
+          </a>
+          <button
+            className="reflexao-action-btn reflexao-action-delete"
+            onClick={handleDelete}
+            title="Excluir reflexão"
+          >
+            🗑️ Excluir
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeedItem({ item, index, onAuthorClick, onToast, currentUid, onReflexaoDeleted }: {
   item: any; index: number;
   onAuthorClick: (e: React.MouseEvent, id: string) => void;
   onToast: (msg: string) => void;
+  currentUid: string | null;
+  onReflexaoDeleted: (id: string) => void;
 }) {
   if (item._feedType === "serie") return <SerieCard serie={item} index={index} />;
+  if (item._feedType === "reflexao") {
+    return (
+      <ReflexaoFeedCard
+        reflexao={item}
+        index={index}
+        currentUid={currentUid}
+        onDeleted={onReflexaoDeleted}
+        onToast={onToast}
+      />
+    );
+  }
   return <PostCard post={item} index={index} onAuthorClick={onAuthorClick} onToast={onToast} />;
 }
 
@@ -329,21 +490,34 @@ function HomePageContent() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const feedRef = useRef<HTMLDivElement>(null);
 
+  const currentUid = auth.currentUser?.uid ?? null;
+
   useEffect(() => {
     async function fetchAll() {
       try {
-        const [postsSnap, seriesSnap] = await Promise.all([
-          getDocs(query(collection(db, "posts"), orderBy("data", "desc"))),
+        const [postsSnap, seriesSnap, reflexoesSnap] = await Promise.all([
+          getDocs(query(collection(db, "posts"), where("tipo", "in", ["sermao", "artigo"]), orderBy("data", "desc"))),
           getDocs(query(collection(db, "series"), orderBy("criadoEm", "desc"))),
+          getDocs(query(collection(db, "posts"), where("tipo", "==", "reflexao"), orderBy("criadoEm", "desc"))),
         ]);
+
         const posts: any[] = [];
         postsSnap.forEach((d) => posts.push({ id: d.id, _feedType: "post", ...d.data() }));
+
         const series: any[] = [];
         seriesSnap.forEach((d) => series.push({ id: d.id, _feedType: "serie", ...d.data() }));
-        const mixed = [...posts, ...series].sort((a, b) => getDataValor(b) - getDataValor(a));
+
+        const reflexoes: any[] = [];
+        reflexoesSnap.forEach((d) => reflexoes.push({ id: d.id, _feedType: "reflexao", ...d.data() }));
+
+        const mixed = [...posts, ...series, ...reflexoes].sort(
+          (a, b) => getDataValor(b) - getDataValor(a)
+        );
         setAllPosts(posts);
         setFeedItems(mixed);
-      } catch (error) { console.error("Erro ao buscar feed:", error); }
+      } catch (error) {
+        console.error("Erro ao buscar feed:", error);
+      }
       setLoading(false);
     }
     fetchAll();
@@ -352,7 +526,7 @@ function HomePageContent() {
   // Reset paginação ao mudar busca
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [buscaAtiva]);
 
-  // ✅ Scroll automático para o feed ao realizar pesquisa
+  // Scroll automático para o feed ao realizar pesquisa
   useEffect(() => {
     if (!buscaAtiva) return;
     const timer = setTimeout(() => {
@@ -388,6 +562,10 @@ function HomePageContent() {
     router.push(`/perfil/${autorId}`);
   }
 
+  function handleReflexaoDeleted(id: string) {
+    setFeedItems((prev) => prev.filter((item) => item.id !== id));
+  }
+
   function scrollToFeed(e: React.MouseEvent) {
     e.preventDefault();
     feedRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -399,7 +577,8 @@ function HomePageContent() {
         return (
           normalizar(item.titulo || "").includes(termo) ||
           normalizar(item.autorNome || "").includes(termo) ||
-          normalizar(item.descricao || "").includes(termo)
+          normalizar(item.descricao || "").includes(termo) ||
+          normalizar(item.fraseInstigadora || "").includes(termo)
         );
       })
     : feedItems;
@@ -438,7 +617,7 @@ function HomePageContent() {
             {user ? (
               <Link href="/criar-post" className="btn-hero-secondary">Publicar Sermão ou Artigo</Link>
             ) : (
-              <Link href="/login" className="btn-hero-secondary">Entrar para Publicar</Link>
+              <Link href="/entrar" className="btn-hero-secondary">Entrar para Publicar</Link>
             )}
           </div>
         </div>
@@ -481,6 +660,8 @@ function HomePageContent() {
                     index={i}
                     onAuthorClick={handleAuthorClick}
                     onToast={showToast}
+                    currentUid={currentUid}
+                    onReflexaoDeleted={handleReflexaoDeleted}
                   />
                 ))}
               </div>
@@ -542,6 +723,44 @@ function HomePageContent() {
         .serie-card:hover .card-cover-img { transform: scale(1.025); }
         .card-cover-badge { position: absolute; top: 0.625rem; right: 0.75rem; backdrop-filter: blur(6px); background: rgba(10, 15, 10, 0.72) !important; }
         .card-image-content { display: flex; flex-direction: column; }
+
+        /* Reflexão no feed */
+        .reflexao-feed-item { position: relative; }
+        .reflexao-owner-actions {
+          display: flex;
+          gap: 0.5rem;
+          padding: 0.5rem 0.75rem;
+          border-top: 1px solid var(--border-light);
+          background: var(--bg-elevated);
+          border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+          margin-top: -1px;
+        }
+        .reflexao-action-btn {
+          font-size: 0.72rem;
+          font-weight: 600;
+          padding: 4px 10px;
+          border-radius: var(--radius-full);
+          border: 1px solid var(--border-light);
+          background: none;
+          cursor: pointer;
+          text-decoration: none;
+          transition: all 0.15s ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          color: var(--text-2);
+        }
+        .reflexao-action-edit:hover {
+          border-color: var(--emerald-dim);
+          color: var(--emerald);
+          background: var(--emerald-dim);
+        }
+        .reflexao-action-delete:hover {
+          border-color: rgba(239,68,68,0.3);
+          color: #ef4444;
+          background: rgba(239,68,68,0.08);
+        }
+
         @media (max-width: 640px) {
           .card-cover-wrapper { max-height: 320px; min-height: 120px; }
           .card-cover-img { max-height: 320px; }
