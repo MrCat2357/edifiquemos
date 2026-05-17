@@ -291,7 +291,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
   function navUrl(p: PostNav) {
     const base = p.slug
-      ? `/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`
+      ? `/posts/${p.tipo === "sermao" ? "sermoes" : "estudos"}/${p.slug}`
       : `/posts/${p.id}`;
     if (resolvedFromSerie && resolvedSerieSlug) return `${base}?from=serie&serieSlug=${resolvedSerieSlug}`;
     if (fromPerfil) return `${base}?from=perfil`;
@@ -370,7 +370,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
               <IconArrowLeft size={12} />
               {resolvedFromSerie
                 ? "Anterior na série"
-                : prev.tipo === "sermao" ? "Sermão anterior" : "Artigo anterior"}
+                : prev.tipo === "sermao" ? "Sermão anterior" : "Estudo anterior"}
             </span>
             <span style={{
               fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
@@ -419,7 +419,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
             }}>
               {resolvedFromSerie
                 ? "Próximo na série"
-                : next.tipo === "sermao" ? "Próximo sermão" : "Próximo artigo"}
+                : next.tipo === "sermao" ? "Próximo sermão" : "Próximo estudo"}
               <IconArrowRight size={12} />
             </span>
             <span style={{
@@ -1054,7 +1054,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         {/* Topo: badge + botões de autor */}
         <div className="post-detail-top">
           <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-            {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+            {post.tipo === "sermao" ? "Sermão" : "Estudo"}
           </span>
           {isAutor && (
             <div className="post-detail-owner-btns">
@@ -1146,7 +1146,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           </p>
         ) : (
           <p className="post-detail-footer-text">
-            Artigo publicado por {nomeExibicao}
+            Estudo publicado por {nomeExibicao}
             {formatData(post.data) ? ` em ${formatData(post.data)}` : ""}
           </p>
         )}

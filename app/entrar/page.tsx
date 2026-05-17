@@ -78,8 +78,8 @@ function EntrarForm() {
   // ── utilitário de redirecionamento pós-auth ──────────────────────────────
   //
   // Lê "redirect-after-auth" do sessionStorage, que pode ser:
-  //   • um pathname+search  (ex: "/posts/artigos/meu-post")
-  //   • uma URL completa    (ex: "https://site.com/posts/artigos/meu-post")
+  //   • um pathname+search  (ex: "/posts/estudos/meu-post")
+  //   • uma URL completa    (ex: "https://site.com/posts/estudos/meu-post")
   //
   // Em ambos os casos extraímos apenas o pathname+search+hash para o
   // router.push funcionar corretamente dentro do Next.js.

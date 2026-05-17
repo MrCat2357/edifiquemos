@@ -46,12 +46,12 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
   const origemHref =
     reflexao.publicacaoOrigemTipo === "artigo"
-      ? `/posts/artigos/${reflexao.publicacaoOrigemSlug}`
+      ? `/posts/estudos/${reflexao.publicacaoOrigemSlug}`
       : `/posts/sermoes/${reflexao.publicacaoOrigemSlug}`;
 
   const origemLabel =
     reflexao.publicacaoOrigemTipo === "artigo"
-      ? "→ Ler o artigo completo"
+      ? "→ Ler o estudo completo"
       : "→ Ler o sermão completo";
 
   const temAtribuicao =

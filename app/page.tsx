@@ -185,7 +185,7 @@ function SerieCard({ serie, index }: { serie: any; index: number }) {
           {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
         </div>
         <div className="card-footer-row" style={{ display: "flex", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
-          <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>Coleção temática de sermões e artigos</span>
+          <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>Coleção temática de sermões e estudos</span>
           <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(`/series/${serie.slug}`)}>Ver série →</span>
         </div>
       </div>
@@ -210,7 +210,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
 
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
-  const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
+  const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
   const fullUrl = typeof window !== "undefined" ? window.location.origin + url : url;
 
   async function handleLike(e: React.MouseEvent) {
@@ -331,7 +331,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
         <div className="card-cover-wrapper">
           <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
           <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-            {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+            {post.tipo === "sermao" ? "Sermão" : "Estudo"}
           </span>
         </div>
         <div className="card-image-content">
@@ -371,7 +371,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
           <span className="card-meta">{buildFrase(post)}</span>
         </div>
         <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-          {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+          {post.tipo === "sermao" ? "Sermão" : "Estudo"}
         </span>
       </div>
       <div className="card-body-area" onClick={() => router.push(url)} style={{ cursor: "pointer" }}>
@@ -615,7 +615,7 @@ function HomePageContent() {
               Explorar Conteúdos
             </button>
             {user ? (
-              <Link href="/criar-post" className="btn-hero-secondary">Publicar Sermão ou Artigo</Link>
+              <Link href="/criar-post" className="btn-hero-secondary">Publicar Sermão ou Estudo</Link>
             ) : (
               <Link href="/entrar" className="btn-hero-secondary">Entrar para Publicar</Link>
             )}
@@ -687,7 +687,7 @@ function HomePageContent() {
             <ul className="trending-list">
               {allPosts.slice(0, 4).map((p) => (
                 <li key={p.id}>
-                  <Link href={`/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`} className="trending-link">
+                  <Link href={`/posts/${p.tipo === "sermao" ? "sermoes" : "estudos"}/${p.slug}`} className="trending-link">
                     <span className="trending-text">{p.titulo}</span>
                     <span className="trending-count">{p.tipo === "sermao" ? "🎤" : "📝"}</span>
                   </Link>

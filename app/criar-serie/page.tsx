@@ -130,7 +130,7 @@ export default function CriarSerie() {
             Criar série
           </h1>
           <p style={{ fontSize: "0.875rem", color: "var(--text-3)" }}>
-            Agrupe seus sermões e artigos em uma coleção temática
+            Agrupe seus sermões e estudos em uma coleção temática
           </p>
         </div>
 
@@ -242,7 +242,7 @@ export default function CriarSerie() {
                           {post.titulo}
                         </p>
                         <p style={{ fontSize: "0.72rem", color: "var(--text-3)", margin: 0 }}>
-                          {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+                          {post.tipo === "sermao" ? "Sermão" : "Estudo"}
                           {post.data?.toDate ? ` · ${post.data.toDate().toLocaleDateString("pt-BR")}` : typeof post.data === "string" ? ` · ${post.data}` : ""}
                         </p>
                       </div>

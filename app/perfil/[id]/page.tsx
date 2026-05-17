@@ -214,7 +214,7 @@ function SerieCardPublico({
 
           {!isOwner && (
             <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>
-              Coleção temática de sermões e artigos
+              Coleção temática de sermões e estudos
             </span>
           )}
 
@@ -254,10 +254,10 @@ function PostCardPerfil({
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
-  const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}?from=perfil`;
+  const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}?from=perfil`;
   const fullUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`
-    : `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
+    ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`
+    : `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
 
   function buildFrase() {
     const data = post.data?.toDate
@@ -395,7 +395,7 @@ function PostCardPerfil({
         <div className="card-cover-wrapper">
           <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
           <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-            {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+            {post.tipo === "sermao" ? "Sermão" : "Estudo"}
           </span>
         </div>
         <div className="card-image-content">
@@ -436,7 +436,7 @@ function PostCardPerfil({
           <span className="card-meta">{buildFrase()}</span>
         </div>
         <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-          {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+          {post.tipo === "sermao" ? "Sermão" : "Estudo"}
         </span>
       </div>
       <div className="card-body-area" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>

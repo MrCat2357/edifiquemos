@@ -8,7 +8,7 @@ import PostDetailContent from "@/components/PostDetailContent";
 
 type AutorType = { nome?: string; titulo?: string; fotoUrl?: string | null };
 
-export default function PostArtigoPage() {
+export default function PostEstudoPage() {
   const { slug } = useParams();
 
   const [post, setPost] = useState<any>(null);

@@ -98,7 +98,7 @@ function PostCardSerie({
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
-  const postBasePath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
+  const postBasePath = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
   const postPathSerie = `${postBasePath}?from=serie&serieSlug=${serieSlug}`;
   const fullUrl = typeof window !== "undefined" ? `${window.location.origin}${postBasePath}` : postBasePath;
 
@@ -183,7 +183,7 @@ function PostCardSerie({
         <div className="card-cover-wrapper">
           <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
           <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-            {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+            {post.tipo === "sermao" ? "Sermão" : "Estudo"}
           </span>
         </div>
         <div className="card-image-content">
@@ -220,7 +220,7 @@ function PostCardSerie({
           <span className="card-meta">{buildFrase()}</span>
         </div>
         <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-          {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+          {post.tipo === "sermao" ? "Sermão" : "Estudo"}
         </span>
       </div>
       <div className="card-body-area" onClick={() => router.push(postPathSerie)} style={{ cursor: "pointer" }}>
