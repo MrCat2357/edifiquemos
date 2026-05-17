@@ -11,6 +11,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
 import LinksReferencia from "@/components/LinksReferencia";
+import BannerLogin from "@/components/BannerLogin";
+import CommentSection from "@/components/comments/CommentSection";
 
 /* ── helpers ─────────────────────────────────────────── */
 
@@ -169,7 +171,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
   const [serieInfo, setSerieInfo] = useState<{ titulo: string; slug: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Estado resolvido: pode vir dos query params OU ser detectado automaticamente
   const [resolvedFromSerie, setResolvedFromSerie] = useState(false);
   const [resolvedSerieSlug, setResolvedSerieSlug] = useState("");
 
@@ -179,10 +180,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
         let fromSerie = fromSerieParam;
         let serieSlug = serieSlugParam;
 
-        // ── Detecção automática de série ──────────────────────────────────────
-        // Se não veio ?from=serie na URL, verifica se este post pertence a alguma
-        // série. Isso garante que a navegação funcione mesmo quando o usuário
-        // acessou o post diretamente (link externo, compartilhamento, etc.).
         if (!fromSerie && !fromPerfil) {
           const seriesSnap = await getDocs(
             query(collection(db, "series"), where("postIds", "array-contains", postId))
@@ -201,7 +198,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
         let all: PostNav[] = [];
 
         if (fromSerie && serieSlug) {
-          // Busca a série pelo slug e respeita a ordem de postIds
           const serieSnap = await getDocs(
             query(collection(db, "series"), where("slug", "==", serieSlug))
           );
@@ -226,7 +222,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
               }));
           }
         } else if (fromPerfil && autorIdProp) {
-          // Navega só entre posts do mesmo autor
           const snap = await getDocs(
             query(
               collection(db, "posts"),
@@ -243,7 +238,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
             autorNome: d.data().autorNome,
           }));
         } else {
-          // Navega entre todos os posts
           const snap = await getDocs(
             query(collection(db, "posts"), orderBy("data", "desc"))
           );
@@ -260,8 +254,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
         const idx = all.findIndex((p) => p.id === postId);
         if (idx === -1) { setLoading(false); return; }
 
-        const p = idx - 1 >= 0        ? all[idx - 1] : null;   // agora "anterior" = índice menor
-        const n = idx + 1 < all.length ? all[idx + 1] : null;  // agora "próximo"  = índice maior
+        const p = idx - 1 >= 0         ? all[idx - 1] : null;
+        const n = idx + 1 < all.length ? all[idx + 1] : null;
         setPrev(p);
         setNext(n);
 
@@ -299,7 +293,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
     const base = p.slug
       ? `/posts/${p.tipo === "sermao" ? "sermoes" : "artigos"}/${p.slug}`
       : `/posts/${p.id}`;
-    // Preserva o contexto de série em todos os links de navegação
     if (resolvedFromSerie && resolvedSerieSlug) return `${base}?from=serie&serieSlug=${resolvedSerieSlug}`;
     if (fromPerfil) return `${base}?from=perfil`;
     return base;
@@ -322,7 +315,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
   return (
     <div style={{ marginTop: "2rem" }}>
-      {/* Banner da série */}
       {serieInfo && (
         <div
           onClick={() => router.push(`/series/${serieInfo.slug}`)}
@@ -352,15 +344,9 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
       )}
 
       <nav
-        className="post-nav"
+        className={`post-nav post-nav-grid ${prev && next ? "post-nav-grid--both" : prev ? "post-nav-grid--prev" : "post-nav-grid--next"}`}
         aria-label="Navegação entre publicações"
-        style={{
-          display: "grid",
-          gridTemplateColumns: prev && next ? "1fr 1fr" : prev ? "1fr auto" : "auto 1fr",
-          gap: "0.75rem",
-        }}
       >
-        {/* ← Anterior */}
         {prev ? (
           <button
             onClick={() => router.push(navUrl(prev))}
@@ -386,7 +372,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
                 ? "Anterior na série"
                 : prev.tipo === "sermao" ? "Sermão anterior" : "Artigo anterior"}
             </span>
-
             <span style={{
               fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
               lineHeight: 1.3, overflow: "hidden",
@@ -395,7 +380,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
             }}>
               {prev.titulo}
             </span>
-
             {prevAutor && (
               <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
                 <AuthorAvatar src={prevAutor.fotoUrl} name={prevAutor.nome} size={22} />
@@ -413,7 +397,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           <span />
         )}
 
-        {/* → Próximo */}
         {next ? (
           <button
             onClick={() => router.push(navUrl(next))}
@@ -439,7 +422,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
                 : next.tipo === "sermao" ? "Próximo sermão" : "Próximo artigo"}
               <IconArrowRight size={12} />
             </span>
-
             <span style={{
               fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
               lineHeight: 1.3, overflow: "hidden",
@@ -448,7 +430,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
             }}>
               {next.titulo}
             </span>
-
             {nextAutor && (
               <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
                 <span style={{
@@ -837,21 +818,21 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [loadingLike, setLoadingLike] = useState(false);
   const [likesModalAberto, setLikesModalAberto] = useState(false);
 
+  // ── NOVO: controla o BannerLogin ──────────────────────
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
+
   const [compartilharAberto, setCompartilharAberto] = useState(false);
   const [copiado, setCopiado] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
-
   const [viewCount, setViewCount] = useState<number>(post.visualizacoes ?? 0);
 
   useEffect(() => {
     async function registrarVisualizacao() {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-
       const sessionKey = `viewed_${postId}`;
       if (sessionStorage.getItem(sessionKey)) return;
-
       try {
         const ref = doc(db, "posts", postId);
         await updateDoc(ref, { visualizacoes: increment(1) });
@@ -941,9 +922,14 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     toastTimer.current = setTimeout(() => setToastVisible(false), 2200);
   }
 
+  // ── handleLike: exibe BannerLogin em vez de toast ─────
   async function handleLike() {
     const uid = auth.currentUser?.uid;
-    if (!uid) { showToast("Faça login para curtir"); return; }
+    if (!uid) {
+  sessionStorage.setItem("redirect-after-auth", window.location.href);
+  setShowLoginBanner(true);
+  return;
+}
     if (loadingLike) return;
     setLoadingLike(true);
     try {
@@ -1181,7 +1167,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             disabled={loadingLike}
             className={`post-btn-share ${liked ? "liked" : ""}`}
             style={{ opacity: loadingLike ? 0.6 : 1, ...actionBtnStyle }}
-            title={user ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
+            title={user ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
           >
             <IconHeart size={14} filled={liked} />
             Amei
@@ -1252,8 +1238,18 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         </div>
 
+        {/* ── BannerLogin: aparece abaixo das ações ao tentar curtir sem login ── */}
+        {showLoginBanner && (
+          <div style={{ marginTop: "0.75rem" }}>
+            <BannerLogin onClose={() => setShowLoginBanner(false)} />
+          </div>
+        )}
+
         {/* Navegação entre posts */}
         <PostNavigation postId={postId} autorIdProp={post.autorId} />
+
+        {/* ── Sistema de comentários ── */}
+        <CommentSection postId={postId} />
       </article>
 
       <style>{`
@@ -1261,6 +1257,19 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           .post-detail-cover-wrapper img {
             max-height: 360px !important;
           }
+        }
+        /* Nav cards — two columns on desktop, stacked on mobile */
+        .post-nav-grid {
+          display: grid;
+          gap: 0.75rem;
+        }
+        .post-nav-grid--both      { grid-template-columns: 1fr 1fr; }
+        .post-nav-grid--prev      { grid-template-columns: 1fr auto; }
+        .post-nav-grid--next      { grid-template-columns: auto 1fr; }
+        @media (max-width: 480px) {
+          .post-nav-grid--both,
+          .post-nav-grid--prev,
+          .post-nav-grid--next { grid-template-columns: 1fr; }
         }
       `}</style>
     </>

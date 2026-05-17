@@ -14,9 +14,14 @@ import {
   arrayUnion,
   arrayRemove,
   increment,
+  deleteDoc,
 } from "firebase/firestore";
 import { useParams, useRouter } from "next/navigation";
 import { gerarPDF } from "@/lib/gerarPDF";
+import { getReflexoesPorAutor } from "@/lib/reflexoes";
+import type { Reflexao } from "@/lib/reflexoes";
+import CardReflexao from "@/components/reflexoes/CardReflexao";
+import BannerLogin from "@/components/BannerLogin";
 
 type User = {
   nome?: string;
@@ -25,6 +30,8 @@ type User = {
   slug?: string;
   fotoUrl?: string | null;
 };
+
+/* ── Helpers ────────────────────────────────────────── */
 
 function getInitials(name: string) {
   if (!name) return "?";
@@ -54,28 +61,21 @@ function Avatar({ src, name, size = 64 }: { src?: string | null; name: string; s
   );
 }
 
-/* ── SVG Icons ───────────────────────────────────────── */
+/* ── SVG Icons ──────────────────────────────────────── */
 
 function IconHeart({ size = 13, filled = false }: { size?: number; filled?: boolean }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
-      <path
-        d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.567 3.067 2 5 2C6.105 2 7.093 2.535 7.75 3.366L8 3.7L8.25 3.366C8.907 2.535 9.895 2 11 2C12.933 2 14.5 3.567 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z"
-        stroke="currentColor" strokeWidth="1.4"
-        fill={filled ? "currentColor" : "none"}
-        strokeLinecap="round" strokeLinejoin="round"
-      />
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.567 3.067 2 5 2C6.105 2 7.093 2.535 7.75 3.366L8 3.7L8.25 3.366C8.907 2.535 9.895 2 11 2C12.933 2 14.5 3.567 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z"
+        stroke="currentColor" strokeWidth="1.4" fill={filled ? "currentColor" : "none"} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
 function IconEye({ size = 13 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
-      <path d="M1.5 8C3 4.5 5.3 3 8 3s5 1.5 6.5 5C13 11.5 10.7 13 8 13S3 11.5 1.5 8Z"
-        stroke="currentColor" strokeWidth="1.4" />
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M1.5 8C3 4.5 5.3 3 8 3s5 1.5 6.5 5C13 11.5 10.7 13 8 13S3 11.5 1.5 8Z" stroke="currentColor" strokeWidth="1.4" />
       <circle cx="8" cy="8" r="2.2" stroke="currentColor" strokeWidth="1.3" />
     </svg>
   );
@@ -83,31 +83,14 @@ function IconEye({ size = 13 }: { size?: number }) {
 
 function IconDownload({ size = 13 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
-      <path d="M8 2v7M8 9l-2.5-2.5M8 9l2.5-2.5"
-        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M8 2v7M8 9l-2.5-2.5M8 9l2.5-2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M3 13h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
 }
 
-/* ── resolverUid ─────────────────────────────────────── */
-
-async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: User } | null> {
-  const qSlug = query(collection(db, "users"), where("slug", "==", idOuSlug));
-  const snapSlug = await getDocs(qSlug);
-  if (!snapSlug.empty) {
-    const docSnap = snapSlug.docs[0];
-    return { uid: docSnap.id, userData: docSnap.data() as User };
-  }
-  const docRef = doc(db, "users", idOuSlug);
-  const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) return { uid: docSnap.id, userData: docSnap.data() as User };
-  return null;
-}
-
-/* ── Toast ───────────────────────────────────────────── */
+/* ── Toast ──────────────────────────────────────────── */
 
 function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   return (
@@ -126,13 +109,135 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   );
 }
 
-/* ── PostCardPerfil ──────────────────────────────────── */
+/* ── resolverUid ────────────────────────────────────── */
+
+async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: User } | null> {
+  const qSlug = query(collection(db, "users"), where("slug", "==", idOuSlug));
+  const snapSlug = await getDocs(qSlug);
+  if (!snapSlug.empty) {
+    const docSnap = snapSlug.docs[0];
+    return { uid: docSnap.id, userData: docSnap.data() as User };
+  }
+  const docRef = doc(db, "users", idOuSlug);
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) return { uid: docSnap.id, userData: docSnap.data() as User };
+  return null;
+}
+
+/* ── SerieCardPublico ────────────────────────────────── */
+
+function SerieCardPublico({
+  serie, index, isOwner, onToast,
+}: {
+  serie: any; index: number; isOwner: boolean; onToast: (msg: string) => void;
+}) {
+  const router = useRouter();
+  const postCount = serie.postIds?.length ?? 0;
+
+  async function handleDeletar(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Tem certeza que deseja apagar esta série?")) return;
+    try {
+      await deleteDoc(doc(db, "series", serie.id));
+      onToast("Série apagada.");
+      router.refresh();
+    } catch (err) {
+      console.error(err);
+      onToast("Erro ao apagar série.");
+    }
+  }
+
+  return (
+    <article
+      className="post-card serie-card"
+      style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
+      onClick={() => router.push(`/series/${serie.slug}`)}
+    >
+      {serie.imagemUrl && (
+        <div className="card-cover-wrapper">
+          <img src={serie.imagemUrl} alt={serie.titulo} className="card-cover-img" />
+          <span className="cat-badge card-cover-badge" style={{
+            background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)",
+            color: "var(--emerald)", borderColor: "var(--emerald-dim)",
+          }}>
+            📚 Série
+          </span>
+        </div>
+      )}
+      <div style={{ padding: serie.imagemUrl ? "0.875rem 1.125rem 0.875rem" : undefined }}>
+        {!serie.imagemUrl && (
+          <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ flex: 1 }}>
+              <span className="card-meta">{postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
+            </div>
+            <span className="cat-badge" style={{
+              color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)",
+            }}>
+              📚 Série
+            </span>
+          </div>
+        )}
+        <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
+          {serie.imagemUrl && (
+            <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
+              {postCount} publicação{postCount !== 1 ? "ões" : ""}
+            </p>
+          )}
+          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>
+            {serie.titulo}
+          </h2>
+          {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
+        </div>
+        <div
+          className="card-footer-row"
+          style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {isOwner && (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
+                className="post-btn-edit"
+                style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+              >
+                ✏ Editar
+              </button>
+              <button
+                onClick={handleDeletar}
+                className="post-btn-delete"
+                style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+              >
+                🗑 Apagar
+              </button>
+            </>
+          )}
+
+          {!isOwner && (
+            <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>
+              Coleção temática de sermões e artigos
+            </span>
+          )}
+
+          <span
+            className="read-link"
+            style={{ marginLeft: "auto" }}
+            onClick={() => router.push(`/series/${serie.slug}`)}
+          >
+            Ver série →
+          </span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/* ── PostCardPerfil ─────────────────────────────────── */
 
 function PostCardPerfil({
-  post, index, user, nomeExibicao, autorUid, onToast,
+  post, index, user, nomeExibicao, autorUid, isOwner, onToast,
 }: {
   post: any; index: number; user: User; nomeExibicao: string;
-  autorUid: string; onToast: (msg: string) => void;
+  autorUid: string; isOwner: boolean; onToast: (msg: string) => void;
 }) {
   const router = useRouter();
   const currentUid = auth.currentUser?.uid;
@@ -144,11 +249,12 @@ function PostCardPerfil({
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
-
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
 
   const viewCount: number = post.visualizacoes ?? 0;
+  const temImagem = !!post.imagemUrl;
 
-  const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}?autorId=${autorUid}`;
+  const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}?from=perfil`;
   const fullUrl = typeof window !== "undefined"
     ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`
     : `/posts/${post.tipo === "sermao" ? "sermoes" : "artigos"}/${post.slug}`;
@@ -168,16 +274,16 @@ function PostCardPerfil({
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!currentUid) { onToast("Faça login para curtir"); return; }
+    if (!currentUid) { setShowLoginBanner(true); return; }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
-      const ref = doc(db, "posts", post.id);
+      const postRef = doc(db, "posts", post.id);
       if (liked) {
-        await updateDoc(ref, { likes: increment(-1), likedBy: arrayRemove(currentUid) });
+        await updateDoc(postRef, { likes: increment(-1), likedBy: arrayRemove(currentUid) });
         setLiked(false); setLikeCount((n) => Math.max(0, n - 1));
       } else {
-        await updateDoc(ref, { likes: increment(1), likedBy: arrayUnion(currentUid) });
+        await updateDoc(postRef, { likes: increment(1), likedBy: arrayUnion(currentUid) });
         setLiked(true); setLikeCount((n) => n + 1);
       }
     } catch (err) { console.error(err); }
@@ -191,10 +297,9 @@ function PostCardPerfil({
     onToast("Gerando PDF...");
     try {
       await gerarPDF({
-        titulo: post.titulo,
-        nomeAutor: nomeExibicao,
+        titulo: post.titulo, nomeAutor: nomeExibicao,
         fotoAutor: user.fotoUrl ?? null,
-        dataPost: post.data?.toDate ? post.data.toDate().toLocaleDateString("pt-BR") : "",
+        dataPost: post.data?.toDate ? post.data.toDate().toLocaleDateString("pt-BR") : typeof post.data === "string" ? post.data : "",
         igreja: post.igreja || "",
         conteudo: post.conteudo || "Acesse o link para ler o conteúdo completo:\n" + fullUrl,
         tipo: post.tipo,
@@ -205,31 +310,127 @@ function PostCardPerfil({
           } catch {}
         },
       });
+    } catch (err) { console.error(err); onToast("Erro ao gerar PDF."); }
+    setGerandoPdf(false);
+  }
+
+  async function handleDeletar(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Tem certeza que deseja apagar este post?")) return;
+    try {
+      await deleteDoc(doc(db, "posts", post.id));
+      onToast("Post apagado.");
+      router.refresh();
     } catch (err) {
       console.error(err);
-      onToast("Erro ao gerar PDF.");
+      onToast("Erro ao apagar post.");
     }
-    setGerandoPdf(false);
+  }
+
+  const ownerButtons = isOwner ? (
+    <>
+      <button
+        onClick={(e) => { e.stopPropagation(); router.push(`/editar-post/${post.id}`); }}
+        className="post-btn-edit"
+        style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+      >
+        ✏ Editar
+      </button>
+      <button
+        onClick={handleDeletar}
+        className="post-btn-delete"
+        style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+      >
+        🗑 Apagar
+      </button>
+    </>
+  ) : null;
+
+  const footerRow = (
+    <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }}
+      onClick={(e) => e.stopPropagation()}>
+      <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+        {isOwner && (
+          <div style={{ display: "flex", gap: "0.5rem", marginRight: "4px" }}>
+            {ownerButtons}
+          </div>
+        )}
+
+        <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike}
+          disabled={loadingLike}
+          title={currentUid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
+          style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
+          <IconHeart size={13} filled={liked} />
+          Amei
+          {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
+        </button>
+        <button className="action-btn" onClick={handleDownloadPdf} disabled={gerandoPdf}
+          title="Baixar como PDF"
+          style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
+          {gerandoPdf ? <><span className="btn-spinner" />PDF</> : <><IconDownload size={13} />PDF</>}
+          {downloadCount > 0 && (
+            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}
+              title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
+              {downloadCount}
+            </span>
+          )}
+        </button>
+        {viewCount > 0 && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}
+            title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}>
+            <IconEye size={13} />{viewCount}
+          </span>
+        )}
+      </div>
+      <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
+        Ler completo →
+      </span>
+    </div>
+  );
+
+  if (temImagem) {
+    return (
+      <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }}
+        onClick={() => router.push(postPath)}>
+        <div className="card-cover-wrapper">
+          <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
+          <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
+            {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+          </span>
+        </div>
+        <div className="card-image-content">
+          <div className="card-header-row" style={{ padding: "0.875rem 1.125rem 0.375rem" }}
+            onClick={(e) => e.stopPropagation()}>
+            <Avatar src={user.fotoUrl} name={nomeExibicao} size={28} />
+            <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+              <span className="author-name-link" style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", fontSize: "0.8rem", cursor: "default" }}>
+                {nomeExibicao}
+              </span>
+              <span className="card-meta">{buildFrase()}</span>
+            </div>
+          </div>
+          <div className="card-body-area" style={{ padding: "0 1.125rem 0.75rem" }}>
+            <h2 className="card-title" style={{ fontSize: "1rem" }}>{post.titulo}</h2>
+            {post.resumo && <p className="card-frase">{post.resumo}</p>}
+          </div>
+          {showLoginBanner && (
+            <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+              <BannerLogin onClose={() => setShowLoginBanner(false)} />
+            </div>
+          )}
+          {footerRow}
+        </div>
+      </article>
+    );
   }
 
   return (
     <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
-      {/* Cabeçalho */}
-      <div
-        className="card-header-row"
-        onClick={() => router.push(postPath)}
-        style={{ cursor: "pointer" }}
-      >
+      <div className="card-header-row" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
         <Avatar src={user.fotoUrl} name={nomeExibicao} size={36} />
-        <div
-          className="author-col"
-          style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}
-        >
-          <span
-            className="author-name-link"
-            onClick={(e) => e.stopPropagation()}
-            style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", cursor: "default" }}
-          >
+        <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+          <span className="author-name-link" onClick={(e) => e.stopPropagation()}
+            style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", cursor: "default" }}>
             {nomeExibicao}
           </span>
           <span className="card-meta">{buildFrase()}</span>
@@ -238,73 +439,72 @@ function PostCardPerfil({
           {post.tipo === "sermao" ? "Sermão" : "Artigo"}
         </span>
       </div>
-
-      {/* Corpo */}
       <div className="card-body-area" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
         <h2 className="card-title">{post.titulo}</h2>
         {post.resumo && <p className="card-frase">{post.resumo}</p>}
       </div>
-
-      {/* Rodapé */}
-      <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }}>
-        {/* Grupo esquerdo: Amei · PDF · olhinho — espaçamento uniforme */}
-        <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-          {/* Amei */}
-          <button
-            className={`action-btn ${liked ? "liked" : ""}`}
-            onClick={handleLike}
-            disabled={loadingLike}
-            title={currentUid ? (liked ? "Remover curtida" : "Curtir") : "Faça login para curtir"}
-            style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
-          >
-            <IconHeart size={13} filled={liked} />
-            Amei
-            {likeCount > 0 && (
-              <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>
-                {likeCount}
-              </span>
-            )}
-          </button>
-
-          {/* PDF */}
-          <button
-            className="action-btn"
-            onClick={handleDownloadPdf}
-            disabled={gerandoPdf}
-            title="Baixar como PDF"
-            style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
-          >
-            {gerandoPdf ? (
-              <><span className="btn-spinner" />PDF</>
-            ) : (
-              <><IconDownload size={13} />PDF</>
-            )}
-            {downloadCount > 0 && (
-              <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}
-                title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
-                {downloadCount}
-              </span>
-            )}
-          </button>
-
-          {/* Visualizações */}
-          {viewCount > 0 && (
-            <span
-              style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}
-              title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}
-            >
-              <IconEye size={13} />
-              {viewCount}
-            </span>
-          )}
+      {showLoginBanner && (
+        <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+          <BannerLogin onClose={() => setShowLoginBanner(false)} />
         </div>
-
-        {/* Ler completo → empurrado para a direita */}
-        <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
-          Ler completo →
-        </span>
-      </div>
+      )}
+      {footerRow}
     </article>
+  );
+}
+
+/* ── CardReflexaoComControles ─────────────────────────── */
+
+function CardReflexaoComControles({
+  reflexao, index, isOwner, onToast,
+}: {
+  reflexao: Reflexao; index: number; isOwner: boolean; onToast: (msg: string) => void;
+}) {
+  const router = useRouter();
+
+  async function handleDeletar(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Tem certeza que deseja apagar esta reflexão?")) return;
+    try {
+      await deleteDoc(doc(db, "reflexoes", reflexao.id!));
+      onToast("Reflexão apagada.");
+      router.refresh();
+    } catch (err) {
+      console.error(err);
+      onToast("Erro ao apagar reflexão.");
+    }
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <CardReflexao reflexao={reflexao} />
+      {isOwner && (
+        <div
+          style={{
+            display: "flex",
+            gap: "0.5rem",
+            padding: "0 1.125rem 0.875rem",
+            marginTop: "-0.25rem",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={(e) => { e.stopPropagation(); router.push(`/editar-reflexao/${reflexao.id}`); }}
+            className="post-btn-edit"
+            style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+          >
+            ✏ Editar
+          </button>
+          <button
+            onClick={handleDeletar}
+            className="post-btn-delete"
+            style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+          >
+            🗑 Apagar
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -317,7 +517,13 @@ export default function PerfilPublico() {
   const [user, setUser] = useState<User | null>(null);
   const [uid, setUid] = useState<string | null>(null);
   const [posts, setPosts] = useState<any[]>([]);
+  const [series, setSeries] = useState<any[]>([]);
+  const [reflexoes, setReflexoes] = useState<Reflexao[]>([]);
+  const [aba, setAba] = useState<"posts" | "series" | "reflexoes">("posts");
   const [loading, setLoading] = useState(true);
+
+  const [visitorUid, setVisitorUid] = useState<string | null>(null);
+
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -328,6 +534,10 @@ export default function PerfilPublico() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastVisible(false), 2200);
   }
+
+  useEffect(() => {
+    setVisitorUid(auth.currentUser?.uid ?? null);
+  }, []);
 
   useEffect(() => {
     async function carregar() {
@@ -343,77 +553,196 @@ export default function PerfilPublico() {
           router.replace(`/perfil/${resultado.userData.slug}`);
         }
 
-        const q = query(
-          collection(db, "posts"),
-          where("autorId", "==", resultado.uid),
-          orderBy("data", "desc")
-        );
-        const snap = await getDocs(q);
-        const lista: any[] = [];
-        snap.forEach((d) => lista.push({ id: d.id, ...d.data() }));
-        setPosts(lista);
+        const [postsSnap, seriesSnap, reflexoesData] = await Promise.all([
+          getDocs(query(
+            collection(db, "posts"),
+            where("autorId", "==", resultado.uid),
+            where("tipo", "in", ["sermao", "artigo"]),
+            orderBy("data", "desc")
+          )),
+          getDocs(query(
+            collection(db, "series"),
+            where("autorId", "==", resultado.uid),
+            orderBy("criadoEm", "desc")
+          )),
+          getReflexoesPorAutor(resultado.uid),
+        ]);
+
+        const listaP: any[] = [];
+        postsSnap.forEach((d) => listaP.push({ id: d.id, ...d.data() }));
+        setPosts(listaP);
+
+        const listaS: any[] = [];
+        seriesSnap.forEach((d) => listaS.push({ id: d.id, ...d.data() }));
+        setSeries(listaS);
+
+        setReflexoes(reflexoesData);
       } catch (err) { console.error(err); }
       setLoading(false);
     }
     carregar();
   }, [id]);
 
-  if (loading)
-    return <div className="post-detail-loading"><div className="spinner" />Carregando perfil...</div>;
-
-  if (!user)
-    return <div className="post-detail-notfound">Usuário não encontrado.</div>;
+  if (loading) return <div className="post-detail-loading"><div className="spinner" />Carregando perfil...</div>;
+  if (!user) return <div className="post-detail-notfound">Usuário não encontrado.</div>;
 
   const nomeExibicao =
     user.titulo && user.nome
       ? `${user.titulo} ${user.nome}`
       : user.nome || "Usuário";
 
+  const isOwner = !!visitorUid && visitorUid === uid;
+
   return (
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
 
       <div className="perfil-wrapper">
-        {/* Card do perfil */}
         <div className="perfil-card">
           <Avatar src={user.fotoUrl} name={nomeExibicao} size={64} />
           <div className="perfil-info">
             <h1 className="perfil-nome">{nomeExibicao}</h1>
-            {user.bio ? (
-              <p className="perfil-bio">{user.bio}</p>
-            ) : (
-              <p className="perfil-bio-vazia">Sem descrição.</p>
-            )}
-            <div className="perfil-stat">
-              <span className="perfil-stat-num">{posts.length}</span>
-              <span className="perfil-stat-label">publicações</span>
+            {user.bio ? <p className="perfil-bio">{user.bio}</p> : <p className="perfil-bio-vazia">Sem descrição.</p>}
+            <div style={{ display: "flex", gap: "1.25rem" }}>
+              <div className="perfil-stat">
+                <span className="perfil-stat-num">{posts.length}</span>
+                <span className="perfil-stat-label">publicações</span>
+              </div>
+              <div className="perfil-stat">
+                <span className="perfil-stat-num">{series.length}</span>
+                <span className="perfil-stat-label">série{series.length !== 1 ? "s" : ""}</span>
+              </div>
+              <div className="perfil-stat">
+                <span className="perfil-stat-num">{reflexoes.length}</span>
+                <span className="perfil-stat-label">reflexões</span>
+              </div>
             </div>
           </div>
+
+          {isOwner && (
+            <div style={{ alignSelf: "flex-start" }}>
+              <button className="post-btn-edit" onClick={() => router.push("/perfil")}>
+                ✏ Editar perfil
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Publicações */}
         <div className="perfil-posts-section">
-          <h2 className="perfil-posts-title">Publicações</h2>
-
-          {posts.length === 0 && (
-            <div className="empty-state">Nenhuma publicação ainda.</div>
-          )}
-
-          <div className="posts-list">
-            {posts.map((post, i) => (
-              <PostCardPerfil
-                key={post.id}
-                post={post}
-                index={i}
-                user={user}
-                nomeExibicao={nomeExibicao}
-                autorUid={uid!}
-                onToast={showToast}
-              />
+          <div style={{ display: "flex", gap: "0", borderBottom: "1px solid var(--border)", marginBottom: "1.5rem" }}>
+            {(["posts", "series", "reflexoes"] as const).map((a) => (
+              <button
+                key={a}
+                onClick={() => setAba(a)}
+                style={{
+                  padding: "0.625rem 1.25rem",
+                  fontSize: "0.875rem",
+                  fontWeight: 600,
+                  background: "none",
+                  border: "none",
+                  borderBottom: aba === a ? "2px solid var(--emerald)" : "2px solid transparent",
+                  color: aba === a ? "var(--emerald)" : "var(--text-3)",
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                  marginBottom: "-1px",
+                }}
+              >
+                {a === "posts" && `Publicações (${posts.length})`}
+                {a === "series" && `Séries (${series.length})`}
+                {a === "reflexoes" && `Reflexões (${reflexoes.length})`}
+              </button>
             ))}
           </div>
+
+          {aba === "posts" && (
+            <>
+              {posts.length === 0 && <div className="empty-state">Nenhuma publicação ainda.</div>}
+              <div className="posts-list">
+                {posts.map((post, i) => (
+                  <PostCardPerfil
+                    key={post.id}
+                    post={post}
+                    index={i}
+                    user={user}
+                    nomeExibicao={nomeExibicao}
+                    autorUid={uid!}
+                    isOwner={isOwner}
+                    onToast={showToast}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {aba === "series" && (
+            <>
+              {series.length === 0 && (
+                <div className="empty-state">Este autor ainda não criou nenhuma série.</div>
+              )}
+              <div className="posts-list">
+                {series.map((serie, i) => (
+                  <SerieCardPublico
+                    key={serie.id}
+                    serie={serie}
+                    index={i}
+                    isOwner={isOwner}
+                    onToast={showToast}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {aba === "reflexoes" && (
+            <>
+              {reflexoes.length === 0 && (
+                <div className="empty-state">Este autor ainda não criou nenhuma reflexão.</div>
+              )}
+              <div className="posts-list">
+                {reflexoes.map((r, i) => (
+                  <CardReflexaoComControles
+                    key={r.id ?? i}
+                    reflexao={r}
+                    index={i}
+                    isOwner={isOwner}
+                    onToast={showToast}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
+
+      <style>{`
+        .post-card-image { cursor: pointer; }
+        .card-cover-wrapper {
+          position: relative; width: 100%;
+          max-height: 420px; min-height: 160px;
+          overflow: hidden;
+          border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+          background: #0d1310;
+          display: flex; align-items: center; justify-content: center;
+        }
+        .card-cover-img {
+          width: 100%; height: 100%;
+          object-fit: contain; display: block;
+          max-height: 420px;
+          transition: transform 0.35s ease;
+        }
+        .post-card-image:hover .card-cover-img { transform: scale(1.025); }
+        .serie-card:hover .card-cover-img { transform: scale(1.025); }
+        .card-cover-badge {
+          position: absolute; top: 0.625rem; right: 0.75rem;
+          backdrop-filter: blur(6px);
+          background: rgba(10, 15, 10, 0.72) !important;
+        }
+        .card-image-content { display: flex; flex-direction: column; }
+        @media (max-width: 640px) {
+          .card-cover-wrapper { max-height: 320px; min-height: 120px; }
+          .card-cover-img { max-height: 320px; }
+        }
+      `}</style>
     </>
   );
 }
