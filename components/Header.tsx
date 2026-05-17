@@ -167,7 +167,7 @@ function HeaderContent() {
           <input
             ref={mobileInputRef}
             type="text"
-            placeholder="Buscar sermões e artigos..."
+            placeholder="Buscar sermões e estudos..."
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
             onFocus={() => setMobileBuscaFocada(true)}

@@ -8,9 +8,9 @@ export function formatPostMeta(post: any) {
 
   const tipo = post.tipo;
 
-  // 📖 ARTIGO
+  // 📖 Estudo
   if (tipo === "artigo") {
-    return `Artigo publicado por ${post.autorNome || "Autor"} em ${dataStr}`;
+    return `Estudo publicado por ${post.autorNome || "Autor"} em ${dataStr}`;
   }
 
   // ✝️ SERMÃO

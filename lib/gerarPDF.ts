@@ -131,7 +131,7 @@ export async function gerarPDF({
   pdf.setFont(fonteMeta, "normal"); pdf.setFontSize(9); pdf.setTextColor(130, 130, 130);
   const rodape = tipo === "sermao"
     ? (igreja ? `Sermão pregado na ${igreja}${dataPost ? ` em ${dataPost}` : ""}` : dataPost ? `Sermão pregado em ${dataPost}` : "")
-    : `Artigo publicado por ${nomeAutor}${dataPost ? ` em ${dataPost}` : ""}`;
+    : `Estudo publicado por ${nomeAutor}${dataPost ? ` em ${dataPost}` : ""}`;
   if (rodape) pdf.text(rodape, margem, y);
 
   /* ── Links de referência (clicáveis no PDF) ── */
