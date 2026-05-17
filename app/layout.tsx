@@ -17,13 +17,10 @@ export default function RootLayout({
   return (
     <html lang="pt-BR">
       <body className="bg-neutral-900 text-neutral-100 min-h-screen">
-
         <HeaderWrapper />
-
-        <main className="max-w-3xl mx-auto px-4 py-8">
+        <main style={{ paddingTop: "var(--header-h)", width: "100%", minWidth: 0, overflowX: "hidden" }}>
           {children}
         </main>
-
       </body>
     </html>
   );
