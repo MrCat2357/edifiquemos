@@ -38,7 +38,7 @@ export default function TermosPage() {
           color: "var(--text-2)",
           lineHeight: 1.8,
         }}>
-          <p>Este site é uma plataforma de compartilhamento de sermões, artigos e reflexões cristãs.</p>
+          <p>Este site é uma plataforma de compartilhamento de sermões, estudos e reflexões cristãs.</p>
           <p>Ao utilizar esta plataforma, o usuário declara ser responsável por todo conteúdo que publicar, garantindo que possui direitos sobre ele.</p>
           <p>Não é permitido publicar conteúdos ofensivos, ilegais, difamatórios ou que violem princípios éticos e cristãos.</p>
           <p>O conteúdo publicado pode ser moderado, editado ou removido pela administração da plataforma a qualquer momento, sem aviso prévio.</p>

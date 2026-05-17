@@ -185,7 +185,7 @@ export default function EditarSerie() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{post.titulo}</p>
                       <p style={{ fontSize: "0.72rem", color: "var(--text-3)", margin: 0 }}>
-                        {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+                        {post.tipo === "sermao" ? "Sermão" : "Estudo"}
                         {post.data?.toDate ? ` · ${post.data.toDate().toLocaleDateString("pt-BR")}` : typeof post.data === "string" ? ` · ${post.data}` : ""}
                       </p>
                     </div>

@@ -5,7 +5,7 @@ import type { ReflexaoGerada } from "./reflexoes";
 // ─────────────────────────────────────────────
 
 function montarPrompt(conteudoOriginal: string, tituloOriginal: string): string {
-  return `Você é um assistente pastoral. Com base no sermão/artigo abaixo, gere exatamente 3 reflexões independentes para compartilhamento no WhatsApp ao longo da semana.
+  return `Você é um assistente pastoral. Com base no sermão/estudo abaixo, gere exatamente 3 reflexões independentes para compartilhamento no WhatsApp ao longo da semana.
 
 TÍTULO ORIGINAL: ${tituloOriginal}
 

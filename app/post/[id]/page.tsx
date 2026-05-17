@@ -31,7 +31,7 @@ function buildFrase(post: any, autorNomeFinal: string) {
     return `Sermão publicado em ${data}`;
   }
 
-  return `Artigo publicado por ${autor} em ${data}`;
+  return `Estudo publicado por ${autor} em ${data}`;
 }
 
 export default function PostPage() {
@@ -93,7 +93,7 @@ export default function PostPage() {
         <span
           className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}
         >
-          {post.tipo === "sermao" ? "Sermão" : "Artigo"}
+          {post.tipo === "sermao" ? "Sermão" : "Estudo"}
         </span>
 
         {isAutor && (

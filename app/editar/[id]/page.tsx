@@ -375,7 +375,7 @@ export default function EditarPost() {
         imagemUrl: imagemUrl ?? null,
       });
 
-      router.push(`/posts/${tipo === "sermao" ? "sermoes" : "artigos"}/${slug}`);
+      router.push(`/posts/${tipo === "sermao" ? "sermoes" : "estudos"}/${slug}`);
     } catch (err) {
       console.error(err);
       setError("Erro ao atualizar post.");
@@ -468,7 +468,7 @@ export default function EditarPost() {
                     transition: "all 0.15s",
                   }}
                 >
-                  {t === "sermao" ? "Sermão" : "Artigo"}
+                  {t === "sermao" ? "Sermão" : "Estudo"}
                 </button>
               ))}
             </div>
@@ -610,7 +610,7 @@ export default function EditarPost() {
               </div>
             </div>
             <textarea
-              placeholder="Escreva seu sermão ou artigo aqui, ou importe um arquivo acima..."
+              placeholder="Escreva seu sermão ou estudo aqui, ou importe um arquivo acima..."
               value={conteudo}
               onChange={(e) => setConteudo(e.target.value)}
               className="auth-input"

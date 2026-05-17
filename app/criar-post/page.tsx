@@ -302,7 +302,7 @@ export default function CriarPost() {
       });
 
       sessionStorage.removeItem("draft-post");
-      router.push(`/posts/${tipo === "sermao" ? "sermoes" : "artigos"}/${slug}`);
+      router.push(`/posts/${tipo === "sermao" ? "sermoes" : "estudos"}/${slug}`);
     } catch (err) {
       console.error(err);
       setError("Erro ao publicar.");
@@ -340,7 +340,7 @@ export default function CriarPost() {
             Publicar conteúdo
           </h1>
           <p style={{ fontSize: "0.875rem", color: "var(--text-3)" }}>
-            Compartilhe um sermão ou artigo com a comunidade
+            Compartilhe um sermão ou estudo com a comunidade
           </p>
         </div>
 
@@ -405,7 +405,7 @@ export default function CriarPost() {
                     transition: "all 0.15s",
                   }}
                 >
-                  {t === "sermao" ? "Sermão" : "Artigo"}
+                  {t === "sermao" ? "Sermão" : "Estudo"}
                 </button>
               ))}
             </div>
@@ -535,7 +535,7 @@ export default function CriarPost() {
               </div>
             </div>
             <textarea
-              placeholder="Escreva seu sermão ou artigo aqui, ou importe um arquivo acima..."
+              placeholder="Escreva seu sermão ou estudo aqui, ou importe um arquivo acima..."
               value={conteudo}
               onChange={(e) => setConteudo(e.target.value)}
               className="auth-input"
