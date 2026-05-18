@@ -3,10 +3,54 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
-import { doc, deleteDoc } from "firebase/firestore";
+import {
+  doc,
+  deleteDoc,
+  runTransaction,
+  arrayUnion,
+  arrayRemove,
+  increment,
+} from "firebase/firestore";
 import { useEffect, useState } from "react";
 import type { Reflexao } from "@/lib/reflexoes";
 import CompartilharWhatsapp from "@/components/reflexoes/CompartilharWhatsapp";
+import BannerLogin from "@/components/BannerLogin";
+import dynamic from "next/dynamic";
+
+// Carregado de forma lazy para não bloquear o render inicial
+const CommentSection = dynamic(
+  () => import("@/components/comments/CommentSection"),
+  { ssr: false, loading: () => null }
+);
+
+// ── Ícones ────────────────────────────────────────────────────────────────────
+
+function IconHeart({ size = 16, filled = false }: { size?: number; filled?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path
+        d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.567 3.067 2 5 2C6.105 2 7.093 2.535 7.75 3.366L8 3.7L8.25 3.366C8.907 2.535 9.895 2 11 2C12.933 2 14.5 3.567 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z"
+        stroke="currentColor" strokeWidth="1.4" fill={filled ? "currentColor" : "none"}
+        strokeLinecap="round" strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconComment({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path
+        d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H9l-3 3v-3H3.5A1.5 1.5 0 0 1 2 9.5v-6Z"
+        stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" fill="none"
+      />
+    </svg>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 type Props = {
   reflexao: Reflexao;
@@ -18,10 +62,23 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
   const [isOwner, setIsOwner] = useState(false);
   const [deletando, setDeletando] = useState(false);
 
+  // ── Curtidas ──────────────────────────────────────────────────────────────
+  // Reflexões vivem em /posts/{id} — mesma coleção que sermões e artigos
+  const uid = auth.currentUser?.uid ?? null;
+  const [likes, setLikes] = useState<number>(reflexao.likes ?? 0);
+  const [likedBy, setLikedBy] = useState<string[]>(reflexao.likedBy ?? []);
+  const [likePending, setLikePending] = useState(false);
+
+  // ── Comentários ───────────────────────────────────────────────────────────
+  const [commentCount, setCommentCount] = useState<number>(reflexao.commentCount ?? 0);
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
+
+  const jaAmei = uid ? likedBy.includes(uid) : false;
+
   // Detecta se o visitante é o autor desta reflexão
   useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    if (uid && reflexao.autorId && uid === reflexao.autorId) {
+    const currentUid = auth.currentUser?.uid;
+    if (currentUid && reflexao.autorId && currentUid === reflexao.autorId) {
       setIsOwner(true);
     }
   }, [reflexao.autorId]);
@@ -31,12 +88,66 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
     if (!confirm("Tem certeza que deseja apagar esta reflexão?")) return;
     setDeletando(true);
     try {
-      await deleteDoc(doc(db, "reflexoes", reflexao.id));
+      await deleteDoc(doc(db, "posts", reflexao.id)); // reflexões vivem em /posts
       router.push(`/perfil/${autorSlug}`);
     } catch (err) {
       console.error(err);
       setDeletando(false);
     }
+  }
+
+  async function handleLike() {
+    if (likePending) return;
+
+    if (!uid) {
+      setShowLoginBanner(true);
+      return;
+    }
+
+    if (!reflexao.id) return;
+    setLikePending(true);
+
+    const novoJaAmei = !jaAmei;
+    setLikedBy((prev) => novoJaAmei ? [...prev, uid] : prev.filter((id) => id !== uid));
+    setLikes((prev) => prev + (novoJaAmei ? 1 : -1));
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const ref = doc(db, "posts", reflexao.id!); // /posts — coleção correta
+        const snap = await transaction.get(ref);
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const currentLikedBy: string[] = data.likedBy ?? [];
+        const alreadyLiked = currentLikedBy.includes(uid);
+        transaction.update(ref, {
+          likes: increment(alreadyLiked ? -1 : 1),
+          likedBy: alreadyLiked ? arrayRemove(uid) : arrayUnion(uid),
+        });
+      });
+    } catch (err) {
+      console.error(err);
+      // Reverte o estado otimista em caso de erro
+      setLikedBy((prev) => novoJaAmei ? prev.filter((id) => id !== uid) : [...prev, uid]);
+      setLikes((prev) => prev + (novoJaAmei ? -1 : 1));
+    } finally {
+      setLikePending(false);
+    }
+  }
+
+  function handleScrollToComments() {
+    // Usuário não logado: mostra banner inline em vez de redirecionar
+    if (!uid) {
+      setShowLoginBanner(true);
+      setTimeout(() => {
+        document.getElementById("reflexao-comments-banner")
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 50);
+      return;
+    }
+    setShowLoginBanner(false);
+    document
+      .getElementById("reflexao-comments")
+      ?.scrollIntoView({ behavior: "smooth" });
   }
 
   const paragrafos = reflexao.conteudo
@@ -219,6 +330,74 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
         </p>
       </div>
 
+      {/* ── Amei + Comentar ───────────────────────────────────────────────── */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "0.5rem",
+        padding: "0.875rem 1.125rem",
+        borderRadius: "var(--radius-lg)",
+        background: "var(--bg-elevated)",
+        border: "1px solid var(--border-light)",
+      }}>
+        {/* Botão Amei */}
+        <button
+          onClick={handleLike}
+          disabled={likePending}
+          aria-label={jaAmei ? "Remover curtida" : "Curtir reflexão"}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "0.4rem",
+            padding: "6px 14px", borderRadius: "var(--radius-full)",
+            border: "1px solid",
+            borderColor: jaAmei ? "var(--emerald-dim)" : "var(--border-light)",
+            background: jaAmei ? "var(--emerald-dim)" : "transparent",
+            color: jaAmei ? "var(--emerald)" : "var(--text-3)",
+            fontSize: "0.82rem", fontWeight: 600,
+            cursor: likePending ? "default" : "pointer",
+            opacity: likePending ? 0.7 : 1,
+            transition: "all 0.2s cubic-bezier(0.4,0,0.2,1)",
+            fontFamily: "inherit",
+          }}
+        >
+          <IconHeart size={15} filled={jaAmei} />
+          <span>Amei</span>
+          {likes > 0 && (
+            <span style={{ fontSize: "0.75rem", color: jaAmei ? "var(--emerald)" : "var(--text-3)" }}>
+              {likes}
+            </span>
+          )}
+        </button>
+
+        {/* Botão Comentar — rola até a seção de comentários */}
+        <button
+          onClick={handleScrollToComments}
+          aria-label="Ir para comentários"
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "0.4rem",
+            padding: "6px 14px", borderRadius: "var(--radius-full)",
+            border: "1px solid var(--border-light)", background: "transparent",
+            color: "var(--text-3)", fontSize: "0.82rem", fontWeight: 600,
+            cursor: "pointer", transition: "all 0.2s cubic-bezier(0.4,0,0.2,1)",
+            fontFamily: "inherit",
+          }}
+        >
+          <IconComment size={15} />
+          <span>Comentar</span>
+          {commentCount > 0 && (
+            <span style={{ fontSize: "0.75rem", color: "var(--text-3)" }}>
+              {commentCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Banner de login inline (ao clicar Comentar sem estar logado) */}
+      {showLoginBanner && (
+        <div id="reflexao-comments-banner">
+          <BannerLogin onClose={() => setShowLoginBanner(false)} />
+        </div>
+      )}
+
       {/* ── Compartilhar no WhatsApp ── */}
       <div style={{
         display: "flex",
@@ -255,30 +434,48 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       <div style={{ height: "1px", background: "var(--border)" }} />
 
       {/* ── Link para a publicação original ── */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-        <p style={{ fontSize: "0.8rem", color: "var(--text-3)", margin: 0 }}>
-          Esta reflexão foi extraída de:
-        </p>
-        <Link
-          href={origemHref}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "0.5rem",
-            fontSize: "0.875rem",
-            fontWeight: 600,
-            color: "var(--emerald)",
-            textDecoration: "none",
-            padding: "10px 16px",
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--border-light)",
-            borderRadius: "var(--radius-md)",
-            transition: "border-color 0.15s",
-          }}
-        >
-          {origemLabel}
-        </Link>
-      </div>
+      {reflexao.publicacaoOrigemSlug && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <p style={{ fontSize: "0.8rem", color: "var(--text-3)", margin: 0 }}>
+            Esta reflexão foi extraída de:
+          </p>
+          <Link
+            href={origemHref}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              fontSize: "0.875rem",
+              fontWeight: 600,
+              color: "var(--emerald)",
+              textDecoration: "none",
+              padding: "10px 16px",
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border-light)",
+              borderRadius: "var(--radius-md)",
+              transition: "border-color 0.15s",
+            }}
+          >
+            {origemLabel}
+          </Link>
+        </div>
+      )}
+
+      {/* ── Seção de comentários ──────────────────────────────────────────── */}
+      {/*
+        Reflexões ficam em /posts/{id} — os comentários ficam em /posts/{id}/comments.
+        Por isso usamos collectionRoot="posts" (padrão do CommentSection).
+        NÃO usar "reflexoes" aqui — a coleção correta é "posts".
+      */}
+      {reflexao.id && (
+        <div id="reflexao-comments">
+          <CommentSection
+            postId={reflexao.id}
+            collectionRoot="posts"
+            onCountChange={setCommentCount}
+          />
+        </div>
+      )}
     </div>
   );
 }

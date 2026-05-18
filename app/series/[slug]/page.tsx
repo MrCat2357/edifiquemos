@@ -18,6 +18,12 @@ import {
 import { useParams, useRouter } from "next/navigation";
 import { gerarPDF } from "@/lib/gerarPDF";
 import BannerLogin from "@/components/BannerLogin";
+import dynamic from "next/dynamic";
+
+const CommentSection = dynamic(
+  () => import("@/components/comments/CommentSection"),
+  { ssr: false, loading: () => null }
+);
 
 function getInitials(name: string) {
   if (!name) return "?";
@@ -50,6 +56,18 @@ function IconHeart({ size = 13, filled = false }: { size?: number; filled?: bool
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
       <path d="M8 13.5C8 13.5 1.5 9.5 1.5 5.5C1.5 3.567 3.067 2 5 2C6.105 2 7.093 2.535 7.75 3.366L8 3.7L8.25 3.366C8.907 2.535 9.895 2 11 2C12.933 2 14.5 3.567 14.5 5.5C14.5 9.5 8 13.5 8 13.5Z"
         stroke="currentColor" strokeWidth="1.4" fill={filled ? "currentColor" : "none"} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconComment({ size = 13, active = false }: { size?: number; active?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path
+        d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H9l-3 3v-3H3.5A1.5 1.5 0 0 1 2 9.5v-6Z"
+        stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"
+        fill={active ? "currentColor" : "none"}
+      />
     </svg>
   );
 }
@@ -94,6 +112,8 @@ function PostCardSerie({
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
   const [showLoginBanner, setShowLoginBanner] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [commentCount, setCommentCount] = useState<number>(post.commentCount ?? 0);
 
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
@@ -151,20 +171,63 @@ function PostCardSerie({
     setGerandoPdf(false);
   }
 
+  function handleToggleComments(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!uid) {
+      setShowLoginBanner(true);
+      return;
+    }
+    setShowComments((v) => !v);
+  }
+
   const footerRow = (
     <div className="card-footer-row" style={{ display: "flex", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
       <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-        <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike} disabled={loadingLike}
+        {/* Amei */}
+        <button
+          className={`action-btn ${liked ? "liked" : ""}`}
+          onClick={handleLike}
+          disabled={loadingLike}
           title={uid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
-          style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
+          style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
+        >
           <IconHeart size={13} filled={liked} />Amei
           {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
         </button>
-        <button className="action-btn" onClick={handleDownloadPdf} disabled={gerandoPdf}
-          style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
+
+        {/* Comentários */}
+        <button
+          onClick={handleToggleComments}
+          title="Ver comentários"
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "4px",
+            padding: 0, background: "none", border: "none",
+            color: showComments ? "var(--emerald)" : "var(--text-3)",
+            cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
+            transition: "color 0.15s",
+          }}
+        >
+          <IconComment size={13} active={showComments} />
+          Comentários
+          {commentCount > 0 && (
+            <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>
+              {commentCount}
+            </span>
+          )}
+        </button>
+
+        {/* PDF */}
+        <button
+          className="action-btn"
+          onClick={handleDownloadPdf}
+          disabled={gerandoPdf}
+          style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
+        >
           {gerandoPdf ? <><span className="btn-spinner" />PDF</> : <><IconDownload size={13} />PDF</>}
           {downloadCount > 0 && <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}>{downloadCount}</span>}
         </button>
+
+        {/* Visualizações */}
         {viewCount > 0 && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}>
             <IconEye size={13} />{viewCount}
@@ -174,6 +237,24 @@ function PostCardSerie({
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPathSerie)}>
         Ler completo →
       </span>
+    </div>
+  );
+
+  // Painel de comentários — igual ao PostCard do feed principal
+  const commentsPanel = showComments && (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        borderTop: "1px solid var(--border-light)",
+        padding: "1.25rem 1.125rem 1.5rem",
+        background: "var(--bg-elevated)",
+        borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
+      }}
+    >
+      <CommentSection
+        postId={post.id}
+        onCountChange={setCommentCount}
+      />
     </div>
   );
 
@@ -205,6 +286,7 @@ function PostCardSerie({
           )}
           {footerRow}
         </div>
+        {commentsPanel}
       </article>
     );
   }
@@ -233,6 +315,7 @@ function PostCardSerie({
         </div>
       )}
       {footerRow}
+      {commentsPanel}
     </article>
   );
 }

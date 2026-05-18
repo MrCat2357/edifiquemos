@@ -42,3 +42,5 @@ next-env.d.ts
 
 lib/serviceAccount.json
 lib/serviceAccount.json.bak
+lib/serviceAccount.staging.json
+lib/serviceAccount.production.json

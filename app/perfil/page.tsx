@@ -27,6 +27,12 @@ import type { Reflexao } from "@/lib/reflexoes";
 import BotaoGerarReflexoes from "@/components/reflexoes/BotaoGerarReflexoes";
 import CardReflexao from "@/components/reflexoes/CardReflexao";
 import BannerLogin from "@/components/BannerLogin";
+import dynamic from "next/dynamic";
+
+const CommentSection = dynamic(
+  () => import("@/components/comments/CommentSection"),
+  { ssr: false, loading: () => null }
+);
 
 /* ── gerarSlugUnico ─────────────────────────────────── */
 
@@ -107,6 +113,20 @@ function IconDownload({ size = 13 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
       <path d="M8 2v7M8 9l-2.5-2.5M8 9l2.5-2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M3 13h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconComment({ size = 13, active = false }: { size?: number; active?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path
+        d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H9l-3 3v-3H3.5A1.5 1.5 0 0 1 2 9.5v-6Z"
+        stroke="currentColor"
+        strokeWidth="1.35"
+        strokeLinejoin="round"
+        fill={active ? "currentColor" : "none"}
+      />
     </svg>
   );
 }
@@ -239,6 +259,7 @@ function PostCardMeuPerfil({
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
   const [showLoginBanner, setShowLoginBanner] = useState(false);
+  const [showComments, setShowComments] = useState(false);
 
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
@@ -312,6 +333,31 @@ function PostCardMeuPerfil({
           Amei
           {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
         </button>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!currentUid) { setShowLoginBanner(true); return; }
+            setShowComments((v) => !v);
+          }}
+          title="Ver comentários"
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "4px",
+            padding: 0, background: "none", border: "none",
+            color: showComments ? "var(--emerald)" : "var(--text-3)",
+            cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
+            transition: "color 0.15s",
+          }}
+        >
+          <IconComment size={13} active={showComments} />
+          Comentários
+          {(post.commentCount ?? 0) > 0 && (
+            <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>
+              {post.commentCount}
+            </span>
+          )}
+        </button>
+
         <button className="action-btn" onClick={handleDownloadPdf} disabled={gerandoPdf}
           title="Baixar como PDF"
           style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
@@ -333,6 +379,20 @@ function PostCardMeuPerfil({
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
         Ler completo →
       </span>
+    </div>
+  );
+
+  const commentsPanel = showComments && (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        borderTop: "1px solid var(--border-light)",
+        padding: "1.25rem 1.125rem 1.5rem",
+        background: "var(--bg-elevated)",
+        borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
+      }}
+    >
+      <CommentSection postId={post.id} />
     </div>
   );
 
@@ -368,6 +428,7 @@ function PostCardMeuPerfil({
           )}
           {footerRow}
         </div>
+        {commentsPanel}
       </article>
     );
   }
@@ -396,6 +457,7 @@ function PostCardMeuPerfil({
         </div>
       )}
       {footerRow}
+      {commentsPanel}
     </article>
   );
 }
