@@ -818,9 +818,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [loadingLike, setLoadingLike] = useState(false);
   const [likesModalAberto, setLikesModalAberto] = useState(false);
 
-  // ── NOVO: controla o BannerLogin ──────────────────────
-  const [showLoginBanner, setShowLoginBanner] = useState(false);
-
   const [compartilharAberto, setCompartilharAberto] = useState(false);
   const [copiado, setCopiado] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
@@ -832,11 +829,11 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       const uid = auth.currentUser?.uid;
       if (!uid) return;
       const sessionKey = `viewed_${postId}`;
-      if (sessionStorage.getItem(sessionKey)) return;
+      if (localStorage.getItem(sessionKey)) return;
       try {
         const ref = doc(db, "posts", postId);
         await updateDoc(ref, { visualizacoes: increment(1) });
-        sessionStorage.setItem(sessionKey, "1");
+        localStorage.setItem(sessionKey, "1");
         setViewCount((n) => n + 1);
       } catch (err) {
         console.error("Erro ao registrar visualização:", err);
@@ -922,14 +919,13 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     toastTimer.current = setTimeout(() => setToastVisible(false), 2200);
   }
 
-  // ── handleLike: exibe BannerLogin em vez de toast ─────
   async function handleLike() {
-    const uid = auth.currentUser?.uid;
-    if (!uid) {
-  sessionStorage.setItem("redirect-after-auth", window.location.href);
-  setShowLoginBanner(true);
-  return;
-}
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    const destino = window.location.pathname + window.location.search;
+    router.push(`/entrar?next=${encodeURIComponent(destino)}`);
+    return;
+  }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
@@ -1237,13 +1233,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           </div>
 
         </div>
-
-        {/* ── BannerLogin: aparece abaixo das ações ao tentar curtir sem login ── */}
-        {showLoginBanner && (
-          <div style={{ marginTop: "0.75rem" }}>
-            <BannerLogin onClose={() => setShowLoginBanner(false)} />
-          </div>
-        )}
 
         {/* Navegação entre posts */}
         <PostNavigation postId={postId} autorIdProp={post.autorId} />

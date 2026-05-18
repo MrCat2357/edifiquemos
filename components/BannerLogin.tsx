@@ -1,17 +1,24 @@
 "use client";
-
 import Link from "next/link";
+import { usePathname, useSearchParams } from "next/navigation";
 
-/**
- * BannerLogin
- * Exibido quando um visitante não logado tenta curtir ou comentar.
- * Uso:
- *   const [showLoginBanner, setShowLoginBanner] = useState(false);
- *   ...
- *   {showLoginBanner && <BannerLogin onClose={() => setShowLoginBanner(false)} />}
- */
+export default function BannerLogin({
+  onClose,
+  redirectTo,
+}: {
+  onClose: () => void;
+  redirectTo?: string;
+}) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const qs = searchParams.toString();
+  const currentPath = qs ? `${pathname}?${qs}` : pathname;
 
-export default function BannerLogin({ onClose }: { onClose: () => void }) {
+  const destino = redirectTo ?? currentPath;
+  const href = destino && destino !== "/" && !destino.startsWith("/entrar")
+    ? `/entrar?next=${encodeURIComponent(destino)}`
+    : "/entrar";
+
   return (
     <div className="login-banner" role="alert" aria-live="polite">
       <div className="login-banner-icon">🙏</div>
@@ -21,7 +28,7 @@ export default function BannerLogin({ onClose }: { onClose: () => void }) {
           Faça parte da nossa comunidade para curtir, salvar conteúdos e muito mais.
         </p>
       </div>
-      <Link href="/entrar" className="login-banner-btn">
+      <Link href={href} className="login-banner-btn">
         Entrar
       </Link>
       <button

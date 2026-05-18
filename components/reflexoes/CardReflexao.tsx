@@ -84,7 +84,7 @@ export default function CardReflexao({ reflexao, hideActions = false }: Props) {
     if (likePending) return;
 
     if (!uid) {
-      setShowLoginBanner(true);
+      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       return;
     }
 
@@ -122,9 +122,7 @@ export default function CardReflexao({ reflexao, hideActions = false }: Props) {
     e.stopPropagation();
 
     if (!uid) {
-      if (typeof window !== "undefined")
-        sessionStorage.setItem("redirect-after-auth", window.location.href);
-      setShowLoginBanner(true);
+      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       return;
     }
 
