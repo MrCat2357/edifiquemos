@@ -44,6 +44,66 @@ function removerMarcacoesLogos(texto: string): string {
     .join("\n");
 }
 
+/**
+ * Une linhas quebradas artificialmente pelo layout do PDF e separa parágrafos.
+ *
+ * PDFs raramente geram linhas em branco entre parágrafos — o fim de parágrafo
+ * é identificado pela pontuação final da linha (., !, ?, …).
+ * Dois-pontos (:) intencionalamente NÃO encerra parágrafo pois costuma
+ * introduzir a frase seguinte na mesma ideia.
+ *
+ * Regras:
+ * - Linha que NÃO termina com pontuação final → unida à próxima (linha quebrada).
+ * - Linha que termina com pontuação final → fim de parágrafo: insere linha em branco.
+ * - Linhas em branco já existentes no texto são preservadas como separadores.
+ */
+function unirLinhasQuebradas(texto: string): string {
+  // Pontuação que marca FIM DE PARÁGRAFO (não inclui ":" propositalmente)
+  const fimDeParagrafo = /[.!?\u2026\u201D"']\s*$/;
+
+  const linhas = texto.split("\n");
+  const resultado: string[] = [];
+  let buffer = "";
+
+  for (const linha of linhas) {
+    const trimmed = linha.trim();
+
+    // Linha em branco já existente → descarrega buffer e preserva separador
+    if (trimmed === "") {
+      if (buffer) {
+        resultado.push(buffer);
+        buffer = "";
+      }
+      // Evita múltiplas linhas em branco consecutivas
+      if (resultado[resultado.length - 1] !== "") {
+        resultado.push("");
+      }
+      continue;
+    }
+
+    if (buffer === "") {
+      buffer = trimmed;
+    } else if (!fimDeParagrafo.test(buffer)) {
+      // Buffer não encerrou parágrafo → une à linha atual
+      buffer = buffer + " " + trimmed;
+    } else {
+      // Buffer encerrou parágrafo → emite parágrafo + linha em branco
+      resultado.push(buffer);
+      resultado.push("");
+      buffer = trimmed;
+    }
+  }
+
+  // Descarrega restante
+  if (buffer) resultado.push(buffer);
+
+  // Remove linha em branco final e garante no máximo uma entre parágrafos
+  return resultado
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 /* ── .pdf ───────────────────────────────────────────────────── */
 async function lerPdf(file: File): Promise<string> {
   const pdfjsLib = await import("pdfjs-dist");
@@ -104,7 +164,10 @@ async function lerPdf(file: File): Promise<string> {
   }
 
   const textoRaw = paginas.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
-  return removerMarcacoesLogos(textoRaw);
+  const semMarcacoes = removerMarcacoesLogos(textoRaw);
+
+  // Une linhas quebradas artificialmente e normaliza parágrafos
+  return unirLinhasQuebradas(semMarcacoes);
 }
 
 /* ── .odt ───────────────────────────────────────────────────── */
