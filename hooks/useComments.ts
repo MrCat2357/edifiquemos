@@ -81,7 +81,18 @@ function injectSlugs(
   });
 }
 
-export function useComments(postId: string) {
+/**
+ * Hook de comentários parametrizado por coleção-raiz.
+ *
+ * @param postId        ID do documento pai (post ou reflexão)
+ * @param collectionRoot  Coleção raiz onde o documento pai vive.
+ *                        "posts" (padrão) → /posts/{postId}/comments
+ *                        "reflexoes"       → /reflexoes/{postId}/comments
+ */
+export function useComments(
+  postId: string,
+  collectionRoot: "posts" | "reflexoes" = "posts"
+) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -97,7 +108,7 @@ export function useComments(postId: string) {
     setLoading(true);
 
     const q = query(
-      collection(db, "posts", postId, "comments"),
+      collection(db, collectionRoot, postId, "comments"),
       orderBy("createdAt", "asc"),
       limit(PAGE_SIZE * 3)
     );
@@ -116,14 +127,14 @@ export function useComments(postId: string) {
     });
 
     return () => unsub();
-  }, [postId]);
+  }, [postId, collectionRoot]);
 
   const loadMore = useCallback(async () => {
     if (!lastDoc || loadingMore || !hasMore) return;
     setLoadingMore(true);
 
     const q = query(
-      collection(db, "posts", postId, "comments"),
+      collection(db, collectionRoot, postId, "comments"),
       orderBy("createdAt", "asc"),
       startAfter(lastDoc),
       limit(PAGE_SIZE * 3)
@@ -146,7 +157,7 @@ export function useComments(postId: string) {
     }
 
     setLoadingMore(false);
-  }, [postId, lastDoc, loadingMore, hasMore]);
+  }, [postId, collectionRoot, lastDoc, loadingMore, hasMore]);
 
   // Usa nome/slug/foto da plataforma; cai no Google só como fallback
   async function addComment(
@@ -158,7 +169,7 @@ export function useComments(postId: string) {
     const trimmed = text.trim();
     if (!trimmed || trimmed.length > 2000) return;
 
-    await addDoc(collection(db, "posts", postId, "comments"), {
+    await addDoc(collection(db, collectionRoot, postId, "comments"), {
       text: trimmed,
       authorId: user.uid,
       authorName: user.platformName || user.displayName || "Anônimo",
@@ -172,9 +183,9 @@ export function useComments(postId: string) {
       editedAt: null,
     });
 
-    // Mantém o contador desnormalizado no doc do post sincronizado
+    // Mantém o contador desnormalizado no doc pai sincronizado
     try {
-      await updateDoc(doc(db, "posts", postId), { commentCount: increment(1) });
+      await updateDoc(doc(db, collectionRoot, postId), { commentCount: increment(1) });
     } catch {}
   }
 
@@ -187,7 +198,7 @@ export function useComments(postId: string) {
     const trimmed = newText.trim();
     if (!trimmed || trimmed.length > 2000) return;
 
-    const ref = doc(db, "posts", postId, "comments", commentId);
+    const ref = doc(db, collectionRoot, postId, "comments", commentId);
     // Busca o doc para checar autoria antes de escrever
     const snap = await getDoc(ref);
     if (!snap.exists() || snap.data().authorId !== userId) return;
@@ -204,7 +215,7 @@ export function useComments(postId: string) {
    * pelo total removido (comentário + replies).
    */
   async function deleteComment(commentId: string, userId: string) {
-    const ref = doc(db, "posts", postId, "comments", commentId);
+    const ref = doc(db, collectionRoot, postId, "comments", commentId);
     const snap = await getDoc(ref);
     if (!snap.exists() || snap.data().authorId !== userId) return;
 
@@ -220,7 +231,7 @@ export function useComments(postId: string) {
     if (repliesAtreladas.length > 0) {
       await Promise.all(
         repliesAtreladas.map((r) =>
-          deleteDoc(doc(db, "posts", postId, "comments", r.id))
+          deleteDoc(doc(db, collectionRoot, postId, "comments", r.id))
         )
       );
     }
@@ -228,7 +239,7 @@ export function useComments(postId: string) {
     // Decrementa o contador pelo total removido (comentário + replies)
     const totalRemovido = 1 + repliesAtreladas.length;
     try {
-      await updateDoc(doc(db, "posts", postId), {
+      await updateDoc(doc(db, collectionRoot, postId), {
         commentCount: increment(-totalRemovido),
       });
     } catch {}
@@ -244,7 +255,7 @@ export function useComments(postId: string) {
     _currentLikes: number,
     _alreadyLiked: boolean
   ) {
-    const ref = doc(db, "posts", postId, "comments", commentId);
+    const ref = doc(db, collectionRoot, postId, "comments", commentId);
 
     await runTransaction(db, async (transaction) => {
       const snap = await transaction.get(ref);

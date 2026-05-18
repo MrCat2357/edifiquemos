@@ -22,6 +22,12 @@ import { getReflexoesPorAutor } from "@/lib/reflexoes";
 import type { Reflexao } from "@/lib/reflexoes";
 import CardReflexao from "@/components/reflexoes/CardReflexao";
 import BannerLogin from "@/components/BannerLogin";
+import dynamic from "next/dynamic";
+
+const CommentSection = dynamic(
+  () => import("@/components/comments/CommentSection"),
+  { ssr: false, loading: () => null }
+);
 
 type User = {
   nome?: string;
@@ -90,6 +96,18 @@ function IconDownload({ size = 13 }: { size?: number }) {
   );
 }
 
+function IconComment({ size = 13, active = false }: { size?: number; active?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path
+        d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H9l-3 3v-3H3.5A1.5 1.5 0 0 1 2 9.5v-6Z"
+        stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"
+        fill={active ? "currentColor" : "none"}
+      />
+    </svg>
+  );
+}
+
 /* ── Toast ──────────────────────────────────────────── */
 
 function Toast({ msg, visible }: { msg: string; visible: boolean }) {
@@ -132,7 +150,54 @@ function SerieCardPublico({
   serie: any; index: number; isOwner: boolean; onToast: (msg: string) => void;
 }) {
   const router = useRouter();
+  const uid = auth.currentUser?.uid ?? null;
+
   const postCount = serie.postIds?.length ?? 0;
+
+  const [liked, setLiked] = useState<boolean>(
+    () => (uid ? (serie.likedBy ?? []).includes(uid) : false)
+  );
+  const [likeCount, setLikeCount] = useState<number>(serie.likes ?? 0);
+  const [loadingLike, setLoadingLike] = useState(false);
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [commentCount, setCommentCount] = useState<number>(serie.commentCount ?? 0);
+
+  async function handleLike(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!uid) {
+      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      setShowLoginBanner(true);
+      return;
+    }
+    if (loadingLike) return;
+    setLoadingLike(true);
+    try {
+      const ref = doc(db, "series", serie.id);
+      if (liked) {
+        await updateDoc(ref, { likes: increment(-1), likedBy: arrayRemove(uid) });
+        setLiked(false);
+        setLikeCount((n) => Math.max(0, n - 1));
+      } else {
+        await updateDoc(ref, { likes: increment(1), likedBy: arrayUnion(uid) });
+        setLiked(true);
+        setLikeCount((n) => n + 1);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    setLoadingLike(false);
+  }
+
+  function handleToggleComments(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!uid) {
+      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      setShowLoginBanner(true);
+      return;
+    }
+    setShowComments((v) => !v);
+  }
 
   async function handleDeletar(e: React.MouseEvent) {
     e.stopPropagation();
@@ -164,6 +229,7 @@ function SerieCardPublico({
           </span>
         </div>
       )}
+
       <div style={{ padding: serie.imagemUrl ? "0.875rem 1.125rem 0.875rem" : undefined }}>
         {!serie.imagemUrl && (
           <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
@@ -177,6 +243,7 @@ function SerieCardPublico({
             </span>
           </div>
         )}
+
         <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
           {serie.imagemUrl && (
             <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
@@ -188,35 +255,79 @@ function SerieCardPublico({
           </h2>
           {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
         </div>
+
+        {/* BannerLogin */}
+        {showLoginBanner && (
+          <div style={{ padding: "0 0 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+            <BannerLogin onClose={() => setShowLoginBanner(false)} />
+          </div>
+        )}
+
+        {/* Rodapé */}
         <div
           className="card-footer-row"
-          style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+          style={{ display: "flex", alignItems: "center", gap: "0" }}
           onClick={(e) => e.stopPropagation()}
         >
-          {isOwner && (
-            <>
-              <button
-                onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
-                className="post-btn-edit"
-                style={{ fontSize: "0.78rem", padding: "5px 12px" }}
-              >
-                ✏ Editar
-              </button>
-              <button
-                onClick={handleDeletar}
-                className="post-btn-delete"
-                style={{ fontSize: "0.78rem", padding: "5px 12px" }}
-              >
-                🗑 Apagar
-              </button>
-            </>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            {/* Botões de dono */}
+            {isOwner && (
+              <div style={{ display: "flex", gap: "0.5rem", marginRight: "4px" }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
+                  className="post-btn-edit"
+                  style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+                >
+                  ✏ Editar
+                </button>
+                <button
+                  onClick={handleDeletar}
+                  className="post-btn-delete"
+                  style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+                >
+                  🗑 Apagar
+                </button>
+              </div>
+            )}
 
-          {!isOwner && (
-            <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>
-              Coleção temática de sermões e estudos
-            </span>
-          )}
+            {/* Curtir */}
+            <button
+              className={`action-btn ${liked ? "liked" : ""}`}
+              onClick={handleLike}
+              disabled={loadingLike}
+              title={uid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
+              style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
+            >
+              <IconHeart size={13} filled={liked} />
+              Amei
+              {likeCount > 0 && (
+                <span style={{ fontSize: "0.72rem", color: liked ? "inherit" : "var(--emerald)", fontWeight: 700 }}>
+                  {likeCount}
+                </span>
+              )}
+            </button>
+
+            {/* Comentários */}
+            <button
+              onClick={handleToggleComments}
+              title="Ver comentários"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: "4px",
+                padding: 0, background: "none", border: "none",
+                color: showComments ? "var(--emerald)" : "var(--text-3)",
+                cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
+                transition: "color 0.15s",
+              }}
+            >
+              <IconComment size={13} active={showComments} />
+              Comentários
+              {commentCount > 0 && (
+                <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>
+                  {commentCount}
+                </span>
+              )}
+            </button>
+          </div>
 
           <span
             className="read-link"
@@ -227,6 +338,21 @@ function SerieCardPublico({
           </span>
         </div>
       </div>
+
+      {/* Painel de comentários */}
+      {showComments && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            borderTop: "1px solid var(--border-light)",
+            padding: "1.25rem 1.125rem 1.5rem",
+            background: "var(--bg-elevated)",
+            borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
+          }}
+        >
+          <CommentSection postId={serie.id} onCountChange={setCommentCount} />
+        </div>
+      )}
     </article>
   );
 }
@@ -250,6 +376,7 @@ function PostCardPerfil({
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
   const [showLoginBanner, setShowLoginBanner] = useState(false);
+  const [showComments, setShowComments] = useState(false);
 
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
@@ -355,7 +482,6 @@ function PostCardPerfil({
             {ownerButtons}
           </div>
         )}
-
         <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike}
           disabled={loadingLike}
           title={currentUid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
@@ -363,6 +489,29 @@ function PostCardPerfil({
           <IconHeart size={13} filled={liked} />
           Amei
           {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!currentUid) { setShowLoginBanner(true); return; }
+            setShowComments((v) => !v);
+          }}
+          title="Ver comentários"
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "4px",
+            padding: 0, background: "none", border: "none",
+            color: showComments ? "var(--emerald)" : "var(--text-3)",
+            cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
+            transition: "color 0.15s",
+          }}
+        >
+          <IconComment size={13} active={showComments} />
+          Comentários
+          {(post.commentCount ?? 0) > 0 && (
+            <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>
+              {post.commentCount}
+            </span>
+          )}
         </button>
         <button className="action-btn" onClick={handleDownloadPdf} disabled={gerandoPdf}
           title="Baixar como PDF"
@@ -385,6 +534,20 @@ function PostCardPerfil({
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
         Ler completo →
       </span>
+    </div>
+  );
+
+  const commentsPanel = showComments && (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        borderTop: "1px solid var(--border-light)",
+        padding: "1.25rem 1.125rem 1.5rem",
+        background: "var(--bg-elevated)",
+        borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
+      }}
+    >
+      <CommentSection postId={post.id} />
     </div>
   );
 
@@ -420,6 +583,7 @@ function PostCardPerfil({
           )}
           {footerRow}
         </div>
+        {commentsPanel}
       </article>
     );
   }
@@ -449,6 +613,7 @@ function PostCardPerfil({
         </div>
       )}
       {footerRow}
+      {commentsPanel}
     </article>
   );
 }
@@ -480,12 +645,7 @@ function CardReflexaoComControles({
       <CardReflexao reflexao={reflexao} />
       {isOwner && (
         <div
-          style={{
-            display: "flex",
-            gap: "0.5rem",
-            padding: "0 1.125rem 0.875rem",
-            marginTop: "-0.25rem",
-          }}
+          style={{ display: "flex", gap: "0.5rem", padding: "0 1.125rem 0.875rem", marginTop: "-0.25rem" }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
@@ -521,7 +681,6 @@ export default function PerfilPublico() {
   const [reflexoes, setReflexoes] = useState<Reflexao[]>([]);
   const [aba, setAba] = useState<"posts" | "series" | "reflexoes">("posts");
   const [loading, setLoading] = useState(true);
-
   const [visitorUid, setVisitorUid] = useState<string | null>(null);
 
   const [toastMsg, setToastMsg] = useState("");
@@ -618,7 +777,6 @@ export default function PerfilPublico() {
               </div>
             </div>
           </div>
-
           {isOwner && (
             <div style={{ alignSelf: "flex-start" }}>
               <button className="post-btn-edit" onClick={() => router.push("/perfil")}>
@@ -635,16 +793,11 @@ export default function PerfilPublico() {
                 key={a}
                 onClick={() => setAba(a)}
                 style={{
-                  padding: "0.625rem 1.25rem",
-                  fontSize: "0.875rem",
-                  fontWeight: 600,
-                  background: "none",
-                  border: "none",
+                  padding: "0.625rem 1.25rem", fontSize: "0.875rem", fontWeight: 600,
+                  background: "none", border: "none",
                   borderBottom: aba === a ? "2px solid var(--emerald)" : "2px solid transparent",
                   color: aba === a ? "var(--emerald)" : "var(--text-3)",
-                  cursor: "pointer",
-                  transition: "all 0.15s",
-                  marginBottom: "-1px",
+                  cursor: "pointer", transition: "all 0.15s", marginBottom: "-1px",
                 }}
               >
                 {a === "posts" && `Publicações (${posts.length})`}
@@ -660,14 +813,9 @@ export default function PerfilPublico() {
               <div className="posts-list">
                 {posts.map((post, i) => (
                   <PostCardPerfil
-                    key={post.id}
-                    post={post}
-                    index={i}
-                    user={user}
-                    nomeExibicao={nomeExibicao}
-                    autorUid={uid!}
-                    isOwner={isOwner}
-                    onToast={showToast}
+                    key={post.id} post={post} index={i}
+                    user={user} nomeExibicao={nomeExibicao}
+                    autorUid={uid!} isOwner={isOwner} onToast={showToast}
                   />
                 ))}
               </div>
@@ -682,11 +830,8 @@ export default function PerfilPublico() {
               <div className="posts-list">
                 {series.map((serie, i) => (
                   <SerieCardPublico
-                    key={serie.id}
-                    serie={serie}
-                    index={i}
-                    isOwner={isOwner}
-                    onToast={showToast}
+                    key={serie.id} serie={serie} index={i}
+                    isOwner={isOwner} onToast={showToast}
                   />
                 ))}
               </div>
@@ -701,11 +846,8 @@ export default function PerfilPublico() {
               <div className="posts-list">
                 {reflexoes.map((r, i) => (
                   <CardReflexaoComControles
-                    key={r.id ?? i}
-                    reflexao={r}
-                    index={i}
-                    isOwner={isOwner}
-                    onToast={showToast}
+                    key={r.id ?? i} reflexao={r} index={i}
+                    isOwner={isOwner} onToast={showToast}
                   />
                 ))}
               </div>
@@ -717,26 +859,14 @@ export default function PerfilPublico() {
       <style>{`
         .post-card-image { cursor: pointer; }
         .card-cover-wrapper {
-          position: relative; width: 100%;
-          max-height: 420px; min-height: 160px;
-          overflow: hidden;
-          border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-          background: #0d1310;
-          display: flex; align-items: center; justify-content: center;
+          position: relative; width: 100%; max-height: 420px; min-height: 160px;
+          overflow: hidden; border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+          background: #0d1310; display: flex; align-items: center; justify-content: center;
         }
-        .card-cover-img {
-          width: 100%; height: 100%;
-          object-fit: contain; display: block;
-          max-height: 420px;
-          transition: transform 0.35s ease;
-        }
+        .card-cover-img { width: 100%; height: 100%; object-fit: contain; display: block; max-height: 420px; transition: transform 0.35s ease; }
         .post-card-image:hover .card-cover-img { transform: scale(1.025); }
         .serie-card:hover .card-cover-img { transform: scale(1.025); }
-        .card-cover-badge {
-          position: absolute; top: 0.625rem; right: 0.75rem;
-          backdrop-filter: blur(6px);
-          background: rgba(10, 15, 10, 0.72) !important;
-        }
+        .card-cover-badge { position: absolute; top: 0.625rem; right: 0.75rem; backdrop-filter: blur(6px); background: rgba(10, 15, 10, 0.72) !important; }
         .card-image-content { display: flex; flex-direction: column; }
         @media (max-width: 640px) {
           .card-cover-wrapper { max-height: 320px; min-height: 120px; }

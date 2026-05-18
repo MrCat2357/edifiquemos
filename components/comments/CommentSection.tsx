@@ -7,9 +7,22 @@ import BannerLogin from "@/components/BannerLogin";
 import { useState, useEffect } from "react";
 import { doc, getDoc } from "firebase/firestore";
 
-type Props = { postId: string; onCountChange?: (n: number) => void };
+type Props = {
+  postId: string;
+  onCountChange?: (n: number) => void;
+  /**
+   * Coleção raiz onde os comentários estão armazenados.
+   * "posts"     → /posts/{postId}/comments     (padrão, retrocompatível)
+   * "reflexoes" → /reflexoes/{postId}/comments
+   */
+  collectionRoot?: "posts" | "reflexoes";
+};
 
-export default function CommentSection({ postId, onCountChange }: Props) {
+export default function CommentSection({
+  postId,
+  onCountChange,
+  collectionRoot = "posts",
+}: Props) {
   const { user } = useAuth();
   const {
     comments,
@@ -23,7 +36,7 @@ export default function CommentSection({ postId, onCountChange }: Props) {
     editComment,
     deleteComment,
     toggleLike,
-  } = useComments(postId);
+  } = useComments(postId, collectionRoot);
   const [showBanner, setShowBanner] = useState(false);
   const currentUserId = auth.currentUser?.uid ?? null;
 
