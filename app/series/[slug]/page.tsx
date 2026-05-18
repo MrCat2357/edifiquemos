@@ -415,7 +415,7 @@ function PostCardSerie({
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      localStorage.setItem("redirect-after-auth", window.location.href);
       setShowLoginBanner(true);
       return;
     }
@@ -481,7 +481,7 @@ function PostCardSerie({
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      localStorage.setItem("redirect-after-auth", window.location.href);
       setShowLoginBanner(true);
       return;
     }
@@ -886,7 +886,7 @@ export default function SeriePage() {
   // ── curtir/descurtir a série ──
   async function handleSerieLike() {
     if (!uid) {
-      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      localStorage.setItem("redirect-after-auth", window.location.href);
       setShowSerieLoginBanner(true);
       return;
     }
@@ -1143,7 +1143,7 @@ export default function SeriePage() {
             <button
               onClick={() => {
                 if (!uid) {
-                  sessionStorage.setItem(
+                  localStorage.setItem(
                     "redirect-after-auth",
                     window.location.href
                   );

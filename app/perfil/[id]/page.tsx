@@ -166,7 +166,7 @@ function SerieCardPublico({
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      localStorage.setItem("redirect-after-auth", window.location.href);
       setShowLoginBanner(true);
       return;
     }
@@ -192,7 +192,7 @@ function SerieCardPublico({
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      localStorage.setItem("redirect-after-auth", window.location.href);
       setShowLoginBanner(true);
       return;
     }

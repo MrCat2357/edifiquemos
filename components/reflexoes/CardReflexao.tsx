@@ -123,7 +123,7 @@ export default function CardReflexao({ reflexao, hideActions = false }: Props) {
 
     if (!uid) {
       if (typeof window !== "undefined")
-        sessionStorage.setItem("redirect-after-auth", window.location.href);
+        localStorage.setItem("redirect-after-auth", window.location.href);
       setShowLoginBanner(true);
       return;
     }
