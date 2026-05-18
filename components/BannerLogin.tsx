@@ -24,7 +24,7 @@ export default function BannerLogin({
   redirectTo?: string;
 }) {
   const href = redirectTo
-    ? `/entrar?redirect=${encodeURIComponent(redirectTo)}`
+    ? `/entrar?next=${encodeURIComponent(redirectTo)}`
     : "/entrar";
 
   return (
