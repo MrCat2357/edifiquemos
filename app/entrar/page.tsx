@@ -132,20 +132,26 @@ function EntrarForm() {
 
   // ── utilitário de redirecionamento pós-auth ──────────────────────────────
   function redirecionarAposAuth() {
-    const raw = sessionStorage.getItem("redirect-after-auth");
-    sessionStorage.removeItem("redirect-after-auth");
+  const raw = sessionStorage.getItem("redirect-after-auth");
+  sessionStorage.removeItem("redirect-after-auth");
 
-    if (raw) {
-      try {
-        const url = new URL(raw);
+  if (raw) {
+    try {
+      const url = new URL(raw);
+      if (!url.pathname.startsWith("/entrar")) {
         router.push(url.pathname + url.search + url.hash);
-      } catch {
-        router.push(raw);
+        return;
       }
-    } else {
-      router.push("/");
+    } catch {
+      if (!raw.startsWith("/entrar")) {
+        router.push(raw);
+        return;
+      }
     }
   }
+
+  router.push("/");
+}
 
   // ── passo 1: verificar email ─────────────────────────────────────────────
 
