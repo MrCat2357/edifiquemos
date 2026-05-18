@@ -920,11 +920,12 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   }
 
   async function handleLike() {
-    const uid = auth.currentUser?.uid;
-    if (!uid) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-      return;
-    }
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    const destino = window.location.pathname + window.location.search;
+    router.push(`/entrar?next=${encodeURIComponent(destino)}`);
+    return;
+  }
     if (loadingLike) return;
     setLoadingLike(true);
     try {

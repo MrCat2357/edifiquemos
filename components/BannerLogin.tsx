@@ -1,20 +1,6 @@
 "use client";
-
 import Link from "next/link";
-
-/**
- * BannerLogin
- * Exibido quando um visitante não logado tenta curtir ou comentar.
- * Uso:
- *   const [showLoginBanner, setShowLoginBanner] = useState(false);
- *   ...
- *   {showLoginBanner && (
- *     <BannerLogin
- *       onClose={() => setShowLoginBanner(false)}
- *       redirectTo="/perfil"   ← opcional: para onde voltar após login
- *     />
- *   )}
- */
+import { usePathname, useSearchParams } from "next/navigation";
 
 export default function BannerLogin({
   onClose,
@@ -23,8 +9,14 @@ export default function BannerLogin({
   onClose: () => void;
   redirectTo?: string;
 }) {
-  const href = redirectTo
-    ? `/entrar?next=${encodeURIComponent(redirectTo)}`
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const qs = searchParams.toString();
+  const currentPath = qs ? `${pathname}?${qs}` : pathname;
+
+  const destino = redirectTo ?? currentPath;
+  const href = destino && destino !== "/" && !destino.startsWith("/entrar")
+    ? `/entrar?next=${encodeURIComponent(destino)}`
     : "/entrar";
 
   return (

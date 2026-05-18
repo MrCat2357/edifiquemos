@@ -31,11 +31,15 @@ async function gerarSlugUnico(base: string, uidAtual: string): Promise<string> {
   const baseSlug = slugify(base);
   let candidato = baseSlug;
   let contador = 1;
+
   while (true) {
     const q = query(collection(db, "users"), where("slug", "==", candidato));
     const snap = await getDocs(q);
-    if (snap.empty || (snap.size === 1 && snap.docs[0].id === uidAtual))
+
+    if (snap.empty || (snap.size === 1 && snap.docs[0].id === uidAtual)) {
       return candidato;
+    }
+
     contador += 1;
     candidato = `${baseSlug}-${contador}`;
   }
@@ -58,7 +62,7 @@ type DadosGoogle = {
   fotoUrl: string | null;
 };
 
-// ─── componente interno (usa useSearchParams) ────────────────────────────────
+// ─── componente interno ─────────────────────────────────────────────────────
 
 function EntrarForm() {
   const router = useRouter();
@@ -77,62 +81,101 @@ function EntrarForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // ── Resolve para onde redirecionar após auth ─────────────────────────────
-  // Ordem de prioridade:
-  //   1. ?next= na URL atual (fluxo normal popup ou link direto)
-  //   2. sessionStorage "auth-next" (sobrevive ao redirect OAuth na mesma aba)
-  //   3. localStorage "redirect-after-auth" (fallback legado)
-  //   4. "/" (home)
+  // ─────────────────────────────────────────────────────────────
+  // Resolve destino pós-auth
+  // ─────────────────────────────────────────────────────────────
+
   function getNextUrl(): string {
-    // 1. parâmetro ?next= na URL
-    const next = searchParams.get("next");
-    if (next && !next.startsWith("/entrar")) return next;
+  const next = searchParams.get("next");
 
-    // 2. sessionStorage — persiste durante o redirect OAuth (mesma aba)
-    try {
-      const saved = sessionStorage.getItem("auth-next");
-      if (saved && !saved.startsWith("/entrar")) return saved;
-    } catch {
-      // sessionStorage indisponível (raro)
-    }
+  console.log("URL next =", next);
 
-    // 3. localStorage — fallback legado
-    try {
-      const raw = localStorage.getItem("redirect-after-auth");
-      if (raw) {
-        const pathname = raw.startsWith("http")
-          ? new URL(raw).pathname + new URL(raw).search
-          : raw;
-        if (!pathname.startsWith("/entrar")) return pathname;
-      }
-    } catch {
-      // localStorage indisponível (modo privado extremo)
-    }
-
-    return "/";
+  if (
+    next &&
+    next !== "/" &&
+    !next.startsWith("/entrar")
+  ) {
+    console.log("RETORNANDO URL");
+    return next;
   }
 
-  // ── utilitário de redirecionamento pós-auth ──────────────────────────────
-  function redirecionarAposAuth() {
-    // Limpa ambos os storages antes de ler o destino para evitar reuso
+  try {
+    const saved = sessionStorage.getItem("auth-next");
+
+    console.log("SESSION =", saved);
+
+    if (
+      saved &&
+      saved !== "/" &&
+      !saved.startsWith("/entrar")
+    ) {
+      console.log("RETORNANDO SESSION");
+      return saved;
+    }
+  } catch {}
+
+  try {
+    const saved = localStorage.getItem("redirect-after-auth");
+
+    console.log("LOCAL =", saved);
+
+    if (
+      saved &&
+      saved !== "/" &&
+      !saved.startsWith("/entrar")
+    ) {
+      console.log("RETORNANDO LOCAL");
+      return saved;
+    }
+  } catch {}
+
+  console.log("RETORNANDO HOME");
+
+  return "/";
+}
+
+  function salvarDestinoAuth() {
+  const next = searchParams.get("next");
+  if (!next || next === "/" || next.startsWith("/entrar")) return;
+  try {
+    sessionStorage.setItem("auth-next", next);
+    localStorage.setItem("redirect-after-auth", next);
+  } catch {}
+}
+
+  function limparRedirectStorage() {
     try {
       sessionStorage.removeItem("auth-next");
       localStorage.removeItem("redirect-after-auth");
-    } catch {
-      // ignora
-    }
-    const destino = getNextUrl();
-    router.push(destino);
+    } catch {}
   }
 
-  // ── Captura o resultado do redirect (mobile) ao montar ──────────────────
+  function redirecionarAposAuth() {
+  const destino = getNextUrl();
+
+  console.log("DESTINO FINAL =", destino);
+
+  try {
+    sessionStorage.removeItem("auth-next");
+    localStorage.removeItem("redirect-after-auth");
+  } catch {}
+
+  window.location.href = destino;
+}
+
+  // ─────────────────────────────────────────────────────────────
+  // Captura resultado do redirect OAuth (mobile)
+  // ─────────────────────────────────────────────────────────────
+
   useEffect(() => {
     async function verificarRedirectResult() {
       try {
         const result = await getRedirectResult(auth);
+
         if (!result) return;
 
         const user = result.user;
+
         const userRef = doc(db, "users", user.uid);
         const userSnap = await getDoc(userRef);
 
@@ -147,6 +190,7 @@ function EntrarForm() {
           email: user.email ?? "",
           fotoUrl: user.photoURL ?? null,
         });
+
         setAceitouTermos(false);
         setEtapa("termos-google");
       } catch (err: any) {
@@ -155,33 +199,41 @@ function EntrarForm() {
             auth,
             err.customData?.email ?? ""
           );
+
           if (methods.includes("password")) {
             setEtapa("senha");
+
             setError(
-              "Sua conta usa senha. Entre com sua senha e depois poderá " +
-              "vincular o Google nas configurações."
+              "Sua conta usa senha. Entre com sua senha e depois poderá vincular o Google nas configurações."
             );
+
             return;
           }
         }
+
         console.error(err);
         setError("Erro ao entrar com Google. Tente novamente.");
       }
     }
 
     verificarRedirectResult();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── passo 1: verificar email ─────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Verificar email
+  // ─────────────────────────────────────────────────────────────
 
   async function handleVerificarEmail(e: React.FormEvent) {
     e.preventDefault();
+
     setError("");
     setLoading(true);
 
     try {
       const existe = await emailExisteNoFirestore(email);
+
       setEtapa(existe ? "senha" : "cadastro");
     } catch {
       setError("Erro ao verificar o email. Tente novamente.");
@@ -190,15 +242,19 @@ function EntrarForm() {
     setLoading(false);
   }
 
-  // ── passo 2a: login com senha ────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Login senha
+  // ─────────────────────────────────────────────────────────────
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
+
     setError("");
     setLoading(true);
 
     try {
       await signInWithEmailAndPassword(auth, email, senha);
+
       redirecionarAposAuth();
     } catch (err: any) {
       if (
@@ -216,24 +272,43 @@ function EntrarForm() {
     setLoading(false);
   }
 
-  // ── passo 2b: cadastro por email ─────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Cadastro email
+  // ─────────────────────────────────────────────────────────────
 
   async function handleCadastro(e: React.FormEvent) {
     e.preventDefault();
+
     setError("");
 
-    if (!nome.trim()) { setError("O nome é obrigatório."); return; }
-    if (senha.length < 6) { setError("A senha deve ter pelo menos 6 caracteres."); return; }
-    if (!aceitouTermos) { setError("Você precisa aceitar os termos de uso."); return; }
+    if (!nome.trim()) {
+      setError("O nome é obrigatório.");
+      return;
+    }
+
+    if (senha.length < 6) {
+      setError("A senha deve ter pelo menos 6 caracteres.");
+      return;
+    }
+
+    if (!aceitouTermos) {
+      setError("Você precisa aceitar os termos de uso.");
+      return;
+    }
 
     setLoading(true);
 
     try {
       const cred = await createUserWithEmailAndPassword(auth, email, senha);
+
       const user = cred.user;
 
       const slug = await gerarSlugUnico(nome.trim(), user.uid);
-      await updateProfile(user, { displayName: nome.trim() });
+
+      await updateProfile(user, {
+        displayName: nome.trim(),
+      });
+
       await setDoc(doc(db, "users", user.uid), {
         nome: nome.trim(),
         titulo: "",
@@ -248,7 +323,10 @@ function EntrarForm() {
     } catch (err: any) {
       if (err.code === "auth/email-already-in-use") {
         setEtapa("senha");
-        setError("Este email já tem uma senha cadastrada. Entre com ela abaixo.");
+
+        setError(
+          "Este email já tem uma senha cadastrada. Entre com ela abaixo."
+        );
       } else {
         setError("Erro ao criar conta. Tente novamente.");
       }
@@ -257,47 +335,60 @@ function EntrarForm() {
     setLoading(false);
   }
 
-  // ── Google ───────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Google
+  // ─────────────────────────────────────────────────────────────
 
   async function handleGoogle() {
     setError("");
     setLoading(true);
 
+    // salva destino ANTES do OAuth
+    salvarDestinoAuth();
+
     const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: "select_account" });
+
+    provider.setCustomParameters({
+      prompt: "select_account",
+    });
 
     try {
       let result;
+
       try {
         result = await signInWithPopup(auth, provider);
       } catch (popupErr: any) {
+  console.log("[GOOGLE] popupErr.code =", popupErr.code);
+  console.log("[GOOGLE] popupErr.message =", popupErr.message);
+
+  if (
+    popupErr.code === "auth/popup-blocked" ||
+    popupErr.code === "auth/cancelled-popup-request" ||
+    popupErr.message?.includes("Cross-Origin-Opener-Policy") ||
+    popupErr.message?.includes("window.closed")
+  ) {
+    console.log("[GOOGLE] caindo no signInWithRedirect");
+    console.log("[GOOGLE] storage antes do redirect:", sessionStorage.getItem("auth-next"));
+    await signInWithRedirect(auth, provider);
+    return;
+  }
+
         if (
-          popupErr.code === "auth/popup-blocked" ||
-          popupErr.code === "auth/cancelled-popup-request"
+          popupErr.code ===
+          "auth/account-exists-with-different-credential"
         ) {
-          // Salva o destino no sessionStorage antes do redirect OAuth.
-          // O sessionStorage sobrevive ao redirect (mesma aba) ao contrário
-          // do ?next= que se perde quando o Google redireciona de volta.
-          const next = getNextUrl();
-          try {
-            sessionStorage.setItem("auth-next", next);
-          } catch {
-            // ignora — getNextUrl() ainda tentará o localStorage como fallback
-          }
-          await signInWithRedirect(auth, provider);
-          return;
-        }
-        if (popupErr.code === "auth/account-exists-with-different-credential") {
           const methods = await fetchSignInMethodsForEmail(
             auth,
             popupErr.customData?.email ?? email
           );
+
           if (methods.includes("password")) {
             setEtapa("senha");
+
             setError(
-              "Sua conta usa senha. Entre com sua senha e depois poderá " +
-              "vincular o Google nas configurações."
+              "Sua conta usa senha. Entre com sua senha e depois poderá vincular o Google nas configurações."
             );
+
             setLoading(false);
             return;
           }
@@ -307,11 +398,13 @@ function EntrarForm() {
         } else {
           throw popupErr;
         }
+
         setLoading(false);
         return;
       }
 
       const user = result.user;
+
       const userRef = doc(db, "users", user.uid);
       const userSnap = await getDoc(userRef);
 
@@ -326,20 +419,25 @@ function EntrarForm() {
         email: user.email ?? "",
         fotoUrl: user.photoURL ?? null,
       });
+
       setAceitouTermos(false);
       setEtapa("termos-google");
     } catch (err: any) {
       console.error(err);
+
       setError("Erro ao entrar com Google. Tente novamente.");
     }
 
     setLoading(false);
   }
 
-  // ── passo final: confirmar termos e criar doc (Google) ───────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Finalizar cadastro Google
+  // ─────────────────────────────────────────────────────────────
 
   async function handleConfirmarTermosGoogle(e: React.FormEvent) {
     e.preventDefault();
+
     setError("");
 
     if (!aceitouTermos) {
@@ -348,10 +446,15 @@ function EntrarForm() {
     }
 
     if (!dadosGoogle) return;
+
     setLoading(true);
 
     try {
-      const slug = await gerarSlugUnico(dadosGoogle.nome, dadosGoogle.uid);
+      const slug = await gerarSlugUnico(
+        dadosGoogle.nome,
+        dadosGoogle.uid
+      );
+
       await setDoc(doc(db, "users", dadosGoogle.uid), {
         nome: dadosGoogle.nome,
         titulo: "",
@@ -365,13 +468,16 @@ function EntrarForm() {
       redirecionarAposAuth();
     } catch (err) {
       console.error(err);
+
       setError("Erro ao finalizar o cadastro. Tente novamente.");
     }
 
     setLoading(false);
   }
 
-  // ── render ────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────
 
   const subtitulos: Record<Etapa, string> = {
     email: "Bem-vindo! Digite seu email para começar.",
@@ -395,6 +501,7 @@ function EntrarForm() {
             ? "Criar sua conta"
             : "Entrar na sua conta"}
         </h1>
+
         <p className="auth-subtitle">{subtitulos[etapa]}</p>
 
         {/* ── ETAPA: EMAIL ── */}
@@ -402,6 +509,7 @@ function EntrarForm() {
           <form onSubmit={handleVerificarEmail} className="auth-form">
             <div className="auth-field">
               <label className="auth-label">Email</label>
+
               <input
                 type="email"
                 placeholder="seu@email.com"
@@ -413,31 +521,48 @@ function EntrarForm() {
               />
             </div>
 
-            {error && <div className="auth-error"><p>{error}</p></div>}
+            {error && (
+              <div className="auth-error">
+                <p>{error}</p>
+              </div>
+            )}
 
-            <button type="submit" disabled={loading} className="auth-btn-primary">
+            <button
+              type="submit"
+              disabled={loading}
+              className="auth-btn-primary"
+            >
               {loading ? "Verificando..." : "Continuar"}
             </button>
 
             <div className="auth-divider">
-              <span /><p>ou continue com</p><span />
+              <span />
+              <p>ou continue com</p>
+              <span />
             </div>
 
             <GoogleBtn onClick={handleGoogle} loading={loading} />
           </form>
         )}
 
-        {/* ── ETAPA: SENHA (login) ── */}
+        {/* ── ETAPA: SENHA ── */}
         {etapa === "senha" && (
           <form onSubmit={handleLogin} className="auth-form">
+
             <div className="auth-field">
               <label className="auth-label">Email</label>
+
               <div className="auth-email-readonly">
                 <span>{email}</span>
+
                 <button
                   type="button"
                   className="auth-link"
-                  onClick={() => { setEtapa("email"); setError(""); setSenha(""); }}
+                  onClick={() => {
+                    setEtapa("email");
+                    setError("");
+                    setSenha("");
+                  }}
                 >
                   Trocar
                 </button>
@@ -446,6 +571,7 @@ function EntrarForm() {
 
             <div className="auth-field">
               <label className="auth-label">Senha</label>
+
               <div className="auth-input-wrapper">
                 <input
                   type={showSenha ? "text" : "password"}
@@ -456,6 +582,7 @@ function EntrarForm() {
                   autoFocus
                   required
                 />
+
                 <button
                   type="button"
                   onClick={() => setShowSenha(!showSenha)}
@@ -466,31 +593,50 @@ function EntrarForm() {
               </div>
             </div>
 
-            {error && <div className="auth-error"><p>{error}</p></div>}
+            {error && (
+              <div className="auth-error">
+                <p>{error}</p>
+              </div>
+            )}
 
-            <button type="submit" disabled={loading} className="auth-btn-primary">
+            <button
+              type="submit"
+              disabled={loading}
+              className="auth-btn-primary"
+            >
               {loading ? "Entrando..." : "Entrar"}
             </button>
 
             <div className="auth-links" style={{ marginTop: "0.5rem" }}>
-              <Link href={`/esqueci-senha?email=${encodeURIComponent(email)}`} className="auth-link">
+              <Link
+                href={`/esqueci-senha?email=${encodeURIComponent(email)}`}
+                className="auth-link"
+              >
                 Esqueci a senha
               </Link>
             </div>
           </form>
         )}
 
-        {/* ── ETAPA: CADASTRO (email) ── */}
+        {/* ── ETAPA: CADASTRO ── */}
         {etapa === "cadastro" && (
           <form onSubmit={handleCadastro} className="auth-form">
+
             <div className="auth-field">
               <label className="auth-label">Email</label>
+
               <div className="auth-email-readonly">
                 <span>{email}</span>
+
                 <button
                   type="button"
                   className="auth-link"
-                  onClick={() => { setEtapa("email"); setError(""); setSenha(""); setNome(""); }}
+                  onClick={() => {
+                    setEtapa("email");
+                    setError("");
+                    setSenha("");
+                    setNome("");
+                  }}
                 >
                   Trocar
                 </button>
@@ -499,6 +645,7 @@ function EntrarForm() {
 
             <div className="auth-field">
               <label className="auth-label">Nome completo</label>
+
               <input
                 type="text"
                 placeholder="Seu nome completo"
@@ -512,6 +659,7 @@ function EntrarForm() {
 
             <div className="auth-field">
               <label className="auth-label">Senha</label>
+
               <div className="auth-input-wrapper">
                 <input
                   type={showSenha ? "text" : "password"}
@@ -521,6 +669,7 @@ function EntrarForm() {
                   onChange={(e) => setSenha(e.target.value)}
                   required
                 />
+
                 <button
                   type="button"
                   onClick={() => setShowSenha(!showSenha)}
@@ -538,6 +687,7 @@ function EntrarForm() {
                 onChange={(e) => setAceitouTermos(e.target.checked)}
                 className="auth-checkbox"
               />
+
               <span>
                 Li e aceito os{" "}
                 <Link href="/termos" className="auth-link">
@@ -546,43 +696,82 @@ function EntrarForm() {
               </span>
             </label>
 
-            {error && <div className="auth-error"><p>{error}</p></div>}
+            {error && (
+              <div className="auth-error">
+                <p>{error}</p>
+              </div>
+            )}
 
-            <button type="submit" disabled={loading} className="auth-btn-primary">
+            <button
+              type="submit"
+              disabled={loading}
+              className="auth-btn-primary"
+            >
               {loading ? "Criando conta..." : "Criar conta"}
             </button>
 
             <div className="auth-divider">
-              <span /><p>ou cadastre-se com</p><span />
+              <span />
+              <p>ou cadastre-se com</p>
+              <span />
             </div>
+
             <GoogleBtn onClick={handleGoogle} loading={loading} />
           </form>
         )}
 
-        {/* ── ETAPA: TERMOS (Google — primeiro acesso) ── */}
+        {/* ── ETAPA: TERMOS GOOGLE ── */}
         {etapa === "termos-google" && dadosGoogle && (
-          <form onSubmit={handleConfirmarTermosGoogle} className="auth-form">
+          <form
+            onSubmit={handleConfirmarTermosGoogle}
+            className="auth-form"
+          >
 
-            <div style={{
-              display: "flex", alignItems: "center", gap: "0.75rem",
-              padding: "0.75rem 1rem",
-              background: "var(--bg-elevated)",
-              border: "1px solid var(--border-light)",
-              borderRadius: "var(--radius-lg)",
-              marginBottom: "0.25rem",
-            }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.75rem",
+                padding: "0.75rem 1rem",
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--border-light)",
+                borderRadius: "var(--radius-lg)",
+                marginBottom: "0.25rem",
+              }}
+            >
               {dadosGoogle.fotoUrl && (
                 <img
                   src={dadosGoogle.fotoUrl}
                   alt={dadosGoogle.nome}
-                  style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: "50%",
+                    objectFit: "cover",
+                    flexShrink: 0,
+                  }}
                 />
               )}
+
               <div>
-                <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-1)", margin: 0 }}>
+                <p
+                  style={{
+                    fontSize: "0.875rem",
+                    fontWeight: 600,
+                    color: "var(--text-1)",
+                    margin: 0,
+                  }}
+                >
                   {dadosGoogle.nome}
                 </p>
-                <p style={{ fontSize: "0.78rem", color: "var(--text-3)", margin: 0 }}>
+
+                <p
+                  style={{
+                    fontSize: "0.78rem",
+                    color: "var(--text-3)",
+                    margin: 0,
+                  }}
+                >
                   {dadosGoogle.email}
                 </p>
               </div>
@@ -595,25 +784,47 @@ function EntrarForm() {
                 onChange={(e) => setAceitouTermos(e.target.checked)}
                 className="auth-checkbox"
               />
+
               <span>
                 Li e aceito os{" "}
-                <Link href="/termos" className="auth-link" target="_blank">
+                <Link
+                  href="/termos"
+                  className="auth-link"
+                  target="_blank"
+                >
                   Termos de Uso
                 </Link>
               </span>
             </label>
 
-            {error && <div className="auth-error"><p>{error}</p></div>}
+            {error && (
+              <div className="auth-error">
+                <p>{error}</p>
+              </div>
+            )}
 
-            <button type="submit" disabled={loading} className="auth-btn-primary">
+            <button
+              type="submit"
+              disabled={loading}
+              className="auth-btn-primary"
+            >
               {loading ? "Finalizando..." : "Concluir cadastro"}
             </button>
 
             <button
               type="button"
               className="auth-link"
-              style={{ marginTop: "0.5rem", fontSize: "0.8rem", textAlign: "center" }}
-              onClick={() => { setEtapa("email"); setDadosGoogle(null); setAceitouTermos(false); setError(""); }}
+              style={{
+                marginTop: "0.5rem",
+                fontSize: "0.8rem",
+                textAlign: "center",
+              }}
+              onClick={() => {
+                setEtapa("email");
+                setDadosGoogle(null);
+                setAceitouTermos(false);
+                setError("");
+              }}
             >
               Cancelar e voltar
             </button>
@@ -625,7 +836,7 @@ function EntrarForm() {
   );
 }
 
-// ─── botão Google reutilizável ────────────────────────────────────────────────
+// ─── botão Google reutilizável ──────────────────────────────────────────────
 
 function GoogleBtn({
   onClick,
@@ -659,19 +870,22 @@ function GoogleBtn({
           fill="#EA4335"
         />
       </svg>
+
       Continuar com Google
     </button>
   );
 }
 
-// ─── export com Suspense ──────────────────────────────────────────────────────
+// ─── export ─────────────────────────────────────────────────────────────────
 
 export default function EntrarPage() {
   return (
     <Suspense
       fallback={
         <div className="auth-page">
-          <div className="auth-card">Carregando...</div>
+          <div className="auth-card">
+            Carregando...
+          </div>
         </div>
       }
     >

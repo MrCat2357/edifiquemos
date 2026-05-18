@@ -769,7 +769,12 @@ function HomePageContent() {
             {user ? (
               <Link href="/criar-post" className="btn-hero-secondary">Publicar Sermão ou Estudo</Link>
             ) : (
-              <Link href="/entrar" className="btn-hero-secondary">Entrar para Publicar</Link>
+              <Link
+  href="/entrar?next=%2F"
+  className="btn-hero-secondary"
+>
+  Entrar para Publicar
+</Link>
             )}
           </div>
         </div>
