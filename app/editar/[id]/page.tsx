@@ -1,888 +1,688 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { db, auth } from "@/lib/firebase";
+import { Suspense, useState, useEffect } from "react";
 import {
-  getStorage,
-  ref as storageRef,
-  uploadBytesResumable,
-  getDownloadURL,
-  deleteObject,
-} from "firebase/storage";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { useParams, useRouter } from "next/navigation";
-import FileImportButton from "@/components/Button";
-import type { LinkReferencia } from "@/components/LinksReferencia";
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
+  GoogleAuthProvider,
+  fetchSignInMethodsForEmail,
+} from "firebase/auth";
+import { auth, db } from "@/lib/firebase";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+} from "firebase/firestore";
+import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { slugify } from "@/lib/slugify";
 
-/* ── Opções de tipo de link ─────────────────────────── */
+// ─── helpers ────────────────────────────────────────────────────────────────
 
-const TIPO_LINK_OPTIONS: { value: LinkReferencia["tipo"]; label: string; icon: string }[] = [
-  { value: "youtube", label: "YouTube",    icon: "▶" },
-  { value: "blog",    label: "Blog / Site", icon: "✍" },
-  { value: "livro",   label: "Livro",      icon: "📖" },
-  { value: "site",    label: "Site",       icon: "🌐" },
-  { value: "outro",   label: "Outro",      icon: "🔗" },
-];
-
-/* ── Upload helper ──────────────────────────────────── */
-
-async function uploadImagem(
-  file: File,
-  uid: string,
-  onProgress: (p: number) => void
-): Promise<string> {
-  const storage = getStorage();
-  const ext  = file.name.split(".").pop() ?? "jpg";
-  const path = `capas/${uid}/${Date.now()}.${ext}`;
-  const sRef = storageRef(storage, path);
-  const task = uploadBytesResumable(sRef, file);
-
-  return new Promise((resolve, reject) => {
-    task.on(
-      "state_changed",
-      (snap) => onProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
-      reject,
-      async () => resolve(await getDownloadURL(task.snapshot.ref))
-    );
-  });
-}
-
-/* Tenta deletar a imagem antiga do Storage (falha silenciosa) */
-async function tentarDeletarImagem(url: string) {
-  try {
-    const storage = getStorage();
-    const match = url.match(/\/o\/(.+?)\?/);
-    if (!match) return;
-    const path = decodeURIComponent(match[1]);
-    await deleteObject(storageRef(storage, path));
-  } catch {
-    /* ignora erros de deleção */
+async function gerarSlugUnico(base: string, uidAtual: string): Promise<string> {
+  const baseSlug = slugify(base);
+  let candidato = baseSlug;
+  let contador = 1;
+  while (true) {
+    const q = query(collection(db, "users"), where("slug", "==", candidato));
+    const snap = await getDocs(q);
+    if (snap.empty || (snap.size === 1 && snap.docs[0].id === uidAtual))
+      return candidato;
+    contador += 1;
+    candidato = `${baseSlug}-${contador}`;
   }
 }
 
-/* ── Componente de upload de imagem ─────────────────── */
-
-function ImageUpload({
-  file,
-  existingUrl,
-  onFileChange,
-  onRemoveExisting,
-}: {
-  file: File | null;
-  existingUrl: string | null;
-  onFileChange: (f: File) => void;
-  onRemoveExisting: () => void;
-}) {
-  const inputRef  = useRef<HTMLInputElement>(null);
-  const [preview, setPreview]  = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-
-  useEffect(() => {
-    if (!file) { setPreview(null); return; }
-    const url = URL.createObjectURL(file);
-    setPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
-
-  function handleFile(f: File) {
-    if (!f.type.startsWith("image/")) return;
-    if (f.size > 5 * 1024 * 1024) { alert("A imagem deve ter no máximo 5 MB."); return; }
-    onFileChange(f);
-  }
-
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault();
-    setDragOver(false);
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
-  }
-
-  /* Qual imagem mostrar: nova (preview) > existente > nenhuma */
-  const shown = preview ?? existingUrl ?? null;
-
-  if (shown) {
-    return (
-      <div
-        style={{
-          position: "relative",
-          borderRadius: "var(--radius-sm)",
-          overflow: "hidden",
-          border: "1px solid var(--border-light)",
-          /* CORREÇÃO: fundo neutro + flex para centralizar imagem de qualquer proporção */
-          background: "#0d1310",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          minHeight: "120px",
-        }}
-      >
-        <img
-          src={shown}
-          alt="Capa do post"
-          style={{
-            width: "100%",
-            /* CORREÇÃO: contain exibe a imagem completa; max-height evita cards enormes */
-            maxHeight: "380px",
-            objectFit: "contain",
-            display: "block",
-          }}
-        />
-
-        {/* Botão remover */}
-        <button
-          type="button"
-          onClick={preview ? () => { onRemoveExisting(); } : onRemoveExisting}
-          title="Remover imagem"
-          style={{
-            position: "absolute", top: "0.5rem", right: "0.5rem",
-            background: "rgba(10,15,10,0.75)", border: "1px solid var(--border-light)",
-            color: "var(--text-1)", borderRadius: "var(--radius-full)",
-            width: 28, height: 28, cursor: "pointer", fontSize: "0.85rem",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            backdropFilter: "blur(4px)", transition: "background 0.15s",
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.7)")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(10,15,10,0.75)")}
-        >
-          ✕
-        </button>
-
-        {/* Botão trocar */}
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          title="Trocar imagem"
-          style={{
-            position: "absolute", top: "0.5rem", right: "2.5rem",
-            background: "rgba(10,15,10,0.75)", border: "1px solid var(--border-light)",
-            color: "var(--text-2)", borderRadius: "var(--radius-full)",
-            fontSize: "0.68rem", fontWeight: 600, padding: "4px 10px",
-            cursor: "pointer", backdropFilter: "blur(4px)", transition: "background 0.15s",
-            whiteSpace: "nowrap",
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(16,185,129,0.5)")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(10,15,10,0.75)")}
-        >
-          Trocar
-        </button>
-
-        <div
-          style={{
-            position: "absolute", bottom: "0.5rem", left: "0.5rem",
-            background: "rgba(10,15,10,0.72)", border: "1px solid var(--emerald-dim)",
-            color: "var(--emerald)", fontSize: "0.68rem", fontWeight: 600,
-            padding: "2px 10px", borderRadius: "var(--radius-full)",
-            backdropFilter: "blur(4px)",
-          }}
-        >
-          {preview ? "Nova imagem" : "Imagem atual"}
-        </div>
-
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          style={{ display: "none" }}
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div
-      onClick={() => inputRef.current?.click()}
-      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={handleDrop}
-      style={{
-        border: `1.5px dashed ${dragOver ? "var(--emerald)" : "var(--border-light)"}`,
-        borderRadius: "var(--radius-sm)",
-        padding: "1.5rem",
-        textAlign: "center",
-        cursor: "pointer",
-        background: dragOver ? "var(--emerald-glow)" : "var(--bg)",
-        transition: "all 0.15s",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: "0.375rem",
-      }}
-    >
-      <span style={{ fontSize: "1.5rem" }}>🖼️</span>
-      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-2)" }}>
-        Arraste uma imagem ou{" "}
-        <span style={{ color: "var(--emerald)" }}>clique para selecionar</span>
-      </span>
-      <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>
-        JPG, PNG ou WEBP · máx. 5 MB · qualquer proporção
-      </span>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        style={{ display: "none" }}
-        onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
-      />
-    </div>
-  );
+async function emailExisteNoFirestore(email: string): Promise<boolean> {
+  const q = query(collection(db, "users"), where("email", "==", email));
+  const snap = await getDocs(q);
+  return !snap.empty;
 }
 
-/* ── Page ─────────────────────────────────────────────── */
+function isMobileDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+}
 
-export default function EditarPost() {
-  const params = useParams();
+// ─── tipos ──────────────────────────────────────────────────────────────────
+
+type Etapa = "email" | "senha" | "cadastro" | "termos-google";
+
+type DadosGoogle = {
+  uid: string;
+  nome: string;
+  email: string;
+  fotoUrl: string | null;
+};
+
+// ─── componente interno (usa useSearchParams) ────────────────────────────────
+
+function EntrarForm() {
   const router = useRouter();
-  const id = params?.id as string;
+  const searchParams = useSearchParams();
 
-  const [titulo,   setTitulo]   = useState("");
-  const [conteudo, setConteudo] = useState("");
-  const [tipo,     setTipo]     = useState("sermao");
-  const [igreja,   setIgreja]   = useState("");
-  const [data,     setData]     = useState("");
-  const [slug,     setSlug]     = useState("");
-  const [links,    setLinks]    = useState<LinkReferencia[]>([]);
+  const [etapa, setEtapa] = useState<Etapa>("email");
 
-  /* imagem */
-  const [imagemUrlAtual,  setImagemUrlAtual]  = useState<string | null>(null);
-  const [imagemRemovida,  setImagemRemovida]  = useState(false);
-  const [novaImagemFile,  setNovaImagemFile]  = useState<File | null>(null);
-  const [uploadProgress,  setUploadProgress]  = useState<number | null>(null);
+  const [email, setEmail] = useState(searchParams.get("email") ?? "");
+  const [senha, setSenha] = useState("");
+  const [nome, setNome] = useState("");
+  const [aceitouTermos, setAceitouTermos] = useState(false);
+  const [showSenha, setShowSenha] = useState(false);
 
-  const [loading, setLoading] = useState(true);
-  const [saving,  setSaving]  = useState(false);
-  const [error,   setError]   = useState("");
+  const [dadosGoogle, setDadosGoogle] = useState<DadosGoogle | null>(null);
 
-  /* correção gramatical */
-  const [corrigindo,           setCorrigindo]           = useState(false);
-  const [mostrarBotaoCorrigir, setMostrarBotaoCorrigir] = useState(false);
-  const [correcaoFeita,        setCorrecaoFeita]        = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
+  // ── Debug log visível na tela ──────────────────────────────────────────
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+
+  function log(msg: string) {
+    console.log(msg);
+    setDebugLog(prev => [...prev, msg]);
+  }
+
+  // ── Captura o resultado do redirect (mobile) ao montar ──────────────────
   useEffect(() => {
-    setMostrarBotaoCorrigir(conteudo.trim().length > 20);
-    setCorrecaoFeita(false);
-  }, [conteudo]);
+    async function verificarRedirectResult() {
+      log("=== ENTRAR MONTOU ===");
+      log("sessionStorage: " + sessionStorage.getItem("redirect-after-auth"));
+      log("URL: " + window.location.href);
 
-  /* ── Carregar post ─────────────────────────────────── */
-
-  useEffect(() => {
-    async function fetchPost() {
-      if (!id) return;
       try {
-        const snap = await getDoc(doc(db, "posts", id));
-        if (!snap.exists()) { setError("Post não encontrado."); return; }
-        const d = snap.data();
-        if (auth.currentUser?.uid !== d.autorId) {
-          setError("Você não tem permissão para editar este post.");
+        const result = await getRedirectResult(auth);
+        log("getRedirectResult: " + (result ? "TEM RESULTADO uid=" + result.user.uid : "null"));
+        if (!result) return;
+
+        const user = result.user;
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        log("userSnap.exists: " + userSnap.exists());
+
+        if (userSnap.exists()) {
+          log("Usuário já existe → redirecionando");
+          redirecionarAposAuth();
           return;
         }
-        setTitulo(d.titulo    || "");
-        setConteudo(d.conteudo  || "");
-        setTipo(d.tipo      || "sermao");
-        setIgreja(d.igreja    || "");
-        setSlug(d.slug      || "");
-        setLinks(d.links     || []);
-        setImagemUrlAtual(d.imagemUrl ?? null);
 
-        if (typeof d.data === "string") {
-          setData(d.data);
-        } else if (d.data?.toDate) {
-          setData(
-            d.data.toDate().toLocaleDateString("pt-BR", {
-              day: "2-digit", month: "long", year: "numeric",
-            })
+        setDadosGoogle({
+          uid: user.uid,
+          nome: user.displayName ?? user.email?.split("@")[0] ?? "Usuário",
+          email: user.email ?? "",
+          fotoUrl: user.photoURL ?? null,
+        });
+        setAceitouTermos(false);
+        setEtapa("termos-google");
+      } catch (err: any) {
+        log("ERRO: " + err.code + " - " + err.message);
+        if (err.code === "auth/account-exists-with-different-credential") {
+          const methods = await fetchSignInMethodsForEmail(
+            auth,
+            err.customData?.email ?? ""
           );
+          if (methods.includes("password")) {
+            setEtapa("senha");
+            setError(
+              "Sua conta usa senha. Entre com sua senha e depois poderá " +
+              "vincular o Google nas configurações."
+            );
+            return;
+          }
         }
-      } catch (err) {
         console.error(err);
-        setError("Erro ao carregar post.");
-      } finally {
-        setLoading(false);
+        setError("Erro ao entrar com Google. Tente novamente.");
       }
     }
-    fetchPost();
-  }, [id]);
 
-  /* ── Links helpers ─────────────────────────────────── */
+    verificarRedirectResult();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  function addLink() { setLinks((p) => [...p, { label: "", url: "", tipo: "youtube" }]); }
-  function removeLink(i: number) { setLinks((p) => p.filter((_, idx) => idx !== i)); }
-  function updateLink(i: number, field: keyof LinkReferencia, value: string) {
-    setLinks((p) => p.map((l, idx) => (idx === i ? { ...l, [field]: value } : l)));
-  }
+  // ── utilitário de redirecionamento pós-auth ──────────────────────────────
+  function redirecionarAposAuth() {
+    const raw = sessionStorage.getItem("redirect-after-auth");
+    sessionStorage.removeItem("redirect-after-auth");
+    log("redirecionarAposAuth → raw: " + raw);
 
-  /* ── Imagem helpers ────────────────────────────────── */
-
-  function handleRemoverImagem() {
-    if (novaImagemFile) {
-      setNovaImagemFile(null);
-    } else {
-      setImagemRemovida(true);
+    if (raw) {
+      try {
+        const url = new URL(raw);
+        log("pathname: " + url.pathname);
+        if (!url.pathname.startsWith("/entrar")) {
+          router.push(url.pathname + url.search + url.hash);
+          return;
+        }
+      } catch {
+        if (!raw.startsWith("/entrar")) {
+          router.push(raw);
+          return;
+        }
+      }
     }
+
+    log("Redirecionando para /");
+    router.push("/");
   }
 
-  /* ── Correção gramatical ───────────────────────────── */
+  // ── passo 1: verificar email ─────────────────────────────────────────────
 
-  async function corrigirGramatica() {
-    if (!conteudo.trim() || corrigindo) return;
-    setCorrigindo(true);
-    try {
-      const res  = await fetch("/api/corrigir", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conteudo }),
-      });
-      const json = await res.json();
-      if (json?.texto) { setConteudo(json.texto); setCorrecaoFeita(true); }
-    } catch (err) { console.error("Erro ao corrigir:", err); }
-    setCorrigindo(false);
-  }
-
-  /* ── Salvar ────────────────────────────────────────── */
-
-  async function handleUpdate(e: React.FormEvent) {
+  async function handleVerificarEmail(e: React.FormEvent) {
     e.preventDefault();
-    if (!titulo.trim() || !conteudo.trim()) {
-      setError("Título e conteúdo são obrigatórios.");
-      return;
+    setError("");
+    setLoading(true);
+
+    try {
+      const existe = await emailExisteNoFirestore(email);
+      setEtapa(existe ? "senha" : "cadastro");
+    } catch {
+      setError("Erro ao verificar o email. Tente novamente.");
     }
-    setSaving(true);
+
+    setLoading(false);
+  }
+
+  // ── passo 2a: login com senha ────────────────────────────────────────────
+
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      await signInWithEmailAndPassword(auth, email, senha);
+      redirecionarAposAuth();
+    } catch (err: any) {
+      if (
+        err.code === "auth/wrong-password" ||
+        err.code === "auth/invalid-credential"
+      ) {
+        setError("Senha incorreta. Tente novamente.");
+      } else if (err.code === "auth/too-many-requests") {
+        setError("Muitas tentativas. Aguarde alguns minutos e tente de novo.");
+      } else {
+        setError("Erro ao entrar. Tente novamente.");
+      }
+    }
+
+    setLoading(false);
+  }
+
+  // ── passo 2b: cadastro por email ─────────────────────────────────────────
+
+  async function handleCadastro(e: React.FormEvent) {
+    e.preventDefault();
     setError("");
 
+    if (!nome.trim()) { setError("O nome é obrigatório."); return; }
+    if (senha.length < 6) { setError("A senha deve ter pelo menos 6 caracteres."); return; }
+    if (!aceitouTermos) { setError("Você precisa aceitar os termos de uso."); return; }
+
+    setLoading(true);
+
     try {
-      const linksFiltrados = links.filter((l) => l.label.trim() && l.url.trim());
-      const uid = auth.currentUser!.uid;
+      const cred = await createUserWithEmailAndPassword(auth, email, senha);
+      const user = cred.user;
 
-      let imagemUrl: string | null = imagemUrlAtual;
-
-      if (novaImagemFile) {
-        setUploadProgress(0);
-        imagemUrl = await uploadImagem(novaImagemFile, uid, setUploadProgress);
-        setUploadProgress(null);
-        if (imagemUrlAtual) await tentarDeletarImagem(imagemUrlAtual);
-      } else if (imagemRemovida) {
-        if (imagemUrlAtual) await tentarDeletarImagem(imagemUrlAtual);
-        imagemUrl = null;
-      }
-
-      await updateDoc(doc(db, "posts", id), {
-        titulo:    titulo.trim(),
-        conteudo:  conteudo.trim(),
-        tipo,
-        igreja:    igreja.trim()  || "",
-        data:      data.trim()    || "",
-        links:     linksFiltrados,
-        imagemUrl: imagemUrl ?? null,
+      const slug = await gerarSlugUnico(nome.trim(), user.uid);
+      await updateProfile(user, { displayName: nome.trim() });
+      await setDoc(doc(db, "users", user.uid), {
+        nome: nome.trim(),
+        titulo: "",
+        email,
+        fotoUrl: null,
+        slug,
+        criadoEm: new Date(),
+        aceitouTermos: true,
       });
 
-      router.push(`/posts/${tipo === "sermao" ? "sermoes" : "estudos"}/${slug}`);
-    } catch (err) {
-      console.error(err);
-      setError("Erro ao atualizar post.");
-      setUploadProgress(null);
+      redirecionarAposAuth();
+    } catch (err: any) {
+      if (err.code === "auth/email-already-in-use") {
+        setEtapa("senha");
+        setError("Este email já tem uma senha cadastrada. Entre com ela abaixo.");
+      } else {
+        setError("Erro ao criar conta. Tente novamente.");
+      }
     }
 
-    setSaving(false);
+    setLoading(false);
   }
 
-  /* ── Estados de carregamento / erro ───────────────── */
+  // ── Google ───────────────────────────────────────────────────────────────
 
-  if (loading) return (
-    <div className="post-detail-loading">
-      <div className="spinner" />
-      <span>Carregando...</span>
-    </div>
-  );
+  async function handleGoogle() {
+    setError("");
+    setLoading(true);
 
-  if (error && !titulo) return (
-    <div className="post-detail-notfound">{error}</div>
-  );
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
 
-  /* qual URL exibir no componente */
-  const imagemExibida = imagemRemovida ? null : imagemUrlAtual;
+    if (isMobileDevice()) {
+      log("Mobile detectado → signInWithRedirect");
+      log("sessionStorage antes do redirect: " + sessionStorage.getItem("redirect-after-auth"));
+      await signInWithRedirect(auth, provider);
+      return;
+    }
 
-  /* ── Render ────────────────────────────────────────── */
+    try {
+      let result;
+
+      try {
+        result = await signInWithPopup(auth, provider);
+      } catch (popupErr: any) {
+        if (popupErr.code === "auth/account-exists-with-different-credential") {
+          const methods = await fetchSignInMethodsForEmail(
+            auth,
+            popupErr.customData?.email ?? email
+          );
+          if (methods.includes("password")) {
+            setEtapa("senha");
+            setError(
+              "Sua conta usa senha. Entre com sua senha e depois poderá " +
+              "vincular o Google nas configurações."
+            );
+            setLoading(false);
+            return;
+          }
+        } else if (popupErr.code === "auth/popup-closed-by-user") {
+          setLoading(false);
+          return;
+        } else {
+          throw popupErr;
+        }
+        setLoading(false);
+        return;
+      }
+
+      const user = result.user;
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+
+      if (userSnap.exists()) {
+        redirecionarAposAuth();
+        return;
+      }
+
+      setDadosGoogle({
+        uid: user.uid,
+        nome: user.displayName ?? user.email?.split("@")[0] ?? "Usuário",
+        email: user.email ?? "",
+        fotoUrl: user.photoURL ?? null,
+      });
+      setAceitouTermos(false);
+      setEtapa("termos-google");
+    } catch (err: any) {
+      console.error(err);
+      setError("Erro ao entrar com Google. Tente novamente.");
+    }
+
+    setLoading(false);
+  }
+
+  // ── passo final: confirmar termos e criar doc (Google) ───────────────────
+
+  async function handleConfirmarTermosGoogle(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+
+    if (!aceitouTermos) {
+      setError("Você precisa aceitar os termos de uso para continuar.");
+      return;
+    }
+
+    if (!dadosGoogle) return;
+    setLoading(true);
+
+    try {
+      const slug = await gerarSlugUnico(dadosGoogle.nome, dadosGoogle.uid);
+      await setDoc(doc(db, "users", dadosGoogle.uid), {
+        nome: dadosGoogle.nome,
+        titulo: "",
+        email: dadosGoogle.email,
+        fotoUrl: dadosGoogle.fotoUrl,
+        slug,
+        criadoEm: new Date(),
+        aceitouTermos: true,
+      });
+
+      redirecionarAposAuth();
+    } catch (err) {
+      console.error(err);
+      setError("Erro ao finalizar o cadastro. Tente novamente.");
+    }
+
+    setLoading(false);
+  }
+
+  // ── render ────────────────────────────────────────────────────────────────
+
+  const subtitulos: Record<Etapa, string> = {
+    email: "Bem-vindo! Digite seu email para começar.",
+    senha: "Encontramos sua conta. Digite sua senha.",
+    cadastro: "Email novo por aqui! Vamos criar sua conta.",
+    "termos-google": `Olá, ${dadosGoogle?.nome ?? ""}! Só falta aceitar os termos.`,
+  };
 
   return (
-    <div style={{ paddingTop: "calc(var(--header-h) + 2rem)", paddingBottom: "4rem" }}>
-      <div
-        style={{
-          maxWidth: "680px",
-          margin: "0 auto",
-          padding: "0 1.25rem",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1.5rem",
-        }}
-      >
-        {/* Cabeçalho */}
-        <div>
-          <h1
-            style={{
-              fontSize: "clamp(1.4rem, 3vw, 2rem)",
-              fontWeight: 800,
-              color: "var(--text-1)",
-              letterSpacing: "-0.02em",
-              marginBottom: "0.25rem",
-            }}
-          >
-            Editar publicação
-          </h1>
-          <p style={{ fontSize: "0.875rem", color: "var(--text-3)" }}>
-            Altere os campos desejados e salve as alterações
-          </p>
+    <div className="auth-page">
+      <div className="auth-card">
+
+        {/* LOGO */}
+        <div className="auth-logo">
+          <span className="auth-logo-dot" />
+          Edifiquemos
         </div>
 
-        {/* Card do formulário */}
-        <form
-          onSubmit={handleUpdate}
-          style={{
-            background: "var(--bg-card)",
-            border: "1px solid var(--border)",
-            borderRadius: "var(--radius-lg)",
-            padding: "2rem",
-            display: "flex",
-            flexDirection: "column",
-            gap: "1.25rem",
-          }}
-        >
-          {/* Tipo */}
-          <div className="auth-field">
-            <label className="auth-label">Tipo de conteúdo</label>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              {(["sermao", "artigo"] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setTipo(t)}
-                  style={{
-                    flex: 1,
-                    padding: "8px 0",
-                    borderRadius: "var(--radius-full)",
-                    border: tipo === t ? "1px solid var(--emerald)" : "1px solid var(--border-light)",
-                    background: tipo === t ? "var(--emerald)" : "var(--bg-elevated)",
-                    color: tipo === t ? "#fff" : "var(--text-2)",
-                    fontWeight: 600,
-                    fontSize: "0.85rem",
-                    cursor: "pointer",
-                    transition: "all 0.15s",
-                  }}
-                >
-                  {t === "sermao" ? "Sermão" : "Estudo"}
-                </button>
-              ))}
-            </div>
-          </div>
+        <h1 className="auth-title">
+          {etapa === "cadastro" || etapa === "termos-google"
+            ? "Criar sua conta"
+            : "Entrar na sua conta"}
+        </h1>
+        <p className="auth-subtitle">{subtitulos[etapa]}</p>
 
-          {/* Título */}
-          <div className="auth-field">
-            <label className="auth-label">Título</label>
-            <input
-              placeholder="Ex: A graça de Deus em Romanos 8"
-              value={titulo}
-              onChange={(e) => setTitulo(e.target.value)}
-              className="auth-input"
-            />
-          </div>
-
-          {/* Imagem de capa */}
-          <div className="auth-field">
-            <label className="auth-label">
-              Imagem de capa{" "}
-              <span className="auth-label-opt">(opcional)</span>
-            </label>
-            <p
-              style={{
-                fontSize: "0.72rem",
-                color: "var(--text-3)",
-                marginBottom: "0.5rem",
-              }}
-            >
-              Quando presente, o card terá um visual diferenciado com a imagem em destaque
-            </p>
-            <ImageUpload
-              file={novaImagemFile}
-              existingUrl={imagemExibida}
-              onFileChange={setNovaImagemFile}
-              onRemoveExisting={handleRemoverImagem}
-            />
-            {uploadProgress !== null && (
-              <div style={{ marginTop: "0.5rem" }}>
-                <div
-                  style={{
-                    height: 4,
-                    background: "var(--border-light)",
-                    borderRadius: "var(--radius-full)",
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${uploadProgress}%`,
-                      background: "var(--emerald)",
-                      borderRadius: "var(--radius-full)",
-                      transition: "width 0.2s ease",
-                    }}
-                  />
-                </div>
-                <p
-                  style={{
-                    fontSize: "0.72rem",
-                    color: "var(--text-3)",
-                    marginTop: "0.25rem",
-                  }}
-                >
-                  Enviando imagem… {uploadProgress}%
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Conteúdo */}
-          <div className="auth-field">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                flexWrap: "wrap",
-                gap: "0.5rem",
-                marginBottom: "0.375rem",
-              }}
-            >
-              <label className="auth-label" style={{ margin: 0 }}>
-                Conteúdo
-              </label>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                <FileImportButton
-                  onImport={(texto) =>
-                    setConteudo((prev) =>
-                      prev.trim() ? prev + "\n\n" + texto : texto
-                    )
-                  }
-                />
-                {mostrarBotaoCorrigir && (
-                  <button
-                    type="button"
-                    onClick={corrigirGramatica}
-                    disabled={corrigindo}
-                    title="Corrigir erros de gramática e ortografia com IA"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.35rem",
-                      padding: "5px 12px",
-                      borderRadius: "var(--radius-full)",
-                      border: correcaoFeita ? "1px solid var(--emerald)" : "1px solid var(--border-light)",
-                      background: correcaoFeita ? "var(--emerald-dim)" : "var(--bg-elevated)",
-                      color: correcaoFeita ? "var(--emerald)" : "var(--text-2)",
-                      fontWeight: 600,
-                      fontSize: "0.78rem",
-                      cursor: corrigindo ? "wait" : "pointer",
-                      transition: "all 0.2s",
-                      whiteSpace: "nowrap",
-                      opacity: corrigindo ? 0.7 : 1,
-                    }}
-                  >
-                    {corrigindo ? (
-                      <>
-                        <span
-                          style={{
-                            display: "inline-block",
-                            width: "10px",
-                            height: "10px",
-                            border: "2px solid var(--text-3)",
-                            borderTopColor: "var(--emerald)",
-                            borderRadius: "50%",
-                            animation: "spin 0.7s linear infinite",
-                          }}
-                        />
-                        Corrigindo...
-                      </>
-                    ) : correcaoFeita ? (
-                      <>✓ Corrigido</>
-                    ) : (
-                      <>✦ Corrigir texto</>
-                    )}
-                  </button>
-                )}
-              </div>
-            </div>
-            <textarea
-              placeholder="Escreva seu sermão ou estudo aqui, ou importe um arquivo acima..."
-              value={conteudo}
-              onChange={(e) => setConteudo(e.target.value)}
-              className="auth-input"
-              style={{ minHeight: "14rem", resize: "vertical", lineHeight: 1.75 }}
-            />
-          </div>
-
-          {/* Igreja e Data */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "0.75rem",
-            }}
-          >
+        {/* ── ETAPA: EMAIL ── */}
+        {etapa === "email" && (
+          <form onSubmit={handleVerificarEmail} className="auth-form">
             <div className="auth-field">
-              <label className="auth-label">
-                Igreja <span className="auth-label-opt">(opcional)</span>
-              </label>
+              <label className="auth-label">Email</label>
               <input
-                placeholder="Nome da igreja"
-                value={igreja}
-                onChange={(e) => setIgreja(e.target.value)}
+                type="email"
+                placeholder="seu@email.com"
                 className="auth-input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoFocus
+                required
               />
             </div>
+
+            {error && <div className="auth-error"><p>{error}</p></div>}
+
+            <button type="submit" disabled={loading} className="auth-btn-primary">
+              {loading ? "Verificando..." : "Continuar"}
+            </button>
+
+            <div className="auth-divider">
+              <span /><p>ou continue com</p><span />
+            </div>
+
+            <GoogleBtn onClick={handleGoogle} loading={loading} />
+          </form>
+        )}
+
+        {/* ── ETAPA: SENHA (login) ── */}
+        {etapa === "senha" && (
+          <form onSubmit={handleLogin} className="auth-form">
             <div className="auth-field">
-              <label className="auth-label">
-                Data <span className="auth-label-opt">(opcional)</span>
-              </label>
+              <label className="auth-label">Email</label>
+              <div className="auth-email-readonly">
+                <span>{email}</span>
+                <button
+                  type="button"
+                  className="auth-link"
+                  onClick={() => { setEtapa("email"); setError(""); setSenha(""); }}
+                >
+                  Trocar
+                </button>
+              </div>
+            </div>
+
+            <div className="auth-field">
+              <label className="auth-label">Senha</label>
+              <div className="auth-input-wrapper">
+                <input
+                  type={showSenha ? "text" : "password"}
+                  placeholder="Sua senha"
+                  className="auth-input"
+                  value={senha}
+                  onChange={(e) => setSenha(e.target.value)}
+                  autoFocus
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSenha(!showSenha)}
+                  className="auth-eye-btn"
+                >
+                  {showSenha ? "🙈" : "👁"}
+                </button>
+              </div>
+            </div>
+
+            {error && <div className="auth-error"><p>{error}</p></div>}
+
+            <button type="submit" disabled={loading} className="auth-btn-primary">
+              {loading ? "Entrando..." : "Entrar"}
+            </button>
+
+            <div className="auth-links" style={{ marginTop: "0.5rem" }}>
+              <Link href={`/esqueci-senha?email=${encodeURIComponent(email)}`} className="auth-link">
+                Esqueci a senha
+              </Link>
+            </div>
+          </form>
+        )}
+
+        {/* ── ETAPA: CADASTRO (email) ── */}
+        {etapa === "cadastro" && (
+          <form onSubmit={handleCadastro} className="auth-form">
+            <div className="auth-field">
+              <label className="auth-label">Email</label>
+              <div className="auth-email-readonly">
+                <span>{email}</span>
+                <button
+                  type="button"
+                  className="auth-link"
+                  onClick={() => { setEtapa("email"); setError(""); setSenha(""); setNome(""); }}
+                >
+                  Trocar
+                </button>
+              </div>
+            </div>
+
+            <div className="auth-field">
+              <label className="auth-label">Nome completo</label>
               <input
                 type="text"
-                placeholder="Ex: 2025, Século XVI…"
-                value={data}
-                onChange={(e) => setData(e.target.value)}
+                placeholder="Seu nome completo"
                 className="auth-input"
+                value={nome}
+                onChange={(e) => setNome(e.target.value)}
+                autoFocus
+                required
               />
             </div>
-          </div>
 
-          {/* Links de Referência */}
-          <div className="auth-field">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: "0.5rem",
-              }}
-            >
-              <div>
-                <label className="auth-label" style={{ margin: 0 }}>
-                  Links de referência{" "}
-                  <span className="auth-label-opt">(opcional)</span>
-                </label>
-                <p
-                  style={{
-                    fontSize: "0.72rem",
-                    color: "var(--text-3)",
-                    marginTop: "2px",
-                  }}
+            <div className="auth-field">
+              <label className="auth-label">Senha</label>
+              <div className="auth-input-wrapper">
+                <input
+                  type={showSenha ? "text" : "password"}
+                  placeholder="Mínimo 6 caracteres"
+                  className="auth-input"
+                  value={senha}
+                  onChange={(e) => setSenha(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSenha(!showSenha)}
+                  className="auth-eye-btn"
                 >
-                  YouTube, blog, livro, site… aparecem como botões visuais no post
+                  {showSenha ? "🙈" : "👁"}
+                </button>
+              </div>
+            </div>
+
+            <label className="auth-terms">
+              <input
+                type="checkbox"
+                checked={aceitouTermos}
+                onChange={(e) => setAceitouTermos(e.target.checked)}
+                className="auth-checkbox"
+              />
+              <span>
+                Li e aceito os{" "}
+                <Link href="/termos" className="auth-link">
+                  Termos de Uso
+                </Link>
+              </span>
+            </label>
+
+            {error && <div className="auth-error"><p>{error}</p></div>}
+
+            <button type="submit" disabled={loading} className="auth-btn-primary">
+              {loading ? "Criando conta..." : "Criar conta"}
+            </button>
+
+            <div className="auth-divider">
+              <span /><p>ou cadastre-se com</p><span />
+            </div>
+            <GoogleBtn onClick={handleGoogle} loading={loading} />
+          </form>
+        )}
+
+        {/* ── ETAPA: TERMOS (Google — primeiro acesso) ── */}
+        {etapa === "termos-google" && dadosGoogle && (
+          <form onSubmit={handleConfirmarTermosGoogle} className="auth-form">
+
+            <div style={{
+              display: "flex", alignItems: "center", gap: "0.75rem",
+              padding: "0.75rem 1rem",
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border-light)",
+              borderRadius: "var(--radius-lg)",
+              marginBottom: "0.25rem",
+            }}>
+              {dadosGoogle.fotoUrl && (
+                <img
+                  src={dadosGoogle.fotoUrl}
+                  alt={dadosGoogle.nome}
+                  style={{ width: 40, height: 40, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
+                />
+              )}
+              <div>
+                <p style={{ fontSize: "0.875rem", fontWeight: 600, color: "var(--text-1)", margin: 0 }}>
+                  {dadosGoogle.nome}
+                </p>
+                <p style={{ fontSize: "0.78rem", color: "var(--text-3)", margin: 0 }}>
+                  {dadosGoogle.email}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={addLink}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.3rem",
-                  padding: "5px 12px",
-                  borderRadius: "var(--radius-full)",
-                  border: "1px solid var(--border-light)",
-                  background: "var(--bg-elevated)",
-                  color: "var(--emerald)",
-                  fontWeight: 600,
-                  fontSize: "0.78rem",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  transition: "all 0.15s",
-                }}
-              >
-                + Adicionar
-              </button>
             </div>
 
-            {links.length === 0 && (
-              <div
-                style={{
-                  border: "1px dashed var(--border-light)",
-                  borderRadius: "var(--radius-lg)",
-                  padding: "1.25rem",
-                  textAlign: "center",
-                  color: "var(--text-3)",
-                  fontSize: "0.82rem",
-                }}
-              >
-                Nenhum link adicionado ainda.{" "}
-                <span
-                  style={{
-                    color: "var(--emerald)",
-                    cursor: "pointer",
-                    fontWeight: 600,
-                  }}
-                  onClick={addLink}
-                >
-                  Clique em "+ Adicionar"
-                </span>{" "}
-                para inserir um link de referência.
-              </div>
-            )}
+            <label className="auth-terms">
+              <input
+                type="checkbox"
+                checked={aceitouTermos}
+                onChange={(e) => setAceitouTermos(e.target.checked)}
+                className="auth-checkbox"
+              />
+              <span>
+                Li e aceito os{" "}
+                <Link href="/termos" className="auth-link" target="_blank">
+                  Termos de Uso
+                </Link>
+              </span>
+            </label>
 
-            {links.length > 0 && (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.75rem",
-                }}
-              >
-                {links.map((link, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      background: "var(--bg-elevated)",
-                      border: "1px solid var(--border-light)",
-                      borderRadius: "var(--radius-lg)",
-                      padding: "0.875rem 1rem",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "0.625rem",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.5rem",
-                      }}
-                    >
-                      <label
-                        style={{
-                          fontSize: "0.72rem",
-                          color: "var(--text-3)",
-                          fontWeight: 600,
-                          marginRight: "0.25rem",
-                          flexShrink: 0,
-                        }}
-                      >
-                        Tipo:
-                      </label>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "0.375rem",
-                          flexWrap: "wrap",
-                          flex: 1,
-                        }}
-                      >
-                        {TIPO_LINK_OPTIONS.map((opt) => (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            onClick={() => updateLink(i, "tipo", opt.value)}
-                            style={{
-                              padding: "3px 10px",
-                              borderRadius: "var(--radius-full)",
-                              border:
-                                link.tipo === opt.value
-                                  ? "1px solid var(--emerald)"
-                                  : "1px solid var(--border-light)",
-                              background:
-                                link.tipo === opt.value
-                                  ? "var(--emerald-dim)"
-                                  : "var(--bg-card)",
-                              color:
-                                link.tipo === opt.value
-                                  ? "var(--emerald)"
-                                  : "var(--text-3)",
-                              fontSize: "0.72rem",
-                              fontWeight: 600,
-                              cursor: "pointer",
-                              transition: "all 0.15s",
-                            }}
-                          >
-                            {opt.icon} {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeLink(i)}
-                        title="Remover link"
-                        style={{
-                          background: "none",
-                          border: "none",
-                          color: "var(--text-3)",
-                          cursor: "pointer",
-                          fontSize: "1rem",
-                          padding: "2px 6px",
-                          borderRadius: "var(--radius-sm)",
-                          transition: "color 0.15s",
-                          flexShrink: 0,
-                        }}
-                      >
-                        ✕
-                      </button>
-                    </div>
+            {error && <div className="auth-error"><p>{error}</p></div>}
 
-                    <input
-                      placeholder={
-                        link.tipo === "youtube"
-                          ? "Ex: Acompanhe meu canal no YouTube"
-                          : link.tipo === "blog"
-                          ? "Ex: Veja o conteúdo completo no meu blog"
-                          : link.tipo === "livro"
-                          ? "Ex: Adquira já seu exemplar do livro"
-                          : link.tipo === "site"
-                          ? "Ex: Acesse nosso site"
-                          : "Ex: Veja mais conteúdo aqui"
-                      }
-                      value={link.label}
-                      onChange={(e) => updateLink(i, "label", e.target.value)}
-                      className="auth-input"
-                      style={{ fontSize: "0.85rem", padding: "8px 12px" }}
-                    />
+            <button type="submit" disabled={loading} className="auth-btn-primary">
+              {loading ? "Finalizando..." : "Concluir cadastro"}
+            </button>
 
-                    <input
-                      placeholder="https://..."
-                      value={link.url}
-                      onChange={(e) => updateLink(i, "url", e.target.value)}
-                      className="auth-input"
-                      style={{
-                        fontSize: "0.82rem",
-                        padding: "8px 12px",
-                        color: "var(--text-3)",
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
+            <button
+              type="button"
+              className="auth-link"
+              style={{ marginTop: "0.5rem", fontSize: "0.8rem", textAlign: "center" }}
+              onClick={() => { setEtapa("email"); setDadosGoogle(null); setAceitouTermos(false); setError(""); }}
+            >
+              Cancelar e voltar
+            </button>
+          </form>
+        )}
+
+        {/* ── Debug log visível na tela (remover após resolver o bug) ── */}
+        {debugLog.length > 0 && (
+          <div style={{
+            marginTop: "1rem",
+            padding: "0.75rem",
+            background: "#000",
+            color: "#0f0",
+            fontSize: "0.7rem",
+            borderRadius: "8px",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+          }}>
+            {debugLog.map((l, i) => <div key={i}>{l}</div>)}
           </div>
+        )}
 
-          {/* Erro */}
-          {error && (
-            <div className="auth-error">
-              <p>{error}</p>
-            </div>
-          )}
-
-          {/* Botão salvar */}
-          <button
-            type="submit"
-            disabled={saving}
-            className="auth-btn-primary"
-            style={{ marginTop: "0.25rem" }}
-          >
-            {saving
-              ? uploadProgress !== null
-                ? `Enviando imagem… ${uploadProgress}%`
-                : "Salvando..."
-              : "Salvar alterações"}
-          </button>
-        </form>
       </div>
-
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
     </div>
+  );
+}
+
+// ─── botão Google reutilizável ────────────────────────────────────────────────
+
+function GoogleBtn({
+  onClick,
+  loading,
+}: {
+  onClick: () => void;
+  loading: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={loading}
+      className="auth-btn-google"
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+        <path
+          d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+          fill="#4285F4"
+        />
+        <path
+          d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+          fill="#34A853"
+        />
+        <path
+          d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"
+          fill="#FBBC05"
+        />
+        <path
+          d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+          fill="#EA4335"
+        />
+      </svg>
+      Continuar com Google
+    </button>
+  );
+}
+
+// ─── export com Suspense ──────────────────────────────────────────────────────
+
+export default function EntrarPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="auth-page">
+          <div className="auth-card">Carregando...</div>
+        </div>
+      }
+    >
+      <EntrarForm />
+    </Suspense>
   );
 }
