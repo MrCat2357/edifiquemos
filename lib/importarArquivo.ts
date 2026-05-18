@@ -34,13 +34,53 @@ async function lerDocx(file: File): Promise<string> {
   return lerComoTexto(file);
 }
 
+/* ── Une linhas quebradas artificialmente pelo PDF ───────────── */
+function unirLinhasArtificiais(texto: string): string {
+  const linhas = texto.split("\n");
+  const resultado: string[] = [];
+
+  for (let i = 0; i < linhas.length; i++) {
+    const linha = linhas[i];
+    const proxima = linhas[i + 1];
+
+    // Linha vazia = separador de parágrafo, mantém
+    if (linha.trim() === "") {
+      resultado.push("");
+      continue;
+    }
+
+    // Se a próxima linha existe, não é vazia, e a linha atual
+    // não termina com pontuação final → é quebra artificial, une
+    if (
+      proxima !== undefined &&
+      proxima.trim() !== "" &&
+      !/[.!?:;…\-–—]$/.test(linha.trimEnd())
+    ) {
+      resultado.push(linha.trimEnd() + " " + proxima.trimStart());
+      i++; // pula a próxima, já foi consumida
+    } else {
+      resultado.push(linha);
+    }
+  }
+
+  return resultado.join("\n");
+}
+
+/* ── Garante linha em branco entre parágrafos ────────────────── */
+function normalizarParagrafos(texto: string): string {
+  return texto
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n") // no máximo uma linha em branco
+    .replace(/([^\n])\n([^\n])/g, "$1\n\n$2") // garante linha em branco entre parágrafos não vazios
+    .trim();
+}
+
 /* ── .pdf ───────────────────────────────────────────────────── */
 async function lerPdf(file: File): Promise<string> {
   const pdfjsLib = await import("pdfjs-dist");
 
-  // Aponta para o worker que vem dentro do próprio pacote.
-  // O webpack do Next.js resolve o new URL(...) e copia o arquivo
-  // automaticamente — sem CDN, sem configuração extra.
   if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
       "pdfjs-dist/build/pdf.worker.mjs",
@@ -96,7 +136,9 @@ async function lerPdf(file: File): Promise<string> {
     paginas.push(linhas.join("\n"));
   }
 
-  return paginas.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+  const textoRaw = paginas.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+  const textoUnido = unirLinhasArtificiais(textoRaw);
+  return normalizarParagrafos(textoUnido);
 }
 
 /* ── .odt ───────────────────────────────────────────────────── */
@@ -140,17 +182,13 @@ async function lerRtf(file: File): Promise<string> {
 
   let s = raw;
 
-  // 1. Descarta tudo antes do primeiro \pard ou \sectd —
-  //    cabeçalhos Aspose/Word colocam lixo binário antes do texto real.
   const inicioTexto = s.search(/\\pard\b|\\sectd\b/i);
   if (inicioTexto !== -1) {
     s = s.slice(inicioTexto);
   }
 
-  // 2. Remove blocos binários \binN (N bytes de dados binários)
   s = s.replace(/\\bin\d+\s?[\s\S]{0,4096}/g, "");
 
-  // 3. Remove grupos de lixo conhecidos com possível aninhamento simples
   const gruposLixo = [
     "fonttbl", "colortbl", "stylesheet", "info", "pict",
     "header", "footer", "headerl", "headerr", "footerl", "footerr",
@@ -162,14 +200,12 @@ async function lerRtf(file: File): Promise<string> {
     s = s.replace(re, "");
   }
 
-  // 4. Remove grupos genéricos aninhados restantes (até estabilizar)
   let anterior = "";
   while (anterior !== s) {
     anterior = s;
     s = s.replace(/\{\\[a-z*][^{}]*\}/gi, "");
   }
 
-  // 5. Converte comandos de layout em quebras de texto
   s = s
     .replace(/\\par(?:d)?\b/gi, "\n")
     .replace(/\\line\b/gi, "\n")
@@ -179,26 +215,17 @@ async function lerRtf(file: File): Promise<string> {
     .replace(/\\row\b/gi, "\n")
     .replace(/\\cell\b/gi, " | ");
 
-  // 6. Remove comandos de controle restantes (\palavra ou \palavra-N)
   s = s.replace(/\\[a-z*]+\-?\d*[ \t]?/gi, "");
-
-  // 7. Remove chaves e barras soltas
   s = s.replace(/[{}\\]/g, "");
-
-  // 8. Decodifica \'XX (caracteres especiais RTF como \'e7 → ç)
   s = s.replace(/\\'([0-9a-fA-F]{2})/g, (_, hex: string) => {
     try { return String.fromCharCode(parseInt(hex, 16)); } catch { return ""; }
   });
-
-  // 9. Remove sequências de números/lixo que sobram de headers binários
-  //    (ex: "020206030504" — bytes do Aspose que escaparam)
   s = s.replace(/(?<!\w)[0-9a-f]{6,}(?!\w)/gi, "");
 
-  // 10. Limpa linhas e espaços em excesso
   return s
     .split("\n")
     .map((l) => l.trim())
-    .filter((l, i, arr) => l || (arr[i - 1] !== ""))  // remove linhas vazias duplas
+    .filter((l, i, arr) => l || (arr[i - 1] !== ""))
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
