@@ -90,11 +90,11 @@ export default function CommentSection({
   // Chamado tanto pelo botão "Adicione um comentário..." quanto pelo
   // botão "Responder" em CommentItem quando o usuário não está logado.
   function requestLogin() {
-    if (typeof window !== "undefined") {
-      sessionStorage.setItem("redirect-after-auth", window.location.href);
-    }
-    setShowBanner(true);
+  if (typeof window !== "undefined" && !window.location.pathname.startsWith("/entrar")) {
+    sessionStorage.setItem("redirect-after-auth", window.location.href);
   }
+  setShowBanner(true);
+}
 
   async function handleReply(text: string, parentId: string, rootId: string) {
     if (!effectiveUser) return;
