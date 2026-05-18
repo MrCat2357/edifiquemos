@@ -14,6 +14,11 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
+if (typeof window !== "undefined") {
+  console.log("🔥 Firebase authDomain:", process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN);
+  console.log("🔥 Firebase projectId:", process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
+}
+
 const app = initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
