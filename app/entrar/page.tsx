@@ -80,6 +80,9 @@ function EntrarForm() {
 
   // ── Captura o resultado do redirect (mobile) ao montar ──────────────────
   useEffect(() => {
+    // Mostra config na tela temporariamente
+    setError(`Auth: ${process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN} | Project: ${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}`);
+    
     async function verificarRedirectResult() {
       try {
         console.log("🔍 Verificando redirect result...");
