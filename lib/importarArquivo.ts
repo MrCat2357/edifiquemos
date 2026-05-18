@@ -66,6 +66,16 @@ function unirLinhasArtificiais(texto: string): string {
   return resultado.join("\n");
 }
 
+/* ── Remove marcações de página do Logos Bible Study ────────── */
+function removerMarcacoesLogos(texto: string): string {
+  return texto
+    .split("\n")
+    .filter((linha) =>
+      !/^Page\s+\d+\.\s+Exported from Logos/i.test(linha.trim())
+    )
+    .join("\n");
+}
+
 /* ── Garante linha em branco entre parágrafos ────────────────── */
 function normalizarParagrafos(texto: string): string {
   return texto
@@ -138,7 +148,8 @@ async function lerPdf(file: File): Promise<string> {
 
   const textoRaw = paginas.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
   const textoUnido = unirLinhasArtificiais(textoRaw);
-  return normalizarParagrafos(textoUnido);
+  const textoSemLogos = removerMarcacoesLogos(textoUnido);
+  return normalizarParagrafos(textoSemLogos);
 }
 
 /* ── .odt ───────────────────────────────────────────────────── */
