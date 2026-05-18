@@ -47,10 +47,6 @@ async function emailExisteNoFirestore(email: string): Promise<boolean> {
   return !snap.empty;
 }
 
-function isMobileDevice(): boolean {
-  if (typeof navigator === "undefined") return false;
-  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-}
 
 // ─── tipos ──────────────────────────────────────────────────────────────────
 
@@ -239,74 +235,68 @@ function EntrarForm() {
   // ── Google ───────────────────────────────────────────────────────────────
 
   async function handleGoogle() {
-    setError("");
-    setLoading(true);
+  setError("");
+  setLoading(true);
 
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: "select_account" });
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
 
-    // Mobile: usa redirect para evitar problemas com popup em webview
-    if (isMobileDevice()) {
-      await signInWithRedirect(auth, provider);
-      // A página vai recarregar — o resultado é tratado no useEffect acima
+  try {
+    let result;
+    try {
+      result = await signInWithPopup(auth, provider);
+    } catch (popupErr: any) {
+      if (
+        popupErr.code === "auth/popup-blocked" ||
+        popupErr.code === "auth/cancelled-popup-request" ||
+        popupErr.code === "auth/popup-closed-by-user"
+      ) {
+        // Popup bloqueado → tenta redirect como fallback
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+      if (popupErr.code === "auth/account-exists-with-different-credential") {
+        const methods = await fetchSignInMethodsForEmail(
+          auth,
+          popupErr.customData?.email ?? email
+        );
+        if (methods.includes("password")) {
+          setEtapa("senha");
+          setError(
+            "Sua conta usa senha. Entre com sua senha e depois poderá " +
+            "vincular o Google nas configurações."
+          );
+          setLoading(false);
+          return;
+        }
+      }
+      throw popupErr;
+    }
+
+    const user = result.user;
+    const userRef = doc(db, "users", user.uid);
+    const userSnap = await getDoc(userRef);
+
+    if (userSnap.exists()) {
+      redirecionarAposAuth();
       return;
     }
 
-    // Desktop: mantém o popup
-    try {
-      let result;
-
-      try {
-        result = await signInWithPopup(auth, provider);
-      } catch (popupErr: any) {
-        if (popupErr.code === "auth/account-exists-with-different-credential") {
-          const methods = await fetchSignInMethodsForEmail(
-            auth,
-            popupErr.customData?.email ?? email
-          );
-          if (methods.includes("password")) {
-            setEtapa("senha");
-            setError(
-              "Sua conta usa senha. Entre com sua senha e depois poderá " +
-              "vincular o Google nas configurações."
-            );
-            setLoading(false);
-            return;
-          }
-        } else if (popupErr.code === "auth/popup-closed-by-user") {
-          setLoading(false);
-          return;
-        } else {
-          throw popupErr;
-        }
-        setLoading(false);
-        return;
-      }
-
-      const user = result.user;
-      const userRef = doc(db, "users", user.uid);
-      const userSnap = await getDoc(userRef);
-
-      if (userSnap.exists()) {
-        redirecionarAposAuth();
-        return;
-      }
-
-      setDadosGoogle({
-        uid: user.uid,
-        nome: user.displayName ?? user.email?.split("@")[0] ?? "Usuário",
-        email: user.email ?? "",
-        fotoUrl: user.photoURL ?? null,
-      });
-      setAceitouTermos(false);
-      setEtapa("termos-google");
-    } catch (err: any) {
-      console.error(err);
-      setError("Erro ao entrar com Google. Tente novamente.");
-    }
-
-    setLoading(false);
+    setDadosGoogle({
+      uid: user.uid,
+      nome: user.displayName ?? user.email?.split("@")[0] ?? "Usuário",
+      email: user.email ?? "",
+      fotoUrl: user.photoURL ?? null,
+    });
+    setAceitouTermos(false);
+    setEtapa("termos-google");
+  } catch (err: any) {
+    console.error(err);
+    setError("Erro ao entrar com Google. Tente novamente.");
   }
+
+  setLoading(false);
+}
 
   // ── passo final: confirmar termos e criar doc (Google) ───────────────────
 
