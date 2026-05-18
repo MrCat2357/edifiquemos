@@ -1,11 +1,13 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, useEffect } from "react";
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   updateProfile,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   fetchSignInMethodsForEmail,
 } from "firebase/auth";
@@ -45,6 +47,11 @@ async function emailExisteNoFirestore(email: string): Promise<boolean> {
   return !snap.empty;
 }
 
+function isMobileDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+}
+
 // ─── tipos ──────────────────────────────────────────────────────────────────
 
 type Etapa = "email" | "senha" | "cadastro" | "termos-google";
@@ -75,26 +82,64 @@ function EntrarForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // ── utilitário de redirecionamento pós-auth ──────────────────────────────
-  //
-  // Lê "redirect-after-auth" do sessionStorage, que pode ser:
-  //   • um pathname+search  (ex: "/posts/estudos/meu-post")
-  //   • uma URL completa    (ex: "https://site.com/posts/estudos/meu-post")
-  //
-  // Em ambos os casos extraímos apenas o pathname+search+hash para o
-  // router.push funcionar corretamente dentro do Next.js.
+  // ── Captura o resultado do redirect (mobile) ao montar ──────────────────
+  useEffect(() => {
+    async function verificarRedirectResult() {
+      try {
+        const result = await getRedirectResult(auth);
+        if (!result) return;
 
+        const user = result.user;
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+
+        if (userSnap.exists()) {
+          redirecionarAposAuth();
+          return;
+        }
+
+        setDadosGoogle({
+          uid: user.uid,
+          nome: user.displayName ?? user.email?.split("@")[0] ?? "Usuário",
+          email: user.email ?? "",
+          fotoUrl: user.photoURL ?? null,
+        });
+        setAceitouTermos(false);
+        setEtapa("termos-google");
+      } catch (err: any) {
+        if (err.code === "auth/account-exists-with-different-credential") {
+          const methods = await fetchSignInMethodsForEmail(
+            auth,
+            err.customData?.email ?? ""
+          );
+          if (methods.includes("password")) {
+            setEtapa("senha");
+            setError(
+              "Sua conta usa senha. Entre com sua senha e depois poderá " +
+              "vincular o Google nas configurações."
+            );
+            return;
+          }
+        }
+        console.error(err);
+        setError("Erro ao entrar com Google. Tente novamente.");
+      }
+    }
+
+    verificarRedirectResult();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── utilitário de redirecionamento pós-auth ──────────────────────────────
   function redirecionarAposAuth() {
     const raw = sessionStorage.getItem("redirect-after-auth");
     sessionStorage.removeItem("redirect-after-auth");
 
     if (raw) {
       try {
-        // Tenta parsear como URL completa
         const url = new URL(raw);
         router.push(url.pathname + url.search + url.hash);
       } catch {
-        // Era só um pathname — usa diretamente
         router.push(raw);
       }
     } else {
@@ -195,6 +240,14 @@ function EntrarForm() {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
 
+    // Mobile: usa redirect para evitar problemas com popup em webview
+    if (isMobileDevice()) {
+      await signInWithRedirect(auth, provider);
+      // A página vai recarregar — o resultado é tratado no useEffect acima
+      return;
+    }
+
+    // Desktop: mantém o popup
     try {
       let result;
 
