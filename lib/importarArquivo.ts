@@ -34,38 +34,6 @@ async function lerDocx(file: File): Promise<string> {
   return lerComoTexto(file);
 }
 
-/* ── Une linhas quebradas artificialmente pelo PDF ───────────── */
-function unirLinhasArtificiais(texto: string): string {
-  const linhas = texto.split("\n");
-  const resultado: string[] = [];
-
-  for (let i = 0; i < linhas.length; i++) {
-    const linha = linhas[i];
-    const proxima = linhas[i + 1];
-
-    // Linha vazia = separador de parágrafo, mantém
-    if (linha.trim() === "") {
-      resultado.push("");
-      continue;
-    }
-
-    // Se a próxima linha existe, não é vazia, e a linha atual
-    // não termina com pontuação final → é quebra artificial, une
-    if (
-      proxima !== undefined &&
-      proxima.trim() !== "" &&
-      !/[.!?:;…\-–—]$/.test(linha.trimEnd())
-    ) {
-      resultado.push(linha.trimEnd() + " " + proxima.trimStart());
-      i++; // pula a próxima, já foi consumida
-    } else {
-      resultado.push(linha);
-    }
-  }
-
-  return resultado.join("\n");
-}
-
 /* ── Remove marcações de página do Logos Bible Study ────────── */
 function removerMarcacoesLogos(texto: string): string {
   return texto
@@ -74,17 +42,6 @@ function removerMarcacoesLogos(texto: string): string {
       !/^Page\s+\d+\.\s+Exported from Logos/i.test(linha.trim())
     )
     .join("\n");
-}
-
-/* ── Garante linha em branco entre parágrafos ────────────────── */
-function normalizarParagrafos(texto: string): string {
-  return texto
-    .split("\n")
-    .map((l) => l.trimEnd())
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n") // no máximo uma linha em branco
-    .replace(/([^\n])\n([^\n])/g, "$1\n\n$2") // garante linha em branco entre parágrafos não vazios
-    .trim();
 }
 
 /* ── .pdf ───────────────────────────────────────────────────── */
@@ -147,9 +104,7 @@ async function lerPdf(file: File): Promise<string> {
   }
 
   const textoRaw = paginas.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
-  const textoUnido = unirLinhasArtificiais(textoRaw);
-  const textoSemLogos = removerMarcacoesLogos(textoUnido);
-  return normalizarParagrafos(textoSemLogos);
+  return removerMarcacoesLogos(textoRaw);
 }
 
 /* ── .odt ───────────────────────────────────────────────────── */
