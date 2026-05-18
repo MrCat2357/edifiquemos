@@ -415,7 +415,6 @@ function PostCardSerie({
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      localStorage.setItem("redirect-after-auth", window.location.href);
       setShowLoginBanner(true);
       return;
     }
@@ -481,7 +480,6 @@ function PostCardSerie({
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      localStorage.setItem("redirect-after-auth", window.location.href);
       setShowLoginBanner(true);
       return;
     }
@@ -719,7 +717,14 @@ function PostCardSerie({
                 style={{ padding: "0 1.125rem 0.625rem" }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <BannerLogin onClose={() => setShowLoginBanner(false)} />
+                <BannerLogin
+                  onClose={() => setShowLoginBanner(false)}
+                  redirectTo={
+                    typeof window !== "undefined"
+                      ? window.location.pathname + window.location.search
+                      : undefined
+                  }
+                />
               </div>
             )}
             {footerRow}
@@ -793,7 +798,14 @@ function PostCardSerie({
             style={{ padding: "0 1.125rem 0.625rem" }}
             onClick={(e) => e.stopPropagation()}
           >
-            <BannerLogin onClose={() => setShowLoginBanner(false)} />
+            <BannerLogin
+              onClose={() => setShowLoginBanner(false)}
+              redirectTo={
+                typeof window !== "undefined"
+                  ? window.location.pathname + window.location.search
+                  : undefined
+              }
+            />
           </div>
         )}
         {footerRow}
@@ -886,7 +898,6 @@ export default function SeriePage() {
   // ── curtir/descurtir a série ──
   async function handleSerieLike() {
     if (!uid) {
-      localStorage.setItem("redirect-after-auth", window.location.href);
       setShowSerieLoginBanner(true);
       return;
     }
@@ -942,6 +953,12 @@ export default function SeriePage() {
 
   const currentUid = uid;
   const isAutor = currentUid === serie.autorId;
+
+  // URL atual da série para o redirectTo do BannerLogin
+  const currentPath =
+    typeof window !== "undefined"
+      ? window.location.pathname + window.location.search
+      : `/series/${serieSlug}`;
 
   return (
     <>
@@ -1143,10 +1160,6 @@ export default function SeriePage() {
             <button
               onClick={() => {
                 if (!uid) {
-                  localStorage.setItem(
-                    "redirect-after-auth",
-                    window.location.href
-                  );
                   setShowSerieLoginBanner(true);
                   return;
                 }
@@ -1181,7 +1194,10 @@ export default function SeriePage() {
           {/* BannerLogin para ações da série */}
           {showSerieLoginBanner && (
             <div style={{ marginBottom: "0.75rem" }}>
-              <BannerLogin onClose={() => setShowSerieLoginBanner(false)} />
+              <BannerLogin
+                onClose={() => setShowSerieLoginBanner(false)}
+                redirectTo={currentPath}
+              />
             </div>
           )}
 

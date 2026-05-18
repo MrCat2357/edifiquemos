@@ -86,15 +86,14 @@ export default function CommentSection({
     ? { uid: user.uid, displayName: user.displayName, photoURL: user.photoURL }
     : null);
 
-  // Salva a URL atual e exibe o banner de login.
+  // Exibe o banner de login.
   // Chamado tanto pelo botão "Adicione um comentário..." quanto pelo
   // botão "Responder" em CommentItem quando o usuário não está logado.
+  // Não usa localStorage — o destino é passado via ?next= pelo componente pai
+  // (CardReflexao) ou pela própria página de detalhe ao redirecionar para /entrar.
   function requestLogin() {
-  if (typeof window !== "undefined" && !window.location.pathname.startsWith("/entrar")) {
-    localStorage.setItem("redirect-after-auth", window.location.href);
+    setShowBanner(true);
   }
-  setShowBanner(true);
-}
 
   async function handleReply(text: string, parentId: string, rootId: string) {
     if (!effectiveUser) return;

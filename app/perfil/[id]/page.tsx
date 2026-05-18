@@ -166,7 +166,8 @@ function SerieCardPublico({
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      localStorage.setItem("redirect-after-auth", window.location.href);
+      // Removido: localStorage.setItem("redirect-after-auth", ...)
+      // O BannerLogin é responsável por passar ?next= ao redirecionar
       setShowLoginBanner(true);
       return;
     }
@@ -192,7 +193,8 @@ function SerieCardPublico({
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      localStorage.setItem("redirect-after-auth", window.location.href);
+      // Removido: localStorage.setItem("redirect-after-auth", ...)
+      // O BannerLogin é responsável por passar ?next= ao redirecionar
       setShowLoginBanner(true);
       return;
     }
@@ -401,7 +403,12 @@ function PostCardPerfil({
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!currentUid) { setShowLoginBanner(true); return; }
+    if (!currentUid) {
+      // Removido: localStorage.setItem("redirect-after-auth", ...)
+      // O BannerLogin é responsável por passar ?next= ao redirecionar
+      setShowLoginBanner(true);
+      return;
+    }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
@@ -493,7 +500,12 @@ function PostCardPerfil({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (!currentUid) { setShowLoginBanner(true); return; }
+            if (!currentUid) {
+              // Removido: localStorage.setItem("redirect-after-auth", ...)
+              // O BannerLogin é responsável por passar ?next= ao redirecionar
+              setShowLoginBanner(true);
+              return;
+            }
             setShowComments((v) => !v);
           }}
           title="Ver comentários"

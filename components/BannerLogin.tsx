@@ -8,10 +8,25 @@ import Link from "next/link";
  * Uso:
  *   const [showLoginBanner, setShowLoginBanner] = useState(false);
  *   ...
- *   {showLoginBanner && <BannerLogin onClose={() => setShowLoginBanner(false)} />}
+ *   {showLoginBanner && (
+ *     <BannerLogin
+ *       onClose={() => setShowLoginBanner(false)}
+ *       redirectTo="/perfil"   ← opcional: para onde voltar após login
+ *     />
+ *   )}
  */
 
-export default function BannerLogin({ onClose }: { onClose: () => void }) {
+export default function BannerLogin({
+  onClose,
+  redirectTo,
+}: {
+  onClose: () => void;
+  redirectTo?: string;
+}) {
+  const href = redirectTo
+    ? `/entrar?redirect=${encodeURIComponent(redirectTo)}`
+    : "/entrar";
+
   return (
     <div className="login-banner" role="alert" aria-live="polite">
       <div className="login-banner-icon">🙏</div>
@@ -21,7 +36,7 @@ export default function BannerLogin({ onClose }: { onClose: () => void }) {
           Faça parte da nossa comunidade para curtir, salvar conteúdos e muito mais.
         </p>
       </div>
-      <Link href="/entrar" className="login-banner-btn">
+      <Link href={href} className="login-banner-btn">
         Entrar
       </Link>
       <button
