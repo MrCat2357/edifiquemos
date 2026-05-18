@@ -47,8 +47,6 @@ async function emailExisteNoFirestore(email: string): Promise<boolean> {
   return !snap.empty;
 }
 
-
-
 // ─── tipos ──────────────────────────────────────────────────────────────────
 
 type Etapa = "email" | "senha" | "cadastro" | "termos-google";
@@ -256,70 +254,78 @@ function EntrarForm() {
   // ── Google ───────────────────────────────────────────────────────────────
 
   async function handleGoogle() {
-  setError("");
-  setLoading(true);
+    setError("");
+    setLoading(true);
+    log("handleGoogle chamado — userAgent: " + navigator.userAgent.substring(0, 80));
 
-  const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: "select_account" });
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
 
-  try {
-    let result;
     try {
-      result = await signInWithPopup(auth, provider);
-    } catch (popupErr: any) {
-      // Popup bloqueado → tenta redirect como último recurso
-      if (popupErr.code === "auth/popup-blocked") {
-        await signInWithRedirect(auth, provider);
-        return; // página vai recarregar
-      }
-      if (popupErr.code === "auth/account-exists-with-different-credential") {
-        const methods = await fetchSignInMethodsForEmail(
-          auth,
-          popupErr.customData?.email ?? email
-        );
-        if (methods.includes("password")) {
-          setEtapa("senha");
-          setError(
-            "Sua conta usa senha. Entre com sua senha e depois poderá " +
-            "vincular o Google nas configurações."
-          );
-          setLoading(false);
+      let result;
+      try {
+        log("Tentando signInWithPopup...");
+        result = await signInWithPopup(auth, provider);
+        log("signInWithPopup OK uid=" + result.user.uid);
+      } catch (popupErr: any) {
+        log("Erro no popup: " + popupErr.code);
+        if (popupErr.code === "auth/popup-blocked") {
+          log("Popup bloqueado → tentando redirect...");
+          await signInWithRedirect(auth, provider);
           return;
         }
-      } else if (popupErr.code === "auth/popup-closed-by-user") {
+        if (popupErr.code === "auth/account-exists-with-different-credential") {
+          const methods = await fetchSignInMethodsForEmail(
+            auth,
+            popupErr.customData?.email ?? email
+          );
+          if (methods.includes("password")) {
+            setEtapa("senha");
+            setError(
+              "Sua conta usa senha. Entre com sua senha e depois poderá " +
+              "vincular o Google nas configurações."
+            );
+            setLoading(false);
+            return;
+          }
+        } else if (popupErr.code === "auth/popup-closed-by-user") {
+          log("Usuário fechou o popup");
+          setLoading(false);
+          return;
+        } else {
+          throw popupErr;
+        }
         setLoading(false);
         return;
-      } else {
-        throw popupErr;
       }
-      setLoading(false);
-      return;
+
+      const user = result.user;
+      const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      log("userSnap.exists: " + userSnap.exists());
+
+      if (userSnap.exists()) {
+        log("Usuário já existe → redirecionando");
+        redirecionarAposAuth();
+        return;
+      }
+
+      setDadosGoogle({
+        uid: user.uid,
+        nome: user.displayName ?? user.email?.split("@")[0] ?? "Usuário",
+        email: user.email ?? "",
+        fotoUrl: user.photoURL ?? null,
+      });
+      setAceitouTermos(false);
+      setEtapa("termos-google");
+    } catch (err: any) {
+      log("ERRO FINAL: " + err.code + " - " + err.message);
+      console.error(err);
+      setError("Erro ao entrar com Google. Tente novamente.");
     }
 
-    const user = result.user;
-    const userRef = doc(db, "users", user.uid);
-    const userSnap = await getDoc(userRef);
-
-    if (userSnap.exists()) {
-      redirecionarAposAuth();
-      return;
-    }
-
-    setDadosGoogle({
-      uid: user.uid,
-      nome: user.displayName ?? user.email?.split("@")[0] ?? "Usuário",
-      email: user.email ?? "",
-      fotoUrl: user.photoURL ?? null,
-    });
-    setAceitouTermos(false);
-    setEtapa("termos-google");
-  } catch (err: any) {
-    console.error(err);
-    setError("Erro ao entrar com Google. Tente novamente.");
+    setLoading(false);
   }
-
-  setLoading(false);
-}
 
   // ── passo final: confirmar termos e criar doc (Google) ───────────────────
 
