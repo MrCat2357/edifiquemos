@@ -82,18 +82,33 @@ function EntrarForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // ── Debug log visível na tela ──────────────────────────────────────────
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+
+  function log(msg: string) {
+    console.log(msg);
+    setDebugLog(prev => [...prev, msg]);
+  }
+
   // ── Captura o resultado do redirect (mobile) ao montar ──────────────────
   useEffect(() => {
     async function verificarRedirectResult() {
+      log("=== ENTRAR MONTOU ===");
+      log("sessionStorage: " + sessionStorage.getItem("redirect-after-auth"));
+      log("URL: " + window.location.href);
+
       try {
         const result = await getRedirectResult(auth);
+        log("getRedirectResult: " + (result ? "TEM RESULTADO uid=" + result.user.uid : "null"));
         if (!result) return;
 
         const user = result.user;
         const userRef = doc(db, "users", user.uid);
         const userSnap = await getDoc(userRef);
+        log("userSnap.exists: " + userSnap.exists());
 
         if (userSnap.exists()) {
+          log("Usuário já existe → redirecionando");
           redirecionarAposAuth();
           return;
         }
@@ -107,6 +122,7 @@ function EntrarForm() {
         setAceitouTermos(false);
         setEtapa("termos-google");
       } catch (err: any) {
+        log("ERRO: " + err.code + " - " + err.message);
         if (err.code === "auth/account-exists-with-different-credential") {
           const methods = await fetchSignInMethodsForEmail(
             auth,
@@ -132,26 +148,29 @@ function EntrarForm() {
 
   // ── utilitário de redirecionamento pós-auth ──────────────────────────────
   function redirecionarAposAuth() {
-  const raw = sessionStorage.getItem("redirect-after-auth");
-  sessionStorage.removeItem("redirect-after-auth");
+    const raw = sessionStorage.getItem("redirect-after-auth");
+    sessionStorage.removeItem("redirect-after-auth");
+    log("redirecionarAposAuth → raw: " + raw);
 
-  if (raw) {
-    try {
-      const url = new URL(raw);
-      if (!url.pathname.startsWith("/entrar")) {
-        router.push(url.pathname + url.search + url.hash);
-        return;
-      }
-    } catch {
-      if (!raw.startsWith("/entrar")) {
-        router.push(raw);
-        return;
+    if (raw) {
+      try {
+        const url = new URL(raw);
+        log("pathname: " + url.pathname);
+        if (!url.pathname.startsWith("/entrar")) {
+          router.push(url.pathname + url.search + url.hash);
+          return;
+        }
+      } catch {
+        if (!raw.startsWith("/entrar")) {
+          router.push(raw);
+          return;
+        }
       }
     }
-  }
 
-  router.push("/");
-}
+    log("Redirecionando para /");
+    router.push("/");
+  }
 
   // ── passo 1: verificar email ─────────────────────────────────────────────
 
@@ -246,14 +265,13 @@ function EntrarForm() {
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
 
-    // Mobile: usa redirect para evitar problemas com popup em webview
     if (isMobileDevice()) {
+      log("Mobile detectado → signInWithRedirect");
+      log("sessionStorage antes do redirect: " + sessionStorage.getItem("redirect-after-auth"));
       await signInWithRedirect(auth, provider);
-      // A página vai recarregar — o resultado é tratado no useEffect acima
       return;
     }
 
-    // Desktop: mantém o popup
     try {
       let result;
 
@@ -591,6 +609,22 @@ function EntrarForm() {
               Cancelar e voltar
             </button>
           </form>
+        )}
+
+        {/* ── Debug log visível na tela (remover após resolver o bug) ── */}
+        {debugLog.length > 0 && (
+          <div style={{
+            marginTop: "1rem",
+            padding: "0.75rem",
+            background: "#000",
+            color: "#0f0",
+            fontSize: "0.7rem",
+            borderRadius: "8px",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+          }}>
+            {debugLog.map((l, i) => <div key={i}>{l}</div>)}
+          </div>
         )}
 
       </div>
