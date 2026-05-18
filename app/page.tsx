@@ -23,7 +23,6 @@ import CardReflexao from "@/components/reflexoes/CardReflexao";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
 
-// Carrega o CommentSection apenas quando o usuário abre o painel
 const CommentSection = dynamic(
   () => import("@/components/comments/CommentSection"),
   { ssr: false, loading: () => null }
@@ -68,6 +67,8 @@ function getDataValor(item: any): number {
 function normalizar(str: string) {
   return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
+
+// ─── SVG Icons ────────────────────────────────────────────────────────────────
 
 function IconDownload({ size = 13 }: { size?: number }) {
   return (
@@ -142,56 +143,217 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   );
 }
 
-function SerieCard({ serie, index }: { serie: any; index: number }) {
+// ─── SerieCard ────────────────────────────────────────────────────────────────
+
+function SerieCardMeuPerfil({
+  serie, index, onToast,
+}: {
+  serie: any; index: number; onToast: (msg: string) => void;
+}) {
   const router = useRouter();
+  const uid = auth.currentUser?.uid ?? null;
+
   const postCount = serie.postIds?.length ?? 0;
+
+  const [liked, setLiked] = useState<boolean>(
+    () => (uid ? (serie.likedBy ?? []).includes(uid) : false)
+  );
+  const [likeCount, setLikeCount] = useState<number>(serie.likes ?? 0);
+  const [loadingLike, setLoadingLike] = useState(false);
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
+  const [showComments, setShowComments] = useState(false);
+  const [commentCount, setCommentCount] = useState<number>(serie.commentCount ?? 0);
+
+  async function handleLike(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!uid) {
+      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      setShowLoginBanner(true);
+      return;
+    }
+    if (loadingLike) return;
+    setLoadingLike(true);
+    try {
+      const ref = doc(db, "series", serie.id);
+      if (liked) {
+        await updateDoc(ref, { likes: increment(-1), likedBy: arrayRemove(uid) });
+        setLiked(false);
+        setLikeCount((n) => Math.max(0, n - 1));
+      } else {
+        await updateDoc(ref, { likes: increment(1), likedBy: arrayUnion(uid) });
+        setLiked(true);
+        setLikeCount((n) => n + 1);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+    setLoadingLike(false);
+  }
+
+  function handleToggleComments(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!uid) {
+      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      setShowLoginBanner(true);
+      return;
+    }
+    setShowComments((v) => !v);
+  }
+
+  async function handleDeletar(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm("Tem certeza que deseja apagar esta série?")) return;
+    try {
+      await deleteDoc(doc(db, "series", serie.id));
+      onToast("Série apagada.");
+      router.refresh();
+    } catch (err) {
+      console.error(err);
+      onToast("Erro ao apagar série.");
+    }
+  }
+
   return (
-    <article className="post-card serie-card" style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
-      onClick={() => router.push(`/series/${serie.slug}`)}>
+    <article
+      className="post-card serie-card"
+      style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
+      onClick={() => router.push(`/series/${serie.slug}`)}
+    >
       {serie.imagemUrl && (
         <div className="card-cover-wrapper">
           <img src={serie.imagemUrl} alt={serie.titulo} className="card-cover-img" />
-          <span className="cat-badge card-cover-badge" style={{ background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)", color: "var(--emerald)", borderColor: "var(--emerald-dim)" }}>
+          <span className="cat-badge card-cover-badge" style={{
+            background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)",
+            color: "var(--emerald)", borderColor: "var(--emerald-dim)",
+          }}>
             📚 Série
           </span>
         </div>
       )}
+
       <div style={{ padding: serie.imagemUrl ? "0.875rem 1.125rem 0.875rem" : undefined }}>
         {!serie.imagemUrl && (
           <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
-            <AuthorAvatar src={serie.autorFoto} name={serie.autorNome || "Autor"} size={36} />
-            <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-              <span className="author-name-link" onClick={(e) => { e.stopPropagation(); router.push(`/perfil/${serie.autorId}`); }}>
-                {serie.autorNome || "Autor"}
-              </span>
+            <div style={{ flex: 1 }}>
               <span className="card-meta">{postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
             </div>
-            <span className="cat-badge" style={{ color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)" }}>
+            <span className="cat-badge" style={{
+              color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)",
+            }}>
               📚 Série
             </span>
           </div>
         )}
+
         <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
           {serie.imagemUrl && (
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.375rem" }} onClick={(e) => e.stopPropagation()}>
-              <AuthorAvatar src={serie.autorFoto} name={serie.autorNome || "Autor"} size={22} />
-              <span className="author-name-link" onClick={(e) => { e.stopPropagation(); router.push(`/perfil/${serie.autorId}`); }} style={{ fontSize: "0.78rem" }}>
-                {serie.autorNome || "Autor"}
-              </span>
-              <span className="card-meta">· {postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
-            </div>
+            <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
+              {postCount} publicação{postCount !== 1 ? "ões" : ""}
+            </p>
           )}
-          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>{serie.titulo}</h2>
+          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>
+            {serie.titulo}
+          </h2>
           {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
         </div>
-        <div className="card-footer-row" style={{ display: "flex", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
-          <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic" }}>Coleção temática de sermões e estudos</span>
-          <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(`/series/${serie.slug}`)}>Ver série →</span>
+
+        {showLoginBanner && (
+          <div style={{ padding: "0 0 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+            <BannerLogin onClose={() => setShowLoginBanner(false)} />
+          </div>
+        )}
+
+        <div
+          className="card-footer-row"
+          style={{ display: "flex", alignItems: "center", gap: "0" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            {/* Botões de dono */}
+            <div style={{ display: "flex", gap: "0.5rem", marginRight: "4px" }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
+                className="post-btn-edit"
+                style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+              >
+                ✏ Editar
+              </button>
+              <button
+                onClick={handleDeletar}
+                className="post-btn-delete"
+                style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+              >
+                🗑 Apagar
+              </button>
+            </div>
+
+            {/* Curtir */}
+            <button
+              className={`action-btn ${liked ? "liked" : ""}`}
+              onClick={handleLike}
+              disabled={loadingLike}
+              title={liked ? "Remover curtida" : "Curtir"}
+              style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
+            >
+              <IconHeart size={13} filled={liked} />
+              Amei
+              {likeCount > 0 && (
+                <span style={{ fontSize: "0.72rem", color: liked ? "inherit" : "var(--emerald)", fontWeight: 700 }}>
+                  {likeCount}
+                </span>
+              )}
+            </button>
+
+            {/* Comentários */}
+            <button
+              onClick={handleToggleComments}
+              title="Ver comentários"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: "4px",
+                padding: 0, background: "none", border: "none",
+                color: showComments ? "var(--emerald)" : "var(--text-3)",
+                cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
+                transition: "color 0.15s",
+              }}
+            >
+              <IconComment size={13} active={showComments} />
+              Comentários
+              {commentCount > 0 && (
+                <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>
+                  {commentCount}
+                </span>
+              )}
+            </button>
+          </div>
+
+          <span
+            className="read-link"
+            style={{ marginLeft: "auto" }}
+            onClick={() => router.push(`/series/${serie.slug}`)}
+          >
+            Ver série →
+          </span>
         </div>
       </div>
+
+      {showComments && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            borderTop: "1px solid var(--border-light)",
+            padding: "1.25rem 1.125rem 1.5rem",
+            background: "var(--bg-elevated)",
+            borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
+          }}
+        >
+          <CommentSection postId={serie.id} onCountChange={setCommentCount} />
+        </div>
+      )}
     </article>
   );
 }
+
+// ─── PostCard ─────────────────────────────────────────────────────────────────
 
 function PostCard({ post, index, onAuthorClick, onToast }: {
   post: any; index: number;
@@ -265,7 +427,6 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
           {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
         </button>
 
-        {/* Botão de comentários */}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -300,6 +461,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
           {gerandoPdf ? <><span className="btn-spinner" />PDF</> : <><IconDownload size={13} />PDF</>}
           {downloadCount > 0 && <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}>{downloadCount}</span>}
         </button>
+
         {viewCount > 0 && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}>
             <IconEye size={13} />{viewCount}
@@ -310,7 +472,6 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
     </div>
   );
 
-  // Painel de comentários colapsável — compartilhado entre os dois layouts
   const commentsPanel = showComments && (
     <div
       onClick={(e) => e.stopPropagation()}
@@ -389,9 +550,8 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// ReflexaoFeedCard — wrapper do CardReflexao para o feed
-// ─────────────────────────────────────────────────────────────
+// ─── ReflexaoFeedCard ─────────────────────────────────────────────────────────
+
 function ReflexaoFeedCard({
   reflexao,
   index,
@@ -424,10 +584,7 @@ function ReflexaoFeedCard({
     <div style={{ position: "relative", animationDelay: `${index * 60}ms` }} className="reflexao-feed-item">
       <CardReflexao reflexao={reflexao} />
       {isAutor && (
-        <div
-          className="reflexao-owner-actions"
-          onClick={(e) => e.stopPropagation()}
-        >
+        <div className="reflexao-owner-actions" onClick={(e) => e.stopPropagation()}>
           <a
             href={`/${reflexao.autorSlug}/reflexao/${reflexao.slug}/editar`}
             className="reflexao-action-btn reflexao-action-edit"
@@ -448,6 +605,8 @@ function ReflexaoFeedCard({
   );
 }
 
+// ─── FeedItem ─────────────────────────────────────────────────────────────────
+
 function FeedItem({ item, index, onAuthorClick, onToast, currentUid, onReflexaoDeleted }: {
   item: any; index: number;
   onAuthorClick: (e: React.MouseEvent, id: string) => void;
@@ -455,7 +614,7 @@ function FeedItem({ item, index, onAuthorClick, onToast, currentUid, onReflexaoD
   currentUid: string | null;
   onReflexaoDeleted: (id: string) => void;
 }) {
-  if (item._feedType === "serie") return <SerieCard serie={item} index={index} />;
+  if (item._feedType === "serie") return <SerieCardMeuPerfil serie={item} index={index} onToast={onToast} />;
   if (item._feedType === "reflexao") {
     return (
       <ReflexaoFeedCard
@@ -470,9 +629,8 @@ function FeedItem({ item, index, onAuthorClick, onToast, currentUid, onReflexaoD
   return <PostCard post={item} index={index} onAuthorClick={onAuthorClick} onToast={onToast} />;
 }
 
-// ─────────────────────────────────────────────────────────────
-// Componente interno que usa useSearchParams — envolto em Suspense
-// ─────────────────────────────────────────────────────────────
+// ─── HomePageContent ──────────────────────────────────────────────────────────
+
 function HomePageContent() {
   const { user } = useAuth();
   const router = useRouter();
@@ -523,10 +681,8 @@ function HomePageContent() {
     fetchAll();
   }, []);
 
-  // Reset paginação ao mudar busca
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [buscaAtiva]);
 
-  // Scroll automático para o feed ao realizar pesquisa
   useEffect(() => {
     if (!buscaAtiva) return;
     const timer = setTimeout(() => {
@@ -770,9 +926,8 @@ function HomePageContent() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────
-// Exportação padrão: envolve HomePageContent em Suspense
-// ─────────────────────────────────────────────────────────────
+// ─── HomePage ─────────────────────────────────────────────────────────────────
+
 export default function HomePage() {
   return (
     <Suspense fallback={
