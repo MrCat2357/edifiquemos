@@ -86,8 +86,13 @@ function EntrarForm() {
   useEffect(() => {
     async function verificarRedirectResult() {
       try {
+        console.log("🔍 Verificando redirect result...");
         const result = await getRedirectResult(auth);
-        if (!result) return;
+        console.log("✅ Result:", JSON.stringify(result));
+        if (!result) {
+          console.log("❌ Result nulo");
+          return;
+        }
 
         const user = result.user;
         const userRef = doc(db, "users", user.uid);
