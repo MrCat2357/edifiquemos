@@ -832,11 +832,11 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       const uid = auth.currentUser?.uid;
       if (!uid) return;
       const sessionKey = `viewed_${postId}`;
-      if (sessionStorage.getItem(sessionKey)) return;
+      if (localStorage.getItem(sessionKey)) return;
       try {
         const ref = doc(db, "posts", postId);
         await updateDoc(ref, { visualizacoes: increment(1) });
-        sessionStorage.setItem(sessionKey, "1");
+        localStorage.setItem(sessionKey, "1");
         setViewCount((n) => n + 1);
       } catch (err) {
         console.error("Erro ao registrar visualização:", err);
@@ -926,7 +926,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   async function handleLike() {
     const uid = auth.currentUser?.uid;
     if (!uid) {
-  sessionStorage.setItem("redirect-after-auth", window.location.href);
+  localStorage.setItem("redirect-after-auth", window.location.href);
   setShowLoginBanner(true);
   return;
 }

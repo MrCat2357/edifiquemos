@@ -91,7 +91,7 @@ export default function CommentSection({
   // botão "Responder" em CommentItem quando o usuário não está logado.
   function requestLogin() {
   if (typeof window !== "undefined" && !window.location.pathname.startsWith("/entrar")) {
-    sessionStorage.setItem("redirect-after-auth", window.location.href);
+    localStorage.setItem("redirect-after-auth", window.location.href);
   }
   setShowBanner(true);
 }

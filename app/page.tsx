@@ -167,7 +167,7 @@ function SerieCardMeuPerfil({
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      localStorage.setItem("redirect-after-auth", window.location.href);
       setShowLoginBanner(true);
       return;
     }
@@ -193,7 +193,7 @@ function SerieCardMeuPerfil({
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      localStorage.setItem("redirect-after-auth", window.location.href);
       setShowLoginBanner(true);
       return;
     }
@@ -378,7 +378,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      sessionStorage.setItem("redirect-after-auth", window.location.href);
+      localStorage.setItem("redirect-after-auth", window.location.href);
       setShowLoginBanner(true);
       return;
     }
@@ -431,7 +431,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
           onClick={(e) => {
             e.stopPropagation();
             if (!uid) {
-              sessionStorage.setItem("redirect-after-auth", window.location.href);
+              localStorage.setItem("redirect-after-auth", window.location.href);
               setShowLoginBanner(true);
               return;
             }

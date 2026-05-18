@@ -89,7 +89,7 @@ function EntrarForm() {
   useEffect(() => {
     async function verificarRedirectResult() {
       log("=== ENTRAR MONTOU ===");
-      log("sessionStorage: " + sessionStorage.getItem("redirect-after-auth"));
+      log("localStorage: " + localStorage.getItem("redirect-after-auth"));
       log("URL: " + window.location.href);
 
       try {
@@ -143,8 +143,8 @@ function EntrarForm() {
 
   // ── utilitário de redirecionamento pós-auth ──────────────────────────────
   function redirecionarAposAuth() {
-    const raw = sessionStorage.getItem("redirect-after-auth");
-    sessionStorage.removeItem("redirect-after-auth");
+    const raw = localStorage.getItem("redirect-after-auth");
+    localStorage.removeItem("redirect-after-auth");
     log("redirecionarAposAuth → raw: " + raw);
 
     if (raw) {
