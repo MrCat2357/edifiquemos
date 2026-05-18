@@ -15,15 +15,12 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: "user",
-          content: `Você receberá um texto extraído de um PDF. Por causa disso, ele pode ter linhas quebradas artificialmente no meio de frases e parágrafos mal separados.
-
-Faça as seguintes correções:
-1. Una as linhas quebradas artificialmente, juntando palavras e frases que foram cortadas no meio por causa do layout do PDF. O critério é simples: se uma linha não termina com pontuação final (ponto, exclamação, interrogação, dois-pontos, reticências), ela deve ser unida à linha seguinte.
-2. Garanta exatamente uma linha em branco entre cada parágrafo.
-3. Corrija erros de gramática, ortografia e pontuação.
-4. NÃO altere o conteúdo, estilo, vocabulário teológico nem a estrutura do texto.
-5. NÃO adicione nem remova parágrafos.
-6. Retorne APENAS o texto corrigido, sem comentários, sem explicações, sem marcadores.
+          content: `Você receberá um texto já com parágrafos bem formados. Faça apenas as seguintes correções:
+1. Corrija erros de gramática, ortografia e pontuação.
+2. NÃO altere o conteúdo, estilo, vocabulário teológico nem a estrutura do texto.
+3. NÃO adicione nem remova parágrafos.
+4. NÃO una nem quebre linhas — preserve a estrutura de parágrafos existente.
+5. Retorne APENAS o texto corrigido, sem comentários, sem explicações, sem marcadores.
 
 Texto:
 ${conteudo}`,
