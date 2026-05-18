@@ -269,6 +269,11 @@ function PostCardMeuPerfil({
     ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`
     : `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
 
+  // URL atual para passar ao BannerLogin como destino pós-login
+  const currentPath = typeof window !== "undefined"
+    ? window.location.pathname + window.location.search
+    : "/perfil";
+
   function buildFrase() {
     const data = formatData(post.data);
     if (post.tipo === "sermao") {
@@ -423,7 +428,11 @@ function PostCardMeuPerfil({
           </div>
           {showLoginBanner && (
             <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-              <BannerLogin onClose={() => setShowLoginBanner(false)} />
+              {/* redirectTo garante que após login o usuário volta para esta página */}
+              <BannerLogin
+                onClose={() => setShowLoginBanner(false)}
+                redirectTo={currentPath}
+              />
             </div>
           )}
           {footerRow}
@@ -453,7 +462,11 @@ function PostCardMeuPerfil({
       </div>
       {showLoginBanner && (
         <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-          <BannerLogin onClose={() => setShowLoginBanner(false)} />
+          {/* redirectTo garante que após login o usuário volta para esta página */}
+          <BannerLogin
+            onClose={() => setShowLoginBanner(false)}
+            redirectTo={currentPath}
+          />
         </div>
       )}
       {footerRow}

@@ -167,8 +167,7 @@ function SerieCardMeuPerfil({
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      localStorage.setItem("redirect-after-auth", window.location.href);
-      setShowLoginBanner(true);
+      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       return;
     }
     if (loadingLike) return;
@@ -193,8 +192,7 @@ function SerieCardMeuPerfil({
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      localStorage.setItem("redirect-after-auth", window.location.href);
-      setShowLoginBanner(true);
+      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       return;
     }
     setShowComments((v) => !v);
@@ -378,8 +376,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      localStorage.setItem("redirect-after-auth", window.location.href);
-      setShowLoginBanner(true);
+      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       return;
     }
     if (loadingLike) return;
@@ -431,8 +428,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
           onClick={(e) => {
             e.stopPropagation();
             if (!uid) {
-              localStorage.setItem("redirect-after-auth", window.location.href);
-              setShowLoginBanner(true);
+              router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
               return;
             }
             setShowComments((v) => !v);

@@ -77,33 +77,50 @@ function EntrarForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // ── Debug log visível na tela ──────────────────────────────────────────
-  const [debugLog, setDebugLog] = useState<string[]>([]);
+  // ── Resolve para onde redirecionar após auth ─────────────────────────────
+  // Prioridade: ?next= na URL > localStorage (fallback legado)
+  function getNextUrl(): string {
+    const next = searchParams.get("next");
+    if (next && !next.startsWith("/entrar")) return next;
 
-  function log(msg: string) {
-    console.log(msg);
-    setDebugLog(prev => [...prev, msg]);
+    try {
+      const raw = localStorage.getItem("redirect-after-auth");
+      if (raw) {
+        const pathname = raw.startsWith("http")
+          ? new URL(raw).pathname + new URL(raw).search
+          : raw;
+        if (!pathname.startsWith("/entrar")) return pathname;
+      }
+    } catch {
+      // localStorage indisponível (modo privado extremo)
+    }
+
+    return "/";
+  }
+
+  // ── utilitário de redirecionamento pós-auth ──────────────────────────────
+  function redirecionarAposAuth() {
+    try {
+      localStorage.removeItem("redirect-after-auth");
+    } catch {
+      // ignora
+    }
+    const destino = getNextUrl();
+    router.push(destino);
   }
 
   // ── Captura o resultado do redirect (mobile) ao montar ──────────────────
   useEffect(() => {
     async function verificarRedirectResult() {
-      log("=== ENTRAR MONTOU ===");
-      log("localStorage: " + localStorage.getItem("redirect-after-auth"));
-      log("URL: " + window.location.href);
-
       try {
         const result = await getRedirectResult(auth);
-        log("getRedirectResult: " + (result ? "TEM RESULTADO uid=" + result.user.uid : "null"));
         if (!result) return;
 
         const user = result.user;
         const userRef = doc(db, "users", user.uid);
         const userSnap = await getDoc(userRef);
-        log("userSnap.exists: " + userSnap.exists());
 
         if (userSnap.exists()) {
-          log("Usuário já existe → redirecionando");
           redirecionarAposAuth();
           return;
         }
@@ -117,7 +134,6 @@ function EntrarForm() {
         setAceitouTermos(false);
         setEtapa("termos-google");
       } catch (err: any) {
-        log("ERRO: " + err.code + " - " + err.message);
         if (err.code === "auth/account-exists-with-different-credential") {
           const methods = await fetchSignInMethodsForEmail(
             auth,
@@ -140,32 +156,6 @@ function EntrarForm() {
     verificarRedirectResult();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // ── utilitário de redirecionamento pós-auth ──────────────────────────────
-  function redirecionarAposAuth() {
-    const raw = localStorage.getItem("redirect-after-auth");
-    localStorage.removeItem("redirect-after-auth");
-    log("redirecionarAposAuth → raw: " + raw);
-
-    if (raw) {
-      try {
-        const url = new URL(raw);
-        log("pathname: " + url.pathname);
-        if (!url.pathname.startsWith("/entrar")) {
-          router.push(url.pathname + url.search + url.hash);
-          return;
-        }
-      } catch {
-        if (!raw.startsWith("/entrar")) {
-          router.push(raw);
-          return;
-        }
-      }
-    }
-
-    log("Redirecionando para /");
-    router.push("/");
-  }
 
   // ── passo 1: verificar email ─────────────────────────────────────────────
 
@@ -256,7 +246,6 @@ function EntrarForm() {
   async function handleGoogle() {
     setError("");
     setLoading(true);
-    log("handleGoogle chamado — userAgent: " + navigator.userAgent.substring(0, 80));
 
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
@@ -264,13 +253,22 @@ function EntrarForm() {
     try {
       let result;
       try {
-        log("Tentando signInWithPopup...");
         result = await signInWithPopup(auth, provider);
-        log("signInWithPopup OK uid=" + result.user.uid);
       } catch (popupErr: any) {
-        log("Erro no popup: " + popupErr.code);
-        if (popupErr.code === "auth/popup-blocked") {
-          log("Popup bloqueado → tentando redirect...");
+        if (
+          popupErr.code === "auth/popup-blocked" ||
+          popupErr.code === "auth/cancelled-popup-request"
+        ) {
+          // No mobile o popup pode bloquear sem erro explícito — usamos redirect.
+          // Preservamos o destino no próprio URL atual (já tem ?next=) para
+          // sobreviver ao redirect OAuth. Também gravamos no localStorage
+          // como fallback extra.
+          const next = getNextUrl();
+          try {
+            if (next !== "/") localStorage.setItem("redirect-after-auth", next);
+          } catch {
+            // ignora
+          }
           await signInWithRedirect(auth, provider);
           return;
         }
@@ -289,7 +287,6 @@ function EntrarForm() {
             return;
           }
         } else if (popupErr.code === "auth/popup-closed-by-user") {
-          log("Usuário fechou o popup");
           setLoading(false);
           return;
         } else {
@@ -302,10 +299,8 @@ function EntrarForm() {
       const user = result.user;
       const userRef = doc(db, "users", user.uid);
       const userSnap = await getDoc(userRef);
-      log("userSnap.exists: " + userSnap.exists());
 
       if (userSnap.exists()) {
-        log("Usuário já existe → redirecionando");
         redirecionarAposAuth();
         return;
       }
@@ -319,7 +314,6 @@ function EntrarForm() {
       setAceitouTermos(false);
       setEtapa("termos-google");
     } catch (err: any) {
-      log("ERRO FINAL: " + err.code + " - " + err.message);
       console.error(err);
       setError("Erro ao entrar com Google. Tente novamente.");
     }
@@ -609,22 +603,6 @@ function EntrarForm() {
               Cancelar e voltar
             </button>
           </form>
-        )}
-
-        {/* ── Debug log visível na tela (remover após resolver o bug) ── */}
-        {debugLog.length > 0 && (
-          <div style={{
-            marginTop: "1rem",
-            padding: "0.75rem",
-            background: "#000",
-            color: "#0f0",
-            fontSize: "0.7rem",
-            borderRadius: "8px",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-all",
-          }}>
-            {debugLog.map((l, i) => <div key={i}>{l}</div>)}
-          </div>
         )}
 
       </div>
