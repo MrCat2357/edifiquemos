@@ -78,11 +78,25 @@ function EntrarForm() {
   const [error, setError] = useState("");
 
   // ── Resolve para onde redirecionar após auth ─────────────────────────────
-  // Prioridade: ?next= na URL > localStorage (fallback legado)
+  // Ordem de prioridade:
+  //   1. ?next= na URL atual (fluxo normal popup ou link direto)
+  //   2. sessionStorage "auth-next" (sobrevive ao redirect OAuth na mesma aba)
+  //   3. localStorage "redirect-after-auth" (fallback legado)
+  //   4. "/" (home)
   function getNextUrl(): string {
+    // 1. parâmetro ?next= na URL
     const next = searchParams.get("next");
     if (next && !next.startsWith("/entrar")) return next;
 
+    // 2. sessionStorage — persiste durante o redirect OAuth (mesma aba)
+    try {
+      const saved = sessionStorage.getItem("auth-next");
+      if (saved && !saved.startsWith("/entrar")) return saved;
+    } catch {
+      // sessionStorage indisponível (raro)
+    }
+
+    // 3. localStorage — fallback legado
     try {
       const raw = localStorage.getItem("redirect-after-auth");
       if (raw) {
@@ -100,7 +114,9 @@ function EntrarForm() {
 
   // ── utilitário de redirecionamento pós-auth ──────────────────────────────
   function redirecionarAposAuth() {
+    // Limpa ambos os storages antes de ler o destino para evitar reuso
     try {
+      sessionStorage.removeItem("auth-next");
       localStorage.removeItem("redirect-after-auth");
     } catch {
       // ignora
@@ -259,15 +275,14 @@ function EntrarForm() {
           popupErr.code === "auth/popup-blocked" ||
           popupErr.code === "auth/cancelled-popup-request"
         ) {
-          // No mobile o popup pode bloquear sem erro explícito — usamos redirect.
-          // Preservamos o destino no próprio URL atual (já tem ?next=) para
-          // sobreviver ao redirect OAuth. Também gravamos no localStorage
-          // como fallback extra.
+          // Salva o destino no sessionStorage antes do redirect OAuth.
+          // O sessionStorage sobrevive ao redirect (mesma aba) ao contrário
+          // do ?next= que se perde quando o Google redireciona de volta.
           const next = getNextUrl();
           try {
-            if (next !== "/") localStorage.setItem("redirect-after-auth", next);
+            sessionStorage.setItem("auth-next", next);
           } catch {
-            // ignora
+            // ignora — getNextUrl() ainda tentará o localStorage como fallback
           }
           await signInWithRedirect(auth, provider);
           return;
