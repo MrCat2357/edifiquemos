@@ -265,12 +265,12 @@ function PostCardMeuPerfil({
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
+  // ?from=perfil — indica ao PostDetailContent que deve navegar pelos posts do mesmo autor
   const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}?from=perfil`;
   const fullUrl = typeof window !== "undefined"
     ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`
     : `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
 
-  // URL atual para passar ao BannerLogin como destino pós-login
   const currentPath = typeof window !== "undefined"
     ? window.location.pathname + window.location.search
     : "/perfil";
@@ -429,7 +429,6 @@ function PostCardMeuPerfil({
           </div>
           {showLoginBanner && (
             <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-              {/* redirectTo garante que após login o usuário volta para esta página */}
               <BannerLogin
                 onClose={() => setShowLoginBanner(false)}
                 redirectTo={currentPath}
@@ -463,7 +462,6 @@ function PostCardMeuPerfil({
       </div>
       {showLoginBanner && (
         <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-          {/* redirectTo garante que após login o usuário volta para esta página */}
           <BannerLogin
             onClose={() => setShowLoginBanner(false)}
             redirectTo={currentPath}
@@ -479,7 +477,6 @@ function PostCardMeuPerfil({
 /* ── Perfil (meu perfil) ────────────────────────────── */
 
 function PerfilContent() {
-  // todo o corpo continua igual, sem mudar nada dentro
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -506,9 +503,9 @@ function PerfilContent() {
   const [reflexoes, setReflexoes] = useState<Reflexao[]>([]);
   const searchParams = useSearchParams();
   const [aba, setAba] = useState<"posts" | "series" | "reflexoes">(() => {
-  const abaParam = searchParams.get("aba");
-  if (abaParam === "reflexoes" || abaParam === "series") return abaParam;
-  return "posts";
+    const abaParam = searchParams.get("aba");
+    if (abaParam === "reflexoes" || abaParam === "series") return abaParam;
+    return "posts";
   });
 
   const [toastMsg, setToastMsg] = useState("");
@@ -570,14 +567,12 @@ function PerfilContent() {
 
   useEffect(() => { carregar(); }, []);
 
-  // Recarrega reflexões ao entrar na aba (para pegar as recém-criadas)
   useEffect(() => {
     if (aba === "reflexoes" && uid) {
       getReflexoesPorAutor(uid).then(setReflexoes).catch(console.error);
     }
   }, [aba, uid]);
 
-  // Recarrega séries ao entrar na aba
   useEffect(() => {
     if (aba === "series" && uid) {
       getDocs(query(
@@ -817,7 +812,6 @@ function PerfilContent() {
 
           {aba === "reflexoes" && (
             <>
-              {/* Botão de criação no topo da aba */}
               <div style={{ marginBottom: "1.25rem" }}>
                 {uid && autorSlug && (
                   <BotaoGerarReflexoes
