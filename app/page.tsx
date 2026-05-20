@@ -164,6 +164,9 @@ function SerieCardMeuPerfil({
   const [showComments, setShowComments] = useState(false);
   const [commentCount, setCommentCount] = useState<number>(serie.commentCount ?? 0);
 
+  // ── CORREÇÃO: passa ?from=home para que SerieNavigation use o feed global ──
+  const serieUrl = `/series/${serie.slug}?from=home`;
+
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
@@ -215,7 +218,7 @@ function SerieCardMeuPerfil({
     <article
       className="post-card serie-card"
       style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
-      onClick={() => router.push(`/series/${serie.slug}`)}
+      onClick={() => router.push(serieUrl)}
     >
       {serie.imagemUrl && (
         <div className="card-cover-wrapper">
@@ -267,24 +270,6 @@ function SerieCardMeuPerfil({
           onClick={(e) => e.stopPropagation()}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-            {/* Botões de dono */}
-            <div style={{ display: "flex", gap: "0.5rem", marginRight: "4px" }}>
-              <button
-                onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
-                className="post-btn-edit"
-                style={{ fontSize: "0.78rem", padding: "5px 12px" }}
-              >
-                ✏ Editar
-              </button>
-              <button
-                onClick={handleDeletar}
-                className="post-btn-delete"
-                style={{ fontSize: "0.78rem", padding: "5px 12px" }}
-              >
-                🗑 Apagar
-              </button>
-            </div>
-
             {/* Curtir */}
             <button
               className={`action-btn ${liked ? "liked" : ""}`}
@@ -327,7 +312,7 @@ function SerieCardMeuPerfil({
           <span
             className="read-link"
             style={{ marginLeft: "auto" }}
-            onClick={() => router.push(`/series/${serie.slug}`)}
+            onClick={(e) => { e.stopPropagation(); router.push(serieUrl); }}
           >
             Ver série →
           </span>
@@ -370,8 +355,11 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
 
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
-  const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
-  const fullUrl = typeof window !== "undefined" ? window.location.origin + url : url;
+
+  // ── CORREÇÃO: passa ?from=home para que PostNavigation use o feed global ──
+  const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}?from=home`;
+  const urlSemContexto = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
+  const fullUrl = typeof window !== "undefined" ? window.location.origin + urlSemContexto : urlSemContexto;
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
@@ -561,7 +549,13 @@ function ReflexaoFeedCard({
   onDeleted: (id: string) => void;
   onToast: (msg: string) => void;
 }) {
+  const router = useRouter();
   const isAutor = !!currentUid && currentUid === reflexao.autorId;
+
+  // ── CORREÇÃO: passa ?from=home para que ReflexaoNavigation use o feed global ──
+  function handleCardClick() {
+    router.push(`/${reflexao.autorSlug}/reflexao/${reflexao.slug}?from=home`);
+  }
 
   async function handleDelete(e: React.MouseEvent) {
     e.stopPropagation();
@@ -578,7 +572,18 @@ function ReflexaoFeedCard({
 
   return (
     <div style={{ position: "relative", animationDelay: `${index * 60}ms` }} className="reflexao-feed-item">
-      <CardReflexao reflexao={reflexao} />
+      {/*
+        CardReflexao não aceita um override de URL internamente, então
+        envolvemos o card num wrapper clicável que intercepta o clique
+        antes que o card navegue para a URL padrão (sem ?from=home).
+        O CardReflexao continua renderizando normalmente.
+      */}
+      <div
+        style={{ cursor: "pointer" }}
+        onClick={handleCardClick}
+      >
+        <CardReflexao reflexao={reflexao} disableNavigation />
+      </div>
       {isAutor && (
         <div className="reflexao-owner-actions" onClick={(e) => e.stopPropagation()}>
           <a
@@ -769,12 +774,9 @@ function HomePageContent() {
             {user ? (
               <Link href="/criar-post" className="btn-hero-secondary">Publicar Sermão ou Estudo</Link>
             ) : (
-              <Link
-  href="/entrar?next=%2F"
-  className="btn-hero-secondary"
->
-  Entrar para Publicar
-</Link>
+              <Link href="/entrar?next=%2F" className="btn-hero-secondary">
+                Entrar para Publicar
+              </Link>
             )}
           </div>
         </div>

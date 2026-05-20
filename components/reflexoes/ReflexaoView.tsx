@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
 import {
   doc,
@@ -10,6 +10,12 @@ import {
   arrayUnion,
   arrayRemove,
   increment,
+  collection,
+  query,
+  where,
+  orderBy,
+  getDocs,
+  getDoc,
 } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import type { Reflexao } from "@/lib/reflexoes";
@@ -17,7 +23,6 @@ import CompartilharWhatsapp from "@/components/reflexoes/CompartilharWhatsapp";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
 
-// Carregado de forma lazy para não bloquear o render inicial
 const CommentSection = dynamic(
   () => import("@/components/comments/CommentSection"),
   { ssr: false, loading: () => null }
@@ -50,6 +55,396 @@ function IconComment({ size = 16 }: { size?: number }) {
   );
 }
 
+function IconArrowLeft({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M7.5 2L3.5 6l4 4" stroke="currentColor" strokeWidth="1.4"
+        strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconArrowRight({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 12 12" fill="none"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path d="M4.5 2L8.5 6l-4 4" stroke="currentColor" strokeWidth="1.4"
+        strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// ── Avatar pequeno para nav ───────────────────────────────────────────────────
+
+function NavAvatar({ src, name, size = 22 }: { src?: string | null; name: string; size?: number }) {
+  if (src) {
+    return (
+      <img src={src} alt={name} style={{
+        width: size, height: size, borderRadius: "50%",
+        objectFit: "cover", flexShrink: 0,
+      }} />
+    );
+  }
+  const initials = name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: "50%",
+      background: "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
+      color: "#fff", fontSize: Math.round(size * 0.4) + "px", fontWeight: 700,
+      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+    }}>
+      {initials}
+    </div>
+  );
+}
+
+// ── helpers de feed global ────────────────────────────────────────────────────
+
+function getDataValor(item: any): number {
+  if (!item) return 0;
+  const d = item.criadoEm || item.data;
+  if (!d) return 0;
+  if (d?.toDate) return d.toDate().getTime();
+  if (typeof d === "string") return new Date(d).getTime();
+  return 0;
+}
+
+type FeedNavItem = {
+  id: string;
+  _feedType: "post" | "serie" | "reflexao";
+  titulo: string;
+  slug?: string;
+  tipo?: string;
+  autorId?: string;
+  autorNome?: string;
+  autorSlug?: string;
+};
+
+async function fetchFeedGlobal(): Promise<FeedNavItem[]> {
+  const [postsSnap, seriesSnap, reflexoesSnap] = await Promise.all([
+    getDocs(query(collection(db, "posts"), where("tipo", "in", ["sermao", "artigo"]), orderBy("data", "desc"))),
+    getDocs(query(collection(db, "series"), orderBy("criadoEm", "desc"))),
+    getDocs(query(collection(db, "posts"), where("tipo", "==", "reflexao"), orderBy("criadoEm", "desc"))),
+  ]);
+
+  const posts: FeedNavItem[] = [];
+  postsSnap.forEach((d) => posts.push({ id: d.id, _feedType: "post", ...d.data() } as FeedNavItem));
+
+  const series: FeedNavItem[] = [];
+  seriesSnap.forEach((d) => series.push({ id: d.id, _feedType: "serie", ...d.data() } as FeedNavItem));
+
+  const reflexoes: FeedNavItem[] = [];
+  reflexoesSnap.forEach((d) => reflexoes.push({ id: d.id, _feedType: "reflexao", ...d.data() } as FeedNavItem));
+
+  return [...posts, ...series, ...reflexoes].sort(
+    (a, b) => getDataValor(b) - getDataValor(a)
+  );
+}
+
+function feedItemUrl(item: FeedNavItem): string {
+  if (item._feedType === "serie") return `/series/${item.slug ?? item.id}?from=home`;
+  if (item._feedType === "reflexao") {
+    const aSlug = item.autorSlug ?? item.autorId ?? "";
+    return `/${aSlug}/reflexao/${item.slug ?? item.id}?from=home`;
+  }
+  const cat = item.tipo === "sermao" ? "sermoes" : "estudos";
+  return `/posts/${cat}/${item.slug ?? item.id}?from=home`;
+}
+
+function feedItemLabel(item: FeedNavItem, direction: "prev" | "next"): string {
+  const prefix = direction === "prev" ? "Anterior" : "Próximo";
+  if (item._feedType === "serie") return `${prefix}: série`;
+  if (item._feedType === "reflexao") return `Reflexão ${direction === "prev" ? "anterior" : "próxima"}`;
+  if (item.tipo === "sermao") return `Sermão ${direction === "prev" ? "anterior" : "próximo"}`;
+  return `Estudo ${direction === "prev" ? "anterior" : "próximo"}`;
+}
+
+// ── Tipos de navegação ────────────────────────────────────────────────────────
+
+type ReflexaoNav = {
+  id: string;
+  titulo: string;
+  slug: string;
+  autorSlug: string;
+  autorNome: string;
+  autorFoto: string | null;
+};
+
+type NavAutor = { nome: string; fotoUrl: string | null };
+
+// ── ReflexaoNavigation ────────────────────────────────────────────────────────
+// Suporta três modos:
+//   ?from=home  → feed global misturado
+//   sem param   → reflexões do mesmo autor (comportamento original)
+
+function ReflexaoNavigation({
+  reflexaoId,
+  autorId,
+  autorSlugAtual,
+}: {
+  reflexaoId: string;
+  autorId: string;
+  autorSlugAtual: string;
+}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromHome = searchParams.get("from") === "home";
+
+  const [prev, setPrev] = useState<FeedNavItem | ReflexaoNav | null>(null);
+  const [next, setNext] = useState<FeedNavItem | ReflexaoNav | null>(null);
+  const [prevAutor, setPrevAutor] = useState<NavAutor | null>(null);
+  const [nextAutor, setNextAutor] = useState<NavAutor | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchNav() {
+      try {
+        // ── Modo A: feed global misturado (?from=home) ─────────────────────
+        if (fromHome) {
+          const all = await fetchFeedGlobal();
+          const idx = all.findIndex((item) => item.id === reflexaoId);
+          if (idx === -1) { setLoading(false); return; }
+
+          const p = idx - 1 >= 0         ? all[idx - 1] : null;
+          const n = idx + 1 < all.length ? all[idx + 1] : null;
+          setPrev(p);
+          setNext(n);
+
+          async function autorFromFeedItem(item: FeedNavItem): Promise<NavAutor> {
+            const aId = item.autorId;
+            if (!aId) return { nome: item.autorNome || "Autor", fotoUrl: null };
+            try {
+              const snap = await getDoc(doc(db, "users", aId));
+              if (snap.exists()) {
+                const d = snap.data();
+                return {
+                  nome: d.titulo && d.nome
+                    ? `${d.titulo.trim()} ${d.nome.trim()}`
+                    : d.nome?.trim() || item.autorNome || "Autor",
+                  fotoUrl: d.fotoUrl ?? null,
+                };
+              }
+            } catch {}
+            return { nome: item.autorNome || "Autor", fotoUrl: null };
+          }
+
+          const [pa, na] = await Promise.all([
+            p ? autorFromFeedItem(p as FeedNavItem) : Promise.resolve(null),
+            n ? autorFromFeedItem(n as FeedNavItem) : Promise.resolve(null),
+          ]);
+          setPrevAutor(pa);
+          setNextAutor(na);
+          setLoading(false);
+          return;
+        }
+
+        // ── Modo B: reflexões do mesmo autor (comportamento original) ───────
+        const autorSnap = await getDoc(doc(db, "users", autorId));
+        let fotoUrl: string | null = null;
+        let nomeCompleto = "";
+        if (autorSnap.exists()) {
+          const d = autorSnap.data();
+          fotoUrl = d.fotoUrl ?? null;
+          nomeCompleto =
+            d.titulo && d.nome
+              ? `${d.titulo.trim()} ${d.nome.trim()}`
+              : d.nome?.trim() || "Autor";
+        }
+
+        const snap = await getDocs(
+          query(
+            collection(db, "posts"),
+            where("autorId", "==", autorId),
+            where("tipo", "==", "reflexao"),
+            orderBy("criadoEm", "desc")
+          )
+        );
+
+        const todas: ReflexaoNav[] = snap.docs.map((d) => ({
+          id: d.id,
+          titulo: d.data().titulo || "Sem título",
+          slug: d.data().slug ?? d.id,
+          autorSlug: d.data().autorSlug ?? autorSlugAtual,
+          autorNome: nomeCompleto,
+          autorFoto: fotoUrl,
+        }));
+
+        const idx = todas.findIndex((r) => r.id === reflexaoId);
+        if (idx === -1) { setLoading(false); return; }
+
+        const p = idx - 1 >= 0            ? todas[idx - 1] : null;
+        const n = idx + 1 < todas.length  ? todas[idx + 1] : null;
+        setPrev(p);
+        setNext(n);
+        // Para o modo autor, prevAutor/nextAutor são sempre o mesmo autor
+        const navAutor: NavAutor = { nome: nomeCompleto, fotoUrl };
+        if (p) setPrevAutor(navAutor);
+        if (n) setNextAutor(navAutor);
+      } catch (err) {
+        console.error(err);
+      }
+      setLoading(false);
+    }
+    fetchNav();
+  }, [reflexaoId, autorId, autorSlugAtual, fromHome]);
+
+  // Monta a URL de navegação
+  function navUrl(item: FeedNavItem | ReflexaoNav): string {
+    if (fromHome) return feedItemUrl(item as FeedNavItem);
+    const r = item as ReflexaoNav;
+    return `/${r.autorSlug}/reflexao/${r.slug}`;
+  }
+
+  // Label do botão
+  function navLabel(item: FeedNavItem | ReflexaoNav, direction: "prev" | "next"): string {
+    if (fromHome) return feedItemLabel(item as FeedNavItem, direction);
+    return direction === "prev" ? "Reflexão anterior" : "Próxima reflexão";
+  }
+
+  if (loading || (!prev && !next)) return null;
+
+  const cardBase: React.CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.5rem",
+    padding: "0.875rem 1rem",
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--border-light)",
+    borderRadius: "var(--radius-lg)",
+    cursor: "pointer",
+    transition: "border-color 0.15s, background 0.15s",
+    minWidth: 0,
+    fontFamily: "inherit",
+  };
+
+  const hasLeft  = !!prev;
+  const hasRight = !!next;
+  const gridClass = hasLeft && hasRight
+    ? "reflexao-nav-grid--both"
+    : hasLeft
+    ? "reflexao-nav-grid--prev"
+    : "reflexao-nav-grid--next";
+
+  return (
+    <div style={{ marginTop: "0.5rem" }}>
+      <nav
+        className={`reflexao-nav-grid ${gridClass}`}
+        aria-label="Navegação entre publicações"
+      >
+        {prev ? (
+          <button
+            onClick={() => router.push(navUrl(prev))}
+            aria-label={`Anterior: ${prev.titulo}`}
+            style={{ ...cardBase, alignItems: "flex-start", textAlign: "left" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "var(--emerald-dim)";
+              e.currentTarget.style.background = "var(--bg-card)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "var(--border-light)";
+              e.currentTarget.style.background = "var(--bg-elevated)";
+            }}
+          >
+            <span style={{
+              display: "flex", alignItems: "center", gap: "4px",
+              fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.08em",
+              textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8,
+            }}>
+              <IconArrowLeft size={12} />
+              {navLabel(prev, "prev")}
+            </span>
+            <span style={{
+              fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
+              lineHeight: 1.3, overflow: "hidden",
+              display: "-webkit-box", WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical", wordBreak: "break-word",
+            }}>
+              {prev.titulo}
+            </span>
+            {prevAutor && (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
+                <NavAvatar src={prevAutor.fotoUrl} name={prevAutor.nome} size={22} />
+                <span style={{
+                  fontSize: "0.72rem", color: "var(--text-3)",
+                  fontStyle: "italic", overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {prevAutor.nome}
+                </span>
+              </div>
+            )}
+          </button>
+        ) : (
+          <span />
+        )}
+
+        {next ? (
+          <button
+            onClick={() => router.push(navUrl(next))}
+            aria-label={`Próximo: ${next.titulo}`}
+            style={{ ...cardBase, alignItems: "flex-end", textAlign: "right" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = "var(--emerald-dim)";
+              e.currentTarget.style.background = "var(--bg-card)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = "var(--border-light)";
+              e.currentTarget.style.background = "var(--bg-elevated)";
+            }}
+          >
+            <span style={{
+              display: "flex", alignItems: "center", gap: "4px",
+              fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.08em",
+              textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8,
+            }}>
+              {navLabel(next, "next")}
+              <IconArrowRight size={12} />
+            </span>
+            <span style={{
+              fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
+              lineHeight: 1.3, overflow: "hidden",
+              display: "-webkit-box", WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical", wordBreak: "break-word",
+            }}>
+              {next.titulo}
+            </span>
+            {nextAutor && (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px", justifyContent: "flex-end" }}>
+                <span style={{
+                  fontSize: "0.72rem", color: "var(--text-3)",
+                  fontStyle: "italic", overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {nextAutor.nome}
+                </span>
+                <NavAvatar src={nextAutor.fotoUrl} name={nextAutor.nome} size={22} />
+              </div>
+            )}
+          </button>
+        ) : (
+          <span />
+        )}
+      </nav>
+
+      <style>{`
+        .reflexao-nav-grid {
+          display: grid;
+          gap: 0.75rem;
+        }
+        .reflexao-nav-grid--both { grid-template-columns: 1fr 1fr; }
+        .reflexao-nav-grid--prev { grid-template-columns: 1fr auto; }
+        .reflexao-nav-grid--next { grid-template-columns: auto 1fr; }
+        @media (max-width: 480px) {
+          .reflexao-nav-grid--both,
+          .reflexao-nav-grid--prev,
+          .reflexao-nav-grid--next { grid-template-columns: 1fr; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Props = {
@@ -62,20 +457,16 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
   const [isOwner, setIsOwner] = useState(false);
   const [deletando, setDeletando] = useState(false);
 
-  // ── Curtidas ──────────────────────────────────────────────────────────────
-  // Reflexões vivem em /posts/{id} — mesma coleção que sermões e artigos
   const uid = auth.currentUser?.uid ?? null;
   const [likes, setLikes] = useState<number>(reflexao.likes ?? 0);
   const [likedBy, setLikedBy] = useState<string[]>(reflexao.likedBy ?? []);
   const [likePending, setLikePending] = useState(false);
 
-  // ── Comentários ───────────────────────────────────────────────────────────
   const [commentCount, setCommentCount] = useState<number>(reflexao.commentCount ?? 0);
   const [showLoginBanner, setShowLoginBanner] = useState(false);
 
   const jaAmei = uid ? likedBy.includes(uid) : false;
 
-  // Detecta se o visitante é o autor desta reflexão
   useEffect(() => {
     const currentUid = auth.currentUser?.uid;
     if (currentUid && reflexao.autorId && currentUid === reflexao.autorId) {
@@ -88,7 +479,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
     if (!confirm("Tem certeza que deseja apagar esta reflexão?")) return;
     setDeletando(true);
     try {
-      await deleteDoc(doc(db, "posts", reflexao.id)); // reflexões vivem em /posts
+      await deleteDoc(doc(db, "posts", reflexao.id));
       router.push(`/perfil/${autorSlug}`);
     } catch (err) {
       console.error(err);
@@ -98,12 +489,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
   async function handleLike() {
     if (likePending) return;
-
-    if (!uid) {
-      setShowLoginBanner(true);
-      return;
-    }
-
+    if (!uid) { setShowLoginBanner(true); return; }
     if (!reflexao.id) return;
     setLikePending(true);
 
@@ -113,7 +499,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
     try {
       await runTransaction(db, async (transaction) => {
-        const ref = doc(db, "posts", reflexao.id!); // /posts — coleção correta
+        const ref = doc(db, "posts", reflexao.id!);
         const snap = await transaction.get(ref);
         if (!snap.exists()) return;
         const data = snap.data();
@@ -126,7 +512,6 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       });
     } catch (err) {
       console.error(err);
-      // Reverte o estado otimista em caso de erro
       setLikedBy((prev) => novoJaAmei ? prev.filter((id) => id !== uid) : [...prev, uid]);
       setLikes((prev) => prev + (novoJaAmei ? -1 : 1));
     } finally {
@@ -135,7 +520,6 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
   }
 
   function handleScrollToComments() {
-    // Usuário não logado: mostra banner inline em vez de redirecionar
     if (!uid) {
       setShowLoginBanner(true);
       setTimeout(() => {
@@ -145,9 +529,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       return;
     }
     setShowLoginBanner(false);
-    document
-      .getElementById("reflexao-comments")
-      ?.scrollIntoView({ behavior: "smooth" });
+    document.getElementById("reflexao-comments")?.scrollIntoView({ behavior: "smooth" });
   }
 
   const paragrafos = reflexao.conteudo
@@ -183,13 +565,9 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       {/* ── Barra de ações do autor ─────────────────────────────────── */}
       {isOwner && (
         <div style={{
-          display: "flex",
-          gap: "0.625rem",
-          padding: "0.875rem 1.125rem",
-          background: "var(--bg-elevated)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-lg)",
-          alignItems: "center",
+          display: "flex", gap: "0.625rem", padding: "0.875rem 1.125rem",
+          background: "var(--bg-elevated)", border: "1px solid var(--border)",
+          borderRadius: "var(--radius-lg)", alignItems: "center",
         }}>
           <span style={{ fontSize: "0.78rem", color: "var(--text-3)", fontWeight: 600, flex: 1 }}>
             Você é o autor desta reflexão
@@ -216,11 +594,8 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       {reflexao.imagemCapa && (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
           <div style={{
-            width: "100%",
-            borderRadius: "var(--radius-xl)",
-            overflow: "hidden",
-            aspectRatio: "1200/630",
-            background: "var(--bg-elevated)",
+            width: "100%", borderRadius: "var(--radius-xl)", overflow: "hidden",
+            aspectRatio: "1200/630", background: "var(--bg-elevated)",
           }}>
             <img
               src={reflexao.imagemCapa}
@@ -248,24 +623,15 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       {/* ── Cabeçalho ── */}
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
         <span style={{
-          alignSelf: "flex-start",
-          fontSize: "0.65rem",
-          fontWeight: 700,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          color: "var(--emerald)",
-          background: "var(--emerald-dim)",
-          padding: "3px 10px",
-          borderRadius: "var(--radius-full)",
+          alignSelf: "flex-start", fontSize: "0.65rem", fontWeight: 700,
+          letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--emerald)",
+          background: "var(--emerald-dim)", padding: "3px 10px", borderRadius: "var(--radius-full)",
         }}>
           Reflexão
         </span>
         <h1 style={{
-          fontSize: "clamp(1.5rem, 4vw, 2rem)",
-          fontWeight: 800,
-          color: "var(--text-1)",
-          lineHeight: 1.2,
-          margin: 0,
+          fontSize: "clamp(1.5rem, 4vw, 2rem)", fontWeight: 800, color: "var(--text-1)",
+          lineHeight: 1.2, margin: 0,
         }}>
           {reflexao.titulo}
         </h1>
@@ -279,19 +645,14 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
       {/* ── Frase instigadora ── */}
       <blockquote style={{
-        margin: 0,
-        padding: "1.25rem 1.5rem",
+        margin: 0, padding: "1.25rem 1.5rem",
         borderLeft: "3px solid var(--emerald)",
         background: "var(--bg-elevated)",
         borderRadius: "0 var(--radius-md) var(--radius-md) 0",
       }}>
         <p style={{
-          fontSize: "1.05rem",
-          fontStyle: "italic",
-          color: "var(--text-1)",
-          lineHeight: 1.6,
-          margin: 0,
-          fontWeight: 500,
+          fontSize: "1.05rem", fontStyle: "italic", color: "var(--text-1)",
+          lineHeight: 1.6, margin: 0, fontWeight: 500,
         }}>
           {reflexao.fraseInstigadora}
         </p>
@@ -308,20 +669,13 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
       {/* ── Pergunta reflexiva ── */}
       <div style={{
-        padding: "1.5rem",
-        borderRadius: "var(--radius-lg)",
-        background: "var(--bg-elevated)",
-        border: "1px solid var(--border-light)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "0.625rem",
+        padding: "1.5rem", borderRadius: "var(--radius-lg)",
+        background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
+        display: "flex", flexDirection: "column", gap: "0.625rem",
       }}>
         <span style={{
-          fontSize: "0.65rem",
-          fontWeight: 700,
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          color: "var(--text-3)",
+          fontSize: "0.65rem", fontWeight: 700, letterSpacing: "0.1em",
+          textTransform: "uppercase", color: "var(--text-3)",
         }}>
           Para refletir
         </span>
@@ -330,33 +684,26 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
         </p>
       </div>
 
-      {/* ── Amei + Comentar ───────────────────────────────────────────────── */}
+      {/* ── Amei + Comentar ── */}
       <div style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "0.5rem",
-        padding: "0.875rem 1.125rem",
-        borderRadius: "var(--radius-lg)",
-        background: "var(--bg-elevated)",
-        border: "1px solid var(--border-light)",
+        display: "flex", alignItems: "center", gap: "0.5rem",
+        padding: "0.875rem 1.125rem", borderRadius: "var(--radius-lg)",
+        background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
       }}>
-        {/* Botão Amei */}
         <button
           onClick={handleLike}
           disabled={likePending}
           aria-label={jaAmei ? "Remover curtida" : "Curtir reflexão"}
           style={{
             display: "inline-flex", alignItems: "center", gap: "0.4rem",
-            padding: "6px 14px", borderRadius: "var(--radius-full)",
-            border: "1px solid",
+            padding: "6px 14px", borderRadius: "var(--radius-full)", border: "1px solid",
             borderColor: jaAmei ? "var(--emerald-dim)" : "var(--border-light)",
             background: jaAmei ? "var(--emerald-dim)" : "transparent",
             color: jaAmei ? "var(--emerald)" : "var(--text-3)",
             fontSize: "0.82rem", fontWeight: 600,
             cursor: likePending ? "default" : "pointer",
             opacity: likePending ? 0.7 : 1,
-            transition: "all 0.2s cubic-bezier(0.4,0,0.2,1)",
-            fontFamily: "inherit",
+            transition: "all 0.2s cubic-bezier(0.4,0,0.2,1)", fontFamily: "inherit",
           }}
         >
           <IconHeart size={15} filled={jaAmei} />
@@ -368,7 +715,6 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
           )}
         </button>
 
-        {/* Botão Comentar — rola até a seção de comentários */}
         <button
           onClick={handleScrollToComments}
           aria-label="Ir para comentários"
@@ -384,14 +730,11 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
           <IconComment size={15} />
           <span>Comentar</span>
           {commentCount > 0 && (
-            <span style={{ fontSize: "0.75rem", color: "var(--text-3)" }}>
-              {commentCount}
-            </span>
+            <span style={{ fontSize: "0.75rem", color: "var(--text-3)" }}>{commentCount}</span>
           )}
         </button>
       </div>
 
-      {/* Banner de login inline (ao clicar Comentar sem estar logado) */}
       {showLoginBanner && (
         <div id="reflexao-comments-banner">
           <BannerLogin onClose={() => setShowLoginBanner(false)} />
@@ -400,21 +743,12 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
       {/* ── Compartilhar no WhatsApp ── */}
       <div style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "0.75rem",
-        padding: "1.5rem",
-        borderRadius: "var(--radius-lg)",
-        background: "var(--bg-card)",
-        border: "1px solid var(--border)",
+        display: "flex", flexDirection: "column", gap: "0.75rem", padding: "1.5rem",
+        borderRadius: "var(--radius-lg)", background: "var(--bg-card)", border: "1px solid var(--border)",
       }}>
         <p style={{
-          fontSize: "0.82rem",
-          color: "var(--text-3)",
-          margin: 0,
-          fontWeight: 600,
-          textTransform: "uppercase",
-          letterSpacing: "0.06em",
+          fontSize: "0.82rem", color: "var(--text-3)", margin: 0,
+          fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em",
         }}>
           Compartilhe com seu grupo
         </p>
@@ -430,7 +764,6 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
         />
       </div>
 
-      {/* ── Separador ── */}
       <div style={{ height: "1px", background: "var(--border)" }} />
 
       {/* ── Link para a publicação original ── */}
@@ -442,18 +775,11 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
           <Link
             href={origemHref}
             style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              color: "var(--emerald)",
-              textDecoration: "none",
-              padding: "10px 16px",
-              background: "var(--bg-elevated)",
-              border: "1px solid var(--border-light)",
-              borderRadius: "var(--radius-md)",
-              transition: "border-color 0.15s",
+              display: "inline-flex", alignItems: "center", gap: "0.5rem",
+              fontSize: "0.875rem", fontWeight: 600, color: "var(--emerald)",
+              textDecoration: "none", padding: "10px 16px",
+              background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
+              borderRadius: "var(--radius-md)", transition: "border-color 0.15s",
             }}
           >
             {origemLabel}
@@ -461,12 +787,16 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
         </div>
       )}
 
-      {/* ── Seção de comentários ──────────────────────────────────────────── */}
-      {/*
-        Reflexões ficam em /posts/{id} — os comentários ficam em /posts/{id}/comments.
-        Por isso usamos collectionRoot="posts" (padrão do CommentSection).
-        NÃO usar "reflexoes" aqui — a coleção correta é "posts".
-      */}
+      {/* ── Navegação ── */}
+      {reflexao.id && reflexao.autorId && (
+        <ReflexaoNavigation
+          reflexaoId={reflexao.id}
+          autorId={reflexao.autorId}
+          autorSlugAtual={autorSlug}
+        />
+      )}
+
+      {/* ── Comentários ── */}
       {reflexao.id && (
         <div id="reflexao-comments">
           <CommentSection

@@ -166,8 +166,6 @@ function SerieCardPublico({
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      // Removido: localStorage.setItem("redirect-after-auth", ...)
-      // O BannerLogin é responsável por passar ?next= ao redirecionar
       setShowLoginBanner(true);
       return;
     }
@@ -193,8 +191,6 @@ function SerieCardPublico({
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      // Removido: localStorage.setItem("redirect-after-auth", ...)
-      // O BannerLogin é responsável por passar ?next= ao redirecionar
       setShowLoginBanner(true);
       return;
     }
@@ -258,21 +254,18 @@ function SerieCardPublico({
           {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
         </div>
 
-        {/* BannerLogin */}
         {showLoginBanner && (
           <div style={{ padding: "0 0 0.625rem" }} onClick={(e) => e.stopPropagation()}>
             <BannerLogin onClose={() => setShowLoginBanner(false)} />
           </div>
         )}
 
-        {/* Rodapé */}
         <div
           className="card-footer-row"
           style={{ display: "flex", alignItems: "center", gap: "0" }}
           onClick={(e) => e.stopPropagation()}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-            {/* Botões de dono */}
             {isOwner && (
               <div style={{ display: "flex", gap: "0.5rem", marginRight: "4px" }}>
                 <button
@@ -292,7 +285,6 @@ function SerieCardPublico({
               </div>
             )}
 
-            {/* Curtir */}
             <button
               className={`action-btn ${liked ? "liked" : ""}`}
               onClick={handleLike}
@@ -309,7 +301,6 @@ function SerieCardPublico({
               )}
             </button>
 
-            {/* Comentários */}
             <button
               onClick={handleToggleComments}
               title="Ver comentários"
@@ -341,7 +332,6 @@ function SerieCardPublico({
         </div>
       </div>
 
-      {/* Painel de comentários */}
       {showComments && (
         <div
           onClick={(e) => e.stopPropagation()}
@@ -383,6 +373,7 @@ function PostCardPerfil({
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
+  // ?from=perfil — indica ao PostDetailContent que deve navegar pelos posts do mesmo autor
   const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}?from=perfil`;
   const fullUrl = typeof window !== "undefined"
     ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`
@@ -404,8 +395,6 @@ function PostCardPerfil({
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!currentUid) {
-      // Removido: localStorage.setItem("redirect-after-auth", ...)
-      // O BannerLogin é responsável por passar ?next= ao redirecionar
       setShowLoginBanner(true);
       return;
     }
@@ -501,8 +490,6 @@ function PostCardPerfil({
           onClick={(e) => {
             e.stopPropagation();
             if (!currentUid) {
-              // Removido: localStorage.setItem("redirect-after-auth", ...)
-              // O BannerLogin é responsável por passar ?next= ao redirecionar
               setShowLoginBanner(true);
               return;
             }
