@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebase";
 import { updateProfile } from "firebase/auth";
 import {
@@ -477,7 +478,8 @@ function PostCardMeuPerfil({
 
 /* ── Perfil (meu perfil) ────────────────────────────── */
 
-export default function Perfil() {
+function PerfilContent() {
+  // todo o corpo continua igual, sem mudar nada dentro
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -502,7 +504,12 @@ export default function Perfil() {
   const [posts, setPosts] = useState<any[]>([]);
   const [series, setSeries] = useState<any[]>([]);
   const [reflexoes, setReflexoes] = useState<Reflexao[]>([]);
-  const [aba, setAba] = useState<"posts" | "series" | "reflexoes">("posts");
+  const searchParams = useSearchParams();
+  const [aba, setAba] = useState<"posts" | "series" | "reflexoes">(() => {
+  const abaParam = searchParams.get("aba");
+  if (abaParam === "reflexoes" || abaParam === "series") return abaParam;
+  return "posts";
+  });
 
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
@@ -867,5 +874,13 @@ export default function Perfil() {
         }
       `}</style>
     </>
+  );
+}
+
+export default function Perfil() {
+  return (
+    <Suspense fallback={<div className="post-detail-loading"><div className="spinner" />Carregando...</div>}>
+      <PerfilContent />
+    </Suspense>
   );
 }

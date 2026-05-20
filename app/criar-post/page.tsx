@@ -98,7 +98,6 @@ function ImageUpload({
           borderRadius: "var(--radius-sm)",
           overflow: "hidden",
           border: "1px solid var(--border-light)",
-          /* CORREÇÃO: fundo neutro escuro + flex para centralizar a imagem */
           background: "#0d1310",
           display: "flex",
           alignItems: "center",
@@ -111,7 +110,6 @@ function ImageUpload({
           alt="Pré-visualização da capa"
           style={{
             width: "100%",
-            /* CORREÇÃO: contain exibe a imagem completa; max-height limita o tamanho */
             maxHeight: "380px",
             objectFit: "contain",
             display: "block",
@@ -187,6 +185,211 @@ function ImageUpload({
   );
 }
 
+/* ─── Banner pós-publicação ──────────────────────────── */
+
+function BannerReflexao({
+  slugPublicado,
+  onFechar,
+  onGerarReflexoes,
+}: {
+  slugPublicado: { slug: string; tipo: string };
+  onFechar: () => void;
+  onGerarReflexoes: () => void;
+}) {
+  const postUrl = `/posts/${slugPublicado.tipo === "sermao" ? "sermoes" : "estudos"}/${slugPublicado.slug}`;
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.7)",
+        backdropFilter: "blur(6px)",
+        zIndex: 200,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.25rem",
+        animation: "fadeInOverlay 0.25s ease",
+      }}
+    >
+      <div
+        style={{
+          background: "var(--bg-card)",
+          border: "1px solid var(--emerald-dim)",
+          borderRadius: "var(--radius-lg)",
+          padding: "2rem",
+          maxWidth: "460px",
+          width: "100%",
+          position: "relative",
+          display: "flex",
+          flexDirection: "column",
+          gap: "1.25rem",
+          boxShadow: "0 12px 48px rgba(0,0,0,0.6), 0 0 0 1px var(--emerald-dim)",
+          animation: "slideUpCard 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+        }}
+      >
+        {/* Botão fechar */}
+        <button
+          onClick={onFechar}
+          title="Fechar e ver publicação"
+          style={{
+            position: "absolute",
+            top: "0.875rem",
+            right: "0.875rem",
+            background: "none",
+            border: "none",
+            color: "var(--text-3)",
+            fontSize: "1rem",
+            cursor: "pointer",
+            lineHeight: 1,
+            padding: "4px 7px",
+            borderRadius: "var(--radius-sm)",
+            transition: "color 0.15s",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-1)")}
+          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-3)")}
+        >
+          ✕
+        </button>
+
+        {/* Ícone + título */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "0.625rem",
+            textAlign: "center",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "2.5rem",
+              lineHeight: 1,
+              filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.4))",
+            }}
+          >
+            🎉
+          </div>
+          <h2
+            style={{
+              fontSize: "1.2rem",
+              fontWeight: 800,
+              color: "var(--text-1)",
+              letterSpacing: "-0.025em",
+              margin: 0,
+            }}
+          >
+            Publicação feita com sucesso!
+          </h2>
+        </div>
+
+        {/* Texto principal */}
+        <p
+          style={{
+            fontSize: "0.875rem",
+            color: "var(--text-2)",
+            lineHeight: 1.7,
+            textAlign: "center",
+            margin: 0,
+          }}
+        >
+          Que tal gerar{" "}
+          <strong style={{ color: "var(--text-1)" }}>reflexões edificantes</strong> a partir
+          dela? São formatos prontos para compartilhar com sua igreja e amigos nas redes sociais
+          ao longo da semana.
+        </p>
+
+        {/* Card explicativo */}
+        <div
+          style={{
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border-light)",
+            borderRadius: "var(--radius-sm)",
+            padding: "0.875rem 1rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "0.375rem",
+          }}
+        >
+          <span
+            style={{
+              fontSize: "0.72rem",
+              fontWeight: 700,
+              color: "var(--emerald)",
+              marginBottom: "0.125rem",
+              letterSpacing: "0.02em",
+              textTransform: "uppercase",
+            }}
+          >
+            Cada reflexão inclui
+          </span>
+          {[
+            ["🖼", "Imagem gerada automaticamente"],
+            ["❓", "Pergunta instigadora"],
+            ["📖", "Texto curto (1 min de leitura)"],
+            ["🔗", "Link direto para sua publicação"],
+          ].map(([icon, label]) => (
+            <div
+              key={label}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                fontSize: "0.8rem",
+                color: "var(--text-2)",
+              }}
+            >
+              <span style={{ flexShrink: 0 }}>{icon}</span>
+              <span>{label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Botão principal */}
+        <button
+          onClick={onGerarReflexoes}
+          className="btn-hero-primary"
+          style={{
+            textAlign: "center",
+            fontSize: "0.95rem",
+            padding: "13px 0",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "0.5rem",
+          }}
+        >
+          <span>✦</span>
+          Gerar reflexões agora
+        </button>
+
+        {/* Link secundário */}
+        <button
+          onClick={onFechar}
+          style={{
+            background: "none",
+            border: "none",
+            color: "var(--text-3)",
+            fontSize: "0.8rem",
+            cursor: "pointer",
+            textAlign: "center",
+            textDecoration: "underline",
+            textUnderlineOffset: "3px",
+            padding: 0,
+            transition: "color 0.15s",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-2)")}
+          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-3)")}
+        >
+          Agora não, ver minha publicação →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Page ───────────────────────────────────────────── */
 
 export default function CriarPost() {
@@ -210,6 +413,10 @@ export default function CriarPost() {
   const [corrigindo,           setCorrigindo]           = useState(false);
   const [mostrarBotaoCorrigir, setMostrarBotaoCorrigir] = useState(false);
   const [correcaoFeita,        setCorrecaoFeita]        = useState(false);
+
+  /* banner pós-publicação */
+  const [mostrarBannerReflexao, setMostrarBannerReflexao] = useState(false);
+  const [slugPublicado, setSlugPublicado] = useState<{ slug: string; tipo: string } | null>(null);
 
   useEffect(() => {
     const draft = sessionStorage.getItem("draft-post");
@@ -302,7 +509,12 @@ export default function CriarPost() {
       });
 
       sessionStorage.removeItem("draft-post");
-      router.push(`/posts/${tipo === "sermao" ? "sermoes" : "estudos"}/${slug}`);
+
+      /* Sucesso: mostra o banner em vez de redirecionar imediatamente */
+      setSlugPublicado({ slug, tipo });
+      setMostrarBannerReflexao(true);
+      setLoading(false);
+      return;
     } catch (err) {
       console.error(err);
       setError("Erro ao publicar.");
@@ -312,10 +524,32 @@ export default function CriarPost() {
     setLoading(false);
   }
 
+  /* ── Handlers do banner ── */
+  function handleFecharBanner() {
+    if (!slugPublicado) return;
+    router.push(
+      `/posts/${slugPublicado.tipo === "sermao" ? "sermoes" : "estudos"}/${slugPublicado.slug}`
+    );
+  }
+
+  function handleGerarReflexoes() {
+    router.push("/perfil?aba=reflexoes");
+  }
+
   /* ─────────────────────────────────────────────────────── */
 
   return (
     <div style={{ paddingTop: "calc(var(--header-h) + 2rem)", paddingBottom: "4rem" }}>
+
+      {/* Banner pós-publicação */}
+      {mostrarBannerReflexao && slugPublicado && (
+        <BannerReflexao
+          slugPublicado={slugPublicado}
+          onFechar={handleFecharBanner}
+          onGerarReflexoes={handleGerarReflexoes}
+        />
+      )}
+
       <div
         style={{
           maxWidth: "680px",
@@ -757,6 +991,11 @@ export default function CriarPost() {
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeInOverlay { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUpCard {
+          from { opacity: 0; transform: translateY(16px) scale(0.98); }
+          to   { opacity: 1; transform: translateY(0)    scale(1);    }
+        }
       `}</style>
     </div>
   );
