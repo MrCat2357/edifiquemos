@@ -362,7 +362,7 @@ export default function CriarPost() {
               Para publicar, você precisa criar uma conta.
             </p>
             <button
-              onClick={() => router.push("/cadastro")}
+              onClick={() => router.push("/entrar")}
               className="btn-hero-primary"
               style={{ alignSelf: "center" }}
             >
