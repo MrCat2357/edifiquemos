@@ -143,6 +143,74 @@ function IconArrowRight({ size = 12 }: { size?: number }) {
   );
 }
 
+/* ── helpers de feed global ──────────────────────────── */
+
+function getDataValor(item: any): number {
+  if (!item) return 0;
+  const d = item.criadoEm || item.data;
+  if (!d) return 0;
+  if (d?.toDate) return d.toDate().getTime();
+  if (typeof d === "string") return new Date(d).getTime();
+  return 0;
+}
+
+// Item normalizado para navegação — funciona para post, série e reflexão
+type FeedNavItem = {
+  id: string;
+  _feedType: "post" | "serie" | "reflexao";
+  titulo: string;
+  slug?: string;
+  tipo?: string;          // "sermao" | "artigo" | "reflexao"
+  autorId?: string;
+  autorNome?: string;
+  autorSlug?: string;     // necessário para reflexões
+};
+
+// Busca o feed global misturado (mesma lógica da home)
+async function fetchFeedGlobal(): Promise<FeedNavItem[]> {
+  const [postsSnap, seriesSnap, reflexoesSnap] = await Promise.all([
+    getDocs(query(collection(db, "posts"), where("tipo", "in", ["sermao", "artigo"]), orderBy("data", "desc"))),
+    getDocs(query(collection(db, "series"), orderBy("criadoEm", "desc"))),
+    getDocs(query(collection(db, "posts"), where("tipo", "==", "reflexao"), orderBy("criadoEm", "desc"))),
+  ]);
+
+  const posts: FeedNavItem[] = [];
+  postsSnap.forEach((d) => posts.push({ id: d.id, _feedType: "post", ...d.data() } as FeedNavItem));
+
+  const series: FeedNavItem[] = [];
+  seriesSnap.forEach((d) => series.push({ id: d.id, _feedType: "serie", ...d.data() } as FeedNavItem));
+
+  const reflexoes: FeedNavItem[] = [];
+  reflexoesSnap.forEach((d) => reflexoes.push({ id: d.id, _feedType: "reflexao", ...d.data() } as FeedNavItem));
+
+  return [...posts, ...series, ...reflexoes].sort(
+    (a, b) => getDataValor(b) - getDataValor(a)
+  );
+}
+
+// Monta a URL de destino para qualquer item do feed, propagando ?from=home
+function feedItemUrl(item: FeedNavItem): string {
+  if (item._feedType === "serie") {
+    return `/series/${item.slug ?? item.id}?from=home`;
+  }
+  if (item._feedType === "reflexao") {
+    const aSlug = item.autorSlug ?? item.autorId ?? "";
+    return `/${aSlug}/reflexao/${item.slug ?? item.id}?from=home`;
+  }
+  // post (sermao | artigo)
+  const cat = item.tipo === "sermao" ? "sermoes" : "estudos";
+  return `/posts/${cat}/${item.slug ?? item.id}?from=home`;
+}
+
+// Label descritivo para o card de navegação
+function feedItemLabel(item: FeedNavItem, direction: "prev" | "next"): string {
+  const prefix = direction === "prev" ? "Anterior" : "Próximo";
+  if (item._feedType === "serie") return `${prefix}: série`;
+  if (item._feedType === "reflexao") return `Reflexão ${direction === "prev" ? "anterior" : "próxima"}`;
+  if (item.tipo === "sermao") return `Sermão ${direction === "prev" ? "anterior" : "próximo"}`;
+  return `Estudo ${direction === "prev" ? "anterior" : "próximo"}`;
+}
+
 /* ── Navegação entre posts ───────────────────────────── */
 
 type PostNav = {
@@ -160,46 +228,62 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const fromPerfil = searchParams.get("from") === "perfil";
-  const fromSerieParam = searchParams.get("from") === "serie";
+  const fromParam = searchParams.get("from") ?? "";
+  const fromHome   = fromParam === "home";
+  const fromPerfil = fromParam === "perfil";
+  const fromSerie  = fromParam === "serie";
   const serieSlugParam = searchParams.get("serieSlug") ?? "";
 
-  const [prev, setPrev] = useState<PostNav | null>(null);
-  const [next, setNext] = useState<PostNav | null>(null);
+  const [prev, setPrev] = useState<FeedNavItem | PostNav | null>(null);
+  const [next, setNext] = useState<FeedNavItem | PostNav | null>(null);
   const [prevAutor, setPrevAutor] = useState<PostNavAutor | null>(null);
   const [nextAutor, setNextAutor] = useState<PostNavAutor | null>(null);
   const [serieInfo, setSerieInfo] = useState<{ titulo: string; slug: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [resolvedFromSerie, setResolvedFromSerie] = useState(false);
-  const [resolvedSerieSlug, setResolvedSerieSlug] = useState("");
-
   useEffect(() => {
     async function fetchNav() {
       try {
-        let fromSerie = fromSerieParam;
-        let serieSlug = serieSlugParam;
+        // ── 1. Feed global misturado (?from=home) ──────────────────────────
+        if (fromHome) {
+          const all = await fetchFeedGlobal();
+          const idx = all.findIndex((item) => item.id === postId);
+          if (idx === -1) { setLoading(false); return; }
+          const p = idx - 1 >= 0          ? all[idx - 1] : null;
+          const n = idx + 1 < all.length  ? all[idx + 1] : null;
+          setPrev(p);
+          setNext(n);
 
-        if (!fromSerie && !fromPerfil) {
-          const seriesSnap = await getDocs(
-            query(collection(db, "series"), where("postIds", "array-contains", postId))
-          );
-          if (!seriesSnap.empty) {
-            const serieDoc = seriesSnap.docs[0];
-            const serieData = serieDoc.data();
-            fromSerie = true;
-            serieSlug = serieData.slug ?? "";
+          async function autorFromFeedItem(item: FeedNavItem): Promise<PostNavAutor> {
+            const aId = item.autorId;
+            if (!aId) return { nome: item.autorNome || "Autor", fotoUrl: null };
+            try {
+              const snap = await getDoc(doc(db, "users", aId));
+              if (snap.exists()) {
+                const d = snap.data();
+                return {
+                  nome: d.titulo && d.nome ? `${d.titulo.trim()} ${d.nome.trim()}` : d.nome?.trim() || item.autorNome || "Autor",
+                  fotoUrl: d.fotoUrl ?? null,
+                };
+              }
+            } catch {}
+            return { nome: item.autorNome || "Autor", fotoUrl: null };
           }
+
+          const [pa, na] = await Promise.all([
+            p ? autorFromFeedItem(p as FeedNavItem) : Promise.resolve(null),
+            n ? autorFromFeedItem(n as FeedNavItem) : Promise.resolve(null),
+          ]);
+          setPrevAutor(pa);
+          setNextAutor(na);
+          setLoading(false);
+          return;
         }
 
-        setResolvedFromSerie(fromSerie);
-        setResolvedSerieSlug(serieSlug);
-
-        let all: PostNav[] = [];
-
-        if (fromSerie && serieSlug) {
+        // ── 2. Dentro de uma série (?from=serie) ───────────────────────────
+        if (fromSerie && serieSlugParam) {
           const serieSnap = await getDocs(
-            query(collection(db, "series"), where("slug", "==", serieSlug))
+            query(collection(db, "series"), where("slug", "==", serieSlugParam))
           );
           if (!serieSnap.empty) {
             const serieDoc = serieSnap.docs[0];
@@ -207,10 +291,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
             setSerieInfo({ titulo: serieData.titulo, slug: serieData.slug });
 
             const postIds: string[] = serieData.postIds ?? [];
-            const postSnaps = await Promise.all(
-              postIds.map((id) => getDoc(doc(db, "posts", id)))
-            );
-            all = postSnaps
+            const postSnaps = await Promise.all(postIds.map((id) => getDoc(doc(db, "posts", id))));
+            const all: PostNav[] = postSnaps
               .filter((s) => s.exists())
               .map((s) => ({
                 id: s.id,
@@ -220,64 +302,124 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
                 autorId: s.data()?.autorId,
                 autorNome: s.data()?.autorNome,
               }));
+
+            const idx = all.findIndex((p) => p.id === postId);
+            if (idx === -1) { setLoading(false); return; }
+            const p = idx - 1 >= 0          ? all[idx - 1] : null;
+            const n = idx + 1 < all.length  ? all[idx + 1] : null;
+            setPrev(p);
+            setNext(n);
+
+            async function fetchAutorData(post: PostNav): Promise<PostNavAutor> {
+              if (!post.autorId) return { nome: post.autorNome || "Autor", fotoUrl: null };
+              try {
+                const snap = await getDoc(doc(db, "users", post.autorId));
+                if (snap.exists()) {
+                  const d = snap.data();
+                  return {
+                    nome: d.titulo && d.nome ? `${d.titulo.trim()} ${d.nome.trim()}` : d.nome?.trim() || post.autorNome || "Autor",
+                    fotoUrl: d.fotoUrl ?? null,
+                  };
+                }
+              } catch {}
+              return { nome: post.autorNome || "Autor", fotoUrl: null };
+            }
+
+            const [pa, na] = await Promise.all([
+              p ? fetchAutorData(p as PostNav) : Promise.resolve(null),
+              n ? fetchAutorData(n as PostNav) : Promise.resolve(null),
+            ]);
+            setPrevAutor(pa);
+            setNextAutor(na);
           }
-        } else if (fromPerfil && autorIdProp) {
-          const snap = await getDocs(
-            query(
-              collection(db, "posts"),
-              where("autorId", "==", autorIdProp),
-              orderBy("data", "desc")
-            )
-          );
-          all = snap.docs.map((d) => ({
-            id: d.id,
-            titulo: d.data().titulo || "Sem título",
-            slug: d.data().slug,
-            tipo: d.data().tipo,
-            autorId: d.data().autorId,
-            autorNome: d.data().autorNome,
-          }));
-        } else {
-          const snap = await getDocs(
-            query(collection(db, "posts"), orderBy("data", "desc"))
-          );
-          all = snap.docs.map((d) => ({
-            id: d.id,
-            titulo: d.data().titulo || "Sem título",
-            slug: d.data().slug,
-            tipo: d.data().tipo,
-            autorId: d.data().autorId,
-            autorNome: d.data().autorNome,
-          }));
+          setLoading(false);
+          return;
         }
+
+        // ── 3. Perfil do autor (?from=perfil) ─────────────────────────────
+        if (fromPerfil && autorIdProp) {
+          const snap = await getDocs(
+            query(collection(db, "posts"), where("autorId", "==", autorIdProp), orderBy("data", "desc"))
+          );
+          const all: PostNav[] = snap.docs.map((d) => ({
+            id: d.id,
+            titulo: d.data().titulo || "Sem título",
+            slug: d.data().slug,
+            tipo: d.data().tipo,
+            autorId: d.data().autorId,
+            autorNome: d.data().autorNome,
+          }));
+
+          const idx = all.findIndex((p) => p.id === postId);
+          if (idx === -1) { setLoading(false); return; }
+          const p = idx - 1 >= 0          ? all[idx - 1] : null;
+          const n = idx + 1 < all.length  ? all[idx + 1] : null;
+          setPrev(p);
+          setNext(n);
+
+          async function fetchAutorDataP(post: PostNav): Promise<PostNavAutor> {
+            if (!post.autorId) return { nome: post.autorNome || "Autor", fotoUrl: null };
+            try {
+              const snap = await getDoc(doc(db, "users", post.autorId));
+              if (snap.exists()) {
+                const d = snap.data();
+                return {
+                  nome: d.titulo && d.nome ? `${d.titulo.trim()} ${d.nome.trim()}` : d.nome?.trim() || post.autorNome || "Autor",
+                  fotoUrl: d.fotoUrl ?? null,
+                };
+              }
+            } catch {}
+            return { nome: post.autorNome || "Autor", fotoUrl: null };
+          }
+
+          const [pa, na] = await Promise.all([
+            p ? fetchAutorDataP(p as PostNav) : Promise.resolve(null),
+            n ? fetchAutorDataP(n as PostNav) : Promise.resolve(null),
+          ]);
+          setPrevAutor(pa);
+          setNextAutor(na);
+          setLoading(false);
+          return;
+        }
+
+        // ── 4. Sem parâmetro — feed global de posts apenas (legado) ────────
+        const snap = await getDocs(
+          query(collection(db, "posts"), orderBy("data", "desc"))
+        );
+        const all: PostNav[] = snap.docs.map((d) => ({
+          id: d.id,
+          titulo: d.data().titulo || "Sem título",
+          slug: d.data().slug,
+          tipo: d.data().tipo,
+          autorId: d.data().autorId,
+          autorNome: d.data().autorNome,
+        }));
 
         const idx = all.findIndex((p) => p.id === postId);
         if (idx === -1) { setLoading(false); return; }
-
-        const p = idx - 1 >= 0         ? all[idx - 1] : null;
-        const n = idx + 1 < all.length ? all[idx + 1] : null;
+        const p = idx - 1 >= 0          ? all[idx - 1] : null;
+        const n = idx + 1 < all.length  ? all[idx + 1] : null;
         setPrev(p);
         setNext(n);
 
-        async function fetchAutorData(post: PostNav): Promise<PostNavAutor> {
+        async function fetchAutorDataL(post: PostNav): Promise<PostNavAutor> {
           if (!post.autorId) return { nome: post.autorNome || "Autor", fotoUrl: null };
           try {
             const snap = await getDoc(doc(db, "users", post.autorId));
             if (snap.exists()) {
               const d = snap.data();
-              const nome =
-                d.titulo && d.nome
-                  ? `${d.titulo.trim()} ${d.nome.trim()}`
-                  : d.nome?.trim() || post.autorNome || "Autor";
-              return { nome, fotoUrl: d.fotoUrl ?? null };
+              return {
+                nome: d.titulo && d.nome ? `${d.titulo.trim()} ${d.nome.trim()}` : d.nome?.trim() || post.autorNome || "Autor",
+                fotoUrl: d.fotoUrl ?? null,
+              };
             }
           } catch {}
           return { nome: post.autorNome || "Autor", fotoUrl: null };
         }
 
         const [pa, na] = await Promise.all([
-          p ? fetchAutorData(p) : Promise.resolve(null),
-          n ? fetchAutorData(n) : Promise.resolve(null),
+          p ? fetchAutorDataL(p as PostNav) : Promise.resolve(null),
+          n ? fetchAutorDataL(n as PostNav) : Promise.resolve(null),
         ]);
         setPrevAutor(pa);
         setNextAutor(na);
@@ -287,30 +429,56 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
       setLoading(false);
     }
     fetchNav();
-  }, [postId, autorIdProp, fromPerfil, fromSerieParam, serieSlugParam]);
+  }, [postId, autorIdProp, fromHome, fromPerfil, fromSerie, serieSlugParam]);
 
-  function navUrl(p: PostNav) {
-    const base = p.slug
+  // Monta URL de navegação dependendo do contexto
+  function navUrl(item: FeedNavItem | PostNav): string {
+    // Feed global misturado
+    if (fromHome) {
+      return feedItemUrl(item as FeedNavItem);
+    }
+    // Dentro de série
+    if (fromSerie && serieSlugParam) {
+      const p = item as PostNav;
+      const base = p.slug
+        ? `/posts/${p.tipo === "sermao" ? "sermoes" : "estudos"}/${p.slug}`
+        : `/posts/${p.id}`;
+      return `${base}?from=serie&serieSlug=${serieSlugParam}`;
+    }
+    // Perfil
+    if (fromPerfil) {
+      const p = item as PostNav;
+      const base = p.slug
+        ? `/posts/${p.tipo === "sermao" ? "sermoes" : "estudos"}/${p.slug}`
+        : `/posts/${p.id}`;
+      return `${base}?from=perfil`;
+    }
+    // Legado
+    const p = item as PostNav;
+    return p.slug
       ? `/posts/${p.tipo === "sermao" ? "sermoes" : "estudos"}/${p.slug}`
       : `/posts/${p.id}`;
-    if (resolvedFromSerie && resolvedSerieSlug) return `${base}?from=serie&serieSlug=${resolvedSerieSlug}`;
-    if (fromPerfil) return `${base}?from=perfil`;
-    return base;
+  }
+
+  // Label do botão
+  function navLabel(item: FeedNavItem | PostNav, direction: "prev" | "next"): string {
+    if (fromHome) return feedItemLabel(item as FeedNavItem, direction);
+    if (fromSerie) {
+      return direction === "prev" ? "Anterior na série" : "Próximo na série";
+    }
+    const p = item as PostNav;
+    if (direction === "prev") return p.tipo === "sermao" ? "Sermão anterior" : "Estudo anterior";
+    return p.tipo === "sermao" ? "Próximo sermão" : "Próximo estudo";
   }
 
   if (loading || (!prev && !next && !serieInfo)) return null;
 
   const cardBase: React.CSSProperties = {
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.5rem",
+    display: "flex", flexDirection: "column", gap: "0.5rem",
     padding: "0.875rem 1rem",
-    background: "var(--bg-elevated)",
-    border: "1px solid var(--border-light)",
-    borderRadius: "var(--radius-lg)",
-    cursor: "pointer",
-    transition: "border-color 0.15s, background 0.15s",
-    minWidth: 0,
+    background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
+    borderRadius: "var(--radius-lg)", cursor: "pointer",
+    transition: "border-color 0.15s, background 0.15s", minWidth: 0,
   };
 
   return (
@@ -319,27 +487,16 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
         <div
           onClick={() => router.push(`/series/${serieInfo.slug}`)}
           style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.5rem",
-            marginBottom: "0.75rem",
-            padding: "0.5rem 0.875rem",
-            background: "var(--emerald-dim)",
-            border: "1px solid var(--emerald-dim)",
-            borderRadius: "var(--radius-lg)",
-            cursor: "pointer",
-            fontSize: "0.8rem",
-            color: "var(--emerald)",
-            fontWeight: 600,
+            display: "flex", alignItems: "center", gap: "0.5rem",
+            marginBottom: "0.75rem", padding: "0.5rem 0.875rem",
+            background: "var(--emerald-dim)", border: "1px solid var(--emerald-dim)",
+            borderRadius: "var(--radius-lg)", cursor: "pointer",
+            fontSize: "0.8rem", color: "var(--emerald)", fontWeight: 600,
           }}
         >
           <span>📚</span>
-          <span>
-            Você está lendo a série <strong>{serieInfo.titulo}</strong>
-          </span>
-          <span style={{ marginLeft: "auto", fontSize: "0.72rem", opacity: 0.8 }}>
-            Ver série →
-          </span>
+          <span>Você está lendo a série <strong>{serieInfo.titulo}</strong></span>
+          <span style={{ marginLeft: "auto", fontSize: "0.72rem", opacity: 0.8 }}>Ver série →</span>
         </div>
       )}
 
@@ -351,16 +508,10 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           <button
             onClick={() => router.push(navUrl(prev))}
             className="post-nav-btn post-nav-btn--prev"
-            aria-label={`Publicação anterior: ${prev.titulo}`}
+            aria-label={`Anterior: ${prev.titulo}`}
             style={{ ...cardBase, alignItems: "flex-start", textAlign: "left" }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "var(--emerald-dim)";
-              e.currentTarget.style.background = "var(--bg-card)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = "var(--border-light)";
-              e.currentTarget.style.background = "var(--bg-elevated)";
-            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--emerald-dim)"; e.currentTarget.style.background = "var(--bg-card)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-light)"; e.currentTarget.style.background = "var(--bg-elevated)"; }}
           >
             <span style={{
               display: "flex", alignItems: "center", gap: "4px",
@@ -368,9 +519,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
               textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8,
             }}>
               <IconArrowLeft size={12} />
-              {resolvedFromSerie
-                ? "Anterior na série"
-                : prev.tipo === "sermao" ? "Sermão anterior" : "Estudo anterior"}
+              {navLabel(prev, "prev")}
             </span>
             <span style={{
               fontSize: "0.85rem", fontWeight: 600, color: "var(--text-1)",
@@ -383,11 +532,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
             {prevAutor && (
               <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
                 <AuthorAvatar src={prevAutor.fotoUrl} name={prevAutor.nome} size={22} />
-                <span style={{
-                  fontSize: "0.72rem", color: "var(--text-3)",
-                  fontStyle: "italic", overflow: "hidden",
-                  textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
+                <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {prevAutor.nome}
                 </span>
               </div>
@@ -401,25 +546,17 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           <button
             onClick={() => router.push(navUrl(next))}
             className="post-nav-btn post-nav-btn--next"
-            aria-label={`Próxima publicação: ${next.titulo}`}
+            aria-label={`Próximo: ${next.titulo}`}
             style={{ ...cardBase, alignItems: "flex-end", textAlign: "right" }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = "var(--emerald-dim)";
-              e.currentTarget.style.background = "var(--bg-card)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = "var(--border-light)";
-              e.currentTarget.style.background = "var(--bg-elevated)";
-            }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--emerald-dim)"; e.currentTarget.style.background = "var(--bg-card)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-light)"; e.currentTarget.style.background = "var(--bg-elevated)"; }}
           >
             <span style={{
               display: "flex", alignItems: "center", gap: "4px",
               fontSize: "0.68rem", fontWeight: 600, letterSpacing: "0.08em",
               textTransform: "uppercase", color: "var(--emerald)", opacity: 0.8,
             }}>
-              {resolvedFromSerie
-                ? "Próximo na série"
-                : next.tipo === "sermao" ? "Próximo sermão" : "Próximo estudo"}
+              {navLabel(next, "next")}
               <IconArrowRight size={12} />
             </span>
             <span style={{
@@ -432,11 +569,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
             </span>
             {nextAutor && (
               <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }}>
-                <span style={{
-                  fontSize: "0.72rem", color: "var(--text-3)",
-                  fontStyle: "italic", overflow: "hidden",
-                  textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
+                <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {nextAutor.nome}
                 </span>
                 <AuthorAvatar src={nextAutor.fotoUrl} name={nextAutor.nome} size={22} />
@@ -453,16 +586,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
 /* ── Modal: quem curtiu ──────────────────────────────── */
 
-function LikesModal({
-  likedBy,
-  onClose,
-}: {
-  likedBy: string[];
-  onClose: () => void;
-}) {
-  const [pessoas, setPessoas] = useState<
-    { uid: string; nome: string; foto: string | null }[]
-  >([]);
+function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => void }) {
+  const [pessoas, setPessoas] = useState<{ uid: string; nome: string; foto: string | null }[]>([]);
   const [loadingModal, setLoadingModal] = useState(true);
 
   useEffect(() => {
@@ -476,10 +601,7 @@ function LikesModal({
               const d = snap.data();
               resultado.push({
                 uid,
-                nome:
-                  d.titulo && d.nome
-                    ? `${d.titulo.trim()} ${d.nome.trim()}`
-                    : d.nome?.trim() || "Usuário",
+                nome: d.titulo && d.nome ? `${d.titulo.trim()} ${d.nome.trim()}` : d.nome?.trim() || "Usuário",
                 foto: d.fotoUrl ?? null,
               });
             }
@@ -522,36 +644,20 @@ function LikesModal({
               </span>
             )}
           </h3>
-          <button
-            onClick={onClose}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              color: "var(--text-3)", fontSize: "1.2rem", lineHeight: 1,
-              padding: "2px 6px", borderRadius: "var(--radius-sm)",
-            }}
-          >
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-3)", fontSize: "1.2rem", lineHeight: 1, padding: "2px 6px", borderRadius: "var(--radius-sm)" }}>
             ×
           </button>
         </div>
         <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {loadingModal ? (
-            <div style={{ display: "flex", justifyContent: "center", padding: "2rem" }}>
-              <div className="spinner" />
-            </div>
+            <div style={{ display: "flex", justifyContent: "center", padding: "2rem" }}><div className="spinner" /></div>
           ) : pessoas.length === 0 ? (
-            <p style={{ color: "var(--text-3)", fontSize: "0.85rem", textAlign: "center", padding: "1.5rem 0" }}>
-              Nenhum usuário encontrado.
-            </p>
+            <p style={{ color: "var(--text-3)", fontSize: "0.85rem", textAlign: "center", padding: "1.5rem 0" }}>Nenhum usuário encontrado.</p>
           ) : (
             pessoas.map((p) => (
-              <div key={p.uid} style={{
-                display: "flex", alignItems: "center", gap: "0.625rem",
-                padding: "0.375rem 0.5rem", borderRadius: "var(--radius-sm)",
-              }}>
+              <div key={p.uid} style={{ display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.375rem 0.5rem", borderRadius: "var(--radius-sm)" }}>
                 <AuthorAvatar src={p.foto} name={p.nome} size={32} />
-                <span style={{ fontSize: "0.875rem", color: "var(--text-1)", fontWeight: 500 }}>
-                  {p.nome}
-                </span>
+                <span style={{ fontSize: "0.875rem", color: "var(--text-1)", fontWeight: 500 }}>{p.nome}</span>
               </div>
             ))
           )}
@@ -564,25 +670,13 @@ function LikesModal({
 /* ── ShareDropdown ───────────────────────────────────── */
 
 function ShareDropdown({
-  anchorRef,
-  dropdownRef,
-  urlAtual,
-  textoCompartilhar,
-  urlEncoded,
-  conteudo,
-  copiado,
-  onCopiar,
-  onClose,
+  anchorRef, dropdownRef, urlAtual, textoCompartilhar,
+  urlEncoded, conteudo, copiado, onCopiar, onClose,
 }: {
   anchorRef: React.RefObject<HTMLButtonElement>;
   dropdownRef: React.RefObject<HTMLDivElement>;
-  urlAtual: string;
-  textoCompartilhar: string;
-  urlEncoded: string;
-  conteudo: string;
-  copiado: boolean;
-  onCopiar: () => void;
-  onClose: () => void;
+  urlAtual: string; textoCompartilhar: string; urlEncoded: string;
+  conteudo: string; copiado: boolean; onCopiar: () => void; onClose: () => void;
 }) {
   const [pos, setPos] = useState({ top: 0, left: 0 });
 
@@ -592,48 +686,26 @@ function ShareDropdown({
     const dropdownH = 160;
     const spaceBelow = window.innerHeight - rect.bottom;
     const openUp = spaceBelow < dropdownH + 12;
-    setPos({
-      top: openUp ? rect.top - dropdownH - 6 : rect.bottom + 6,
-      left: Math.min(rect.left, window.innerWidth - 280),
-    });
+    setPos({ top: openUp ? rect.top - dropdownH - 6 : rect.bottom + 6, left: Math.min(rect.left, window.innerWidth - 280) });
   }, []);
 
-  const emailBody = encodeURIComponent(
-    `${conteudo.slice(0, 300)}...\n\nLer completo: ${urlAtual}`
-  );
+  const emailBody = encodeURIComponent(`${conteudo.slice(0, 300)}...\n\nLer completo: ${urlAtual}`);
 
   return (
-    <div
-      ref={dropdownRef}
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        position: "fixed", top: pos.top, left: pos.left,
-        background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
-        borderRadius: "var(--radius-lg)", padding: "0.625rem",
-        display: "flex", flexWrap: "wrap", gap: "0.375rem",
-        width: 268, zIndex: 9999, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
-      }}
-    >
-      <a href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`}
-        target="_blank" rel="noopener noreferrer"
-        className="share-btn share-whatsapp" onClick={onClose}>WhatsApp</a>
-      <a href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`}
-        target="_blank" rel="noopener noreferrer"
-        className="share-btn share-facebook" onClick={onClose}>Facebook</a>
-      <a href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`}
-        target="_blank" rel="noopener noreferrer"
-        className="share-btn share-threads" onClick={onClose}>Threads</a>
-      <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`}
-        target="_blank" rel="noopener noreferrer"
-        className="share-btn share-twitter" onClick={onClose}>X (Twitter)</a>
-      <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`}
-        target="_blank" rel="noopener noreferrer"
-        className="share-btn share-linkedin" onClick={onClose}>LinkedIn</a>
-      <a href={`https://mail.google.com/mail/?view=cm&su=${textoCompartilhar}&body=${emailBody}`}
-        className="share-btn share-email" onClick={onClose}>Email</a>
-      <button onClick={onCopiar} className="share-btn share-copy">
-        {copiado ? "✓ Copiado!" : "Copiar link"}
-      </button>
+    <div ref={dropdownRef} onClick={(e) => e.stopPropagation()} style={{
+      position: "fixed", top: pos.top, left: pos.left,
+      background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
+      borderRadius: "var(--radius-lg)", padding: "0.625rem",
+      display: "flex", flexWrap: "wrap", gap: "0.375rem",
+      width: 268, zIndex: 9999, boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+    }}>
+      <a href={`https://wa.me/?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-whatsapp" onClick={onClose}>WhatsApp</a>
+      <a href={`https://www.facebook.com/sharer/sharer.php?u=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-facebook" onClick={onClose}>Facebook</a>
+      <a href={`https://www.threads.net/intent/post?text=${textoCompartilhar}%20${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-threads" onClick={onClose}>Threads</a>
+      <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-twitter" onClick={onClose}>X (Twitter)</a>
+      <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-linkedin" onClick={onClose}>LinkedIn</a>
+      <a href={`https://mail.google.com/mail/?view=cm&su=${textoCompartilhar}&body=${emailBody}`} className="share-btn share-email" onClick={onClose}>Email</a>
+      <button onClick={onCopiar} className="share-btn share-copy">{copiado ? "✓ Copiado!" : "Copiar link"}</button>
     </div>
   );
 }
@@ -641,23 +713,11 @@ function ShareDropdown({
 /* ── SelectionPopup ──────────────────────────────────── */
 
 function SelectionPopup({
-  trechoSelecionado,
-  posicao,
-  isMobile,
-  nomeAutor,
-  tituloPost,
-  urlAtual,
-  onFechar,
-  onToast,
+  trechoSelecionado, posicao, isMobile, nomeAutor, tituloPost, urlAtual, onFechar, onToast,
 }: {
-  trechoSelecionado: string;
-  posicao: { x: number; top: number; bottom: number };
-  isMobile: boolean;
-  nomeAutor: string;
-  tituloPost: string;
-  urlAtual: string;
-  onFechar: () => void;
-  onToast: (msg: string) => void;
+  trechoSelecionado: string; posicao: { x: number; top: number; bottom: number };
+  isMobile: boolean; nomeAutor: string; tituloPost: string; urlAtual: string;
+  onFechar: () => void; onToast: (msg: string) => void;
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
   const [copiado, setCopiado] = useState(false);
@@ -666,9 +726,7 @@ function SelectionPopup({
     `Li essa passagem e me lembrei de você:\n\n` +
     `"${trechoSelecionado}"\n\n` +
     `— ${nomeAutor}, em "${tituloPost}"\n\n` +
-    `Leia a versão completa:\n` +
-    `${urlAtual}`;
-
+    `Leia a versão completa:\n${urlAtual}`;
   const mensagemEncoded = encodeURIComponent(mensagem);
 
   async function handleCopiar() {
@@ -677,19 +735,11 @@ function SelectionPopup({
       setCopiado(true);
       onToast("Trecho copiado!");
       setTimeout(() => { setCopiado(false); onFechar(); }, 1800);
-    } catch {
-      onToast("Não foi possível copiar.");
-    }
+    } catch { onToast("Não foi possível copiar."); }
   }
 
-  const POPUP_W = 260;
-  const POPUP_H = 44;
-  const MARGIN = 8;
-
-  const left = Math.max(
-    MARGIN,
-    Math.min(posicao.x - POPUP_W / 2, window.innerWidth - POPUP_W - MARGIN)
-  );
+  const POPUP_W = 260, POPUP_H = 44, MARGIN = 8;
+  const left = Math.max(MARGIN, Math.min(posicao.x - POPUP_W / 2, window.innerWidth - POPUP_W - MARGIN));
   const openBelow = isMobile;
   const top = openBelow
     ? Math.min(posicao.bottom + 10, window.innerHeight - POPUP_H - MARGIN)
@@ -697,101 +747,46 @@ function SelectionPopup({
 
   useEffect(() => {
     function handler(e: MouseEvent | TouchEvent) {
-      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
-        onFechar();
-      }
+      if (popupRef.current && !popupRef.current.contains(e.target as Node)) onFechar();
     }
     const t = setTimeout(() => {
       document.addEventListener("mousedown", handler);
       document.addEventListener("touchstart", handler);
     }, 150);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener("mousedown", handler);
-      document.removeEventListener("touchstart", handler);
-    };
+    return () => { clearTimeout(t); document.removeEventListener("mousedown", handler); document.removeEventListener("touchstart", handler); };
   }, [onFechar]);
 
   const arrowDown = !openBelow;
 
   return (
-    <div
-      ref={popupRef}
-      style={{
-        position: "fixed", top, left, zIndex: 9990,
-        background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
-        borderRadius: "var(--radius-full)", padding: "6px 10px",
-        display: "flex", alignItems: "center", gap: "6px",
-        boxShadow: "0 6px 24px rgba(0,0,0,0.5)",
-        animation: "fadeUp 0.15s ease both", whiteSpace: "nowrap",
-      }}
-    >
+    <div ref={popupRef} style={{
+      position: "fixed", top, left, zIndex: 9990,
+      background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
+      borderRadius: "var(--radius-full)", padding: "6px 10px",
+      display: "flex", alignItems: "center", gap: "6px",
+      boxShadow: "0 6px 24px rgba(0,0,0,0.5)",
+      animation: "fadeUp 0.15s ease both", whiteSpace: "nowrap",
+    }}>
       {arrowDown ? (
         <>
-          <div style={{
-            position: "absolute", bottom: -6, left: "50%", transform: "translateX(-50%)",
-            width: 0, height: 0,
-            borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
-            borderTop: "6px solid var(--border-light)",
-          }} />
-          <div style={{
-            position: "absolute", bottom: -5, left: "50%", transform: "translateX(-50%)",
-            width: 0, height: 0,
-            borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
-            borderTop: "6px solid var(--bg-elevated)",
-          }} />
+          <div style={{ position: "absolute", bottom: -6, left: "50%", transform: "translateX(-50%)", width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "6px solid var(--border-light)" }} />
+          <div style={{ position: "absolute", bottom: -5, left: "50%", transform: "translateX(-50%)", width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "6px solid var(--bg-elevated)" }} />
         </>
       ) : (
         <>
-          <div style={{
-            position: "absolute", top: -6, left: "50%", transform: "translateX(-50%)",
-            width: 0, height: 0,
-            borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
-            borderBottom: "6px solid var(--border-light)",
-          }} />
-          <div style={{
-            position: "absolute", top: -5, left: "50%", transform: "translateX(-50%)",
-            width: 0, height: 0,
-            borderLeft: "6px solid transparent", borderRight: "6px solid transparent",
-            borderBottom: "6px solid var(--bg-elevated)",
-          }} />
+          <div style={{ position: "absolute", top: -6, left: "50%", transform: "translateX(-50%)", width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderBottom: "6px solid var(--border-light)" }} />
+          <div style={{ position: "absolute", top: -5, left: "50%", transform: "translateX(-50%)", width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderBottom: "6px solid var(--bg-elevated)" }} />
         </>
       )}
-
-      <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 500 }}>
-        Compartilhar trecho:
-      </span>
-
-      <a
-        href={`https://wa.me/?text=${mensagemEncoded}`}
-        target="_blank" rel="noopener noreferrer" onClick={onFechar}
-        style={{
-          display: "inline-flex", alignItems: "center",
-          background: "#16a34a", color: "#fff",
-          fontSize: "0.72rem", fontWeight: 600,
-          padding: "4px 10px", borderRadius: "var(--radius-full)",
-          textDecoration: "none", transition: "background 0.15s",
-        }}
+      <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 500 }}>Compartilhar trecho:</span>
+      <a href={`https://wa.me/?text=${mensagemEncoded}`} target="_blank" rel="noopener noreferrer" onClick={onFechar}
+        style={{ display: "inline-flex", alignItems: "center", background: "#16a34a", color: "#fff", fontSize: "0.72rem", fontWeight: 600, padding: "4px 10px", borderRadius: "var(--radius-full)", textDecoration: "none", transition: "background 0.15s" }}
         onMouseEnter={(e) => (e.currentTarget.style.background = "#15803d")}
         onMouseLeave={(e) => (e.currentTarget.style.background = "#16a34a")}
-      >
-        WhatsApp
-      </a>
-
-      <button
-        onClick={handleCopiar}
-        style={{
-          display: "inline-flex", alignItems: "center",
-          background: copiado ? "var(--emerald-dim)" : "var(--bg-card)",
-          color: copiado ? "var(--emerald)" : "var(--text-2)",
-          border: "1px solid var(--border-light)",
-          fontSize: "0.72rem", fontWeight: 600,
-          padding: "4px 10px", borderRadius: "var(--radius-full)",
-          cursor: "pointer", transition: "all 0.15s",
-        }}
-      >
-        {copiado ? "✓ Copiado!" : "Copiar"}
-      </button>
+      >WhatsApp</a>
+      <button onClick={handleCopiar}
+        style={{ display: "inline-flex", alignItems: "center", background: copiado ? "var(--emerald-dim)" : "var(--bg-card)", color: copiado ? "var(--emerald)" : "var(--text-2)", border: "1px solid var(--border-light)", fontSize: "0.72rem", fontWeight: 600, padding: "4px 10px", borderRadius: "var(--radius-full)", cursor: "pointer", transition: "all 0.15s" }}
+      >{copiado ? "✓ Copiado!" : "Copiar"}</button>
     </div>
   );
 }
@@ -831,13 +826,10 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       const sessionKey = `viewed_${postId}`;
       if (localStorage.getItem(sessionKey)) return;
       try {
-        const ref = doc(db, "posts", postId);
-        await updateDoc(ref, { visualizacoes: increment(1) });
+        await updateDoc(doc(db, "posts", postId), { visualizacoes: increment(1) });
         localStorage.setItem(sessionKey, "1");
         setViewCount((n) => n + 1);
-      } catch (err) {
-        console.error("Erro ao registrar visualização:", err);
-      }
+      } catch (err) { console.error("Erro ao registrar visualização:", err); }
     }
     if (postId) registrarVisualizacao();
   }, [postId]);
@@ -860,16 +852,10 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     const trecho = selection.toString().trim();
     if (trecho.length < 10) { setSelecao(null); return; }
     const range = selection.getRangeAt(0);
-    if (!conteudoRef.current?.contains(range.commonAncestorContainer)) {
-      setSelecao(null); return;
-    }
+    if (!conteudoRef.current?.contains(range.commonAncestorContainer)) { setSelecao(null); return; }
     const rect = range.getBoundingClientRect();
     const mobile = window.matchMedia("(pointer: coarse)").matches;
-    setSelecao({
-      trecho: trecho.slice(0, 500),
-      posicao: { x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom },
-      isMobile: mobile,
-    });
+    setSelecao({ trecho: trecho.slice(0, 500), posicao: { x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom }, isMobile: mobile });
   }, []);
 
   const handleMouseUp = useCallback(() => { detectarSelecao(); }, [detectarSelecao]);
@@ -879,10 +865,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     const isMobile = window.matchMedia("(pointer: coarse)").matches;
     if (!isMobile) return;
     let timer: ReturnType<typeof setTimeout>;
-    function onSelectionChange() {
-      clearTimeout(timer);
-      timer = setTimeout(detectarSelecao, 400);
-    }
+    function onSelectionChange() { clearTimeout(timer); timer = setTimeout(detectarSelecao, 400); }
     document.addEventListener("selectionchange", onSelectionChange);
     return () => { clearTimeout(timer); document.removeEventListener("selectionchange", onSelectionChange); };
   }, [detectarSelecao]);
@@ -891,10 +874,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     if (!compartilharAberto) return;
     function handler(e: MouseEvent) {
       const target = e.target as Node;
-      if (
-        shareButtonRef.current && !shareButtonRef.current.contains(target) &&
-        shareDropdownRef.current && !shareDropdownRef.current.contains(target)
-      ) {
+      if (shareButtonRef.current && !shareButtonRef.current.contains(target) && shareDropdownRef.current && !shareDropdownRef.current.contains(target)) {
         setCompartilharAberto(false);
       }
     }
@@ -903,9 +883,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   }, [compartilharAberto]);
 
   const nomeExibicao =
-    autor?.titulo && autor?.nome
-      ? `${autor.titulo} ${autor.nome}`
-      : autor?.nome || post.autorNome || "Autor";
+    autor?.titulo && autor?.nome ? `${autor.titulo} ${autor.nome}` : autor?.nome || post.autorNome || "Autor";
   const fotoAutor = autor?.fotoUrl ?? post.autorFoto ?? null;
   const isAutor = user?.uid === post.autorId;
   const urlAtual = typeof window !== "undefined" ? window.location.href : "";
@@ -913,33 +891,28 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const urlEncoded = encodeURIComponent(urlAtual);
 
   function showToast(msg: string) {
-    setToastMsg(msg);
-    setToastVisible(true);
+    setToastMsg(msg); setToastVisible(true);
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToastVisible(false), 2200);
   }
 
   async function handleLike() {
-  const uid = auth.currentUser?.uid;
-  if (!uid) {
-    const destino = window.location.pathname + window.location.search;
-    router.push(`/entrar?next=${encodeURIComponent(destino)}`);
-    return;
-  }
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      const destino = window.location.pathname + window.location.search;
+      router.push(`/entrar?next=${encodeURIComponent(destino)}`);
+      return;
+    }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
       const ref = doc(db, "posts", postId);
       if (liked) {
         await updateDoc(ref, { likes: increment(-1), likedBy: arrayRemove(uid) });
-        setLiked(false);
-        setLikeCount((n) => Math.max(0, n - 1));
-        setLikedBy((arr) => arr.filter((id) => id !== uid));
+        setLiked(false); setLikeCount((n) => Math.max(0, n - 1)); setLikedBy((arr) => arr.filter((id) => id !== uid));
       } else {
         await updateDoc(ref, { likes: increment(1), likedBy: arrayUnion(uid) });
-        setLiked(true);
-        setLikeCount((n) => n + 1);
-        setLikedBy((arr) => [...arr, uid]);
+        setLiked(true); setLikeCount((n) => n + 1); setLikedBy((arr) => [...arr, uid]);
       }
     } catch (err) { console.error(err); }
     setLoadingLike(false);
@@ -947,36 +920,23 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
   async function copiarLink() {
     await navigator.clipboard.writeText(urlAtual);
-    setCopiado(true);
-    showToast("Link copiado!");
+    setCopiado(true); showToast("Link copiado!");
     setTimeout(() => setCopiado(false), 2000);
   }
 
   async function handleDownloadPdf() {
     if (gerandoPdf) return;
-    setGerandoPdf(true);
-    showToast("Gerando PDF...");
+    setGerandoPdf(true); showToast("Gerando PDF...");
     try {
       await gerarPDF({
-        titulo: post.titulo,
-        nomeAutor: nomeExibicao,
-        fotoAutor,
-        dataPost: formatData(post.data),
-        igreja: post.igreja || "",
-        conteudo: post.conteudo,
-        tipo: post.tipo,
-        links: post.links ?? [],
+        titulo: post.titulo, nomeAutor: nomeExibicao, fotoAutor,
+        dataPost: formatData(post.data), igreja: post.igreja || "",
+        conteudo: post.conteudo, tipo: post.tipo, links: post.links ?? [],
         onDownload: async () => {
-          try {
-            await updateDoc(doc(db, "posts", postId), { downloads: increment(1) });
-            setDownloadCount((n) => n + 1);
-          } catch {}
+          try { await updateDoc(doc(db, "posts", postId), { downloads: increment(1) }); setDownloadCount((n) => n + 1); } catch {}
         },
       });
-    } catch (err) {
-      console.error(err);
-      showToast("Erro ao gerar PDF.");
-    }
+    } catch (err) { console.error(err); showToast("Erro ao gerar PDF."); }
     setGerandoPdf(false);
   }
 
@@ -985,182 +945,108 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     try {
       await deleteDoc(doc(db, "posts", postId));
       router.push("/posts");
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao apagar o post.");
-    }
+    } catch (err) { console.error(err); alert("Erro ao apagar o post."); }
   }
 
-  const actionBtnStyle: React.CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "5px",
-  };
+  const actionBtnStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: "5px" };
 
   return (
     <>
-      {/* Toast */}
-      <div
-        style={{
-          position: "fixed", bottom: "1.5rem", left: "50%",
-          transform: `translateX(-50%) translateY(${toastVisible ? 0 : "12px"})`,
-          background: "var(--bg-elevated)", border: "1px solid var(--emerald-dim)",
-          color: "var(--emerald)", fontSize: "0.82rem", fontWeight: 600,
-          padding: "8px 20px", borderRadius: "var(--radius-full)",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
-          opacity: toastVisible ? 1 : 0, transition: "all 0.25s ease",
-          pointerEvents: "none", zIndex: 998,
-        }}
-      >
+      <div style={{
+        position: "fixed", bottom: "1.5rem", left: "50%",
+        transform: `translateX(-50%) translateY(${toastVisible ? 0 : "12px"})`,
+        background: "var(--bg-elevated)", border: "1px solid var(--emerald-dim)",
+        color: "var(--emerald)", fontSize: "0.82rem", fontWeight: 600,
+        padding: "8px 20px", borderRadius: "var(--radius-full)",
+        boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+        opacity: toastVisible ? 1 : 0, transition: "all 0.25s ease",
+        pointerEvents: "none", zIndex: 998,
+      }}>
         {toastMsg}
       </div>
 
-      {likesModalAberto && (
-        <LikesModal likedBy={likedBy} onClose={() => setLikesModalAberto(false)} />
-      )}
+      {likesModalAberto && <LikesModal likedBy={likedBy} onClose={() => setLikesModalAberto(false)} />}
 
       {compartilharAberto && (
         <ShareDropdown
-          anchorRef={shareButtonRef}
-          dropdownRef={shareDropdownRef}
-          urlAtual={urlAtual}
-          textoCompartilhar={textoCompartilhar}
-          urlEncoded={urlEncoded}
-          conteudo={post.conteudo}
-          copiado={copiado}
-          onCopiar={copiarLink}
+          anchorRef={shareButtonRef} dropdownRef={shareDropdownRef}
+          urlAtual={urlAtual} textoCompartilhar={textoCompartilhar} urlEncoded={urlEncoded}
+          conteudo={post.conteudo} copiado={copiado} onCopiar={copiarLink}
           onClose={() => setCompartilharAberto(false)}
         />
       )}
 
       {selecao && (
         <SelectionPopup
-          trechoSelecionado={selecao.trecho}
-          posicao={selecao.posicao}
-          isMobile={selecao.isMobile}
-          nomeAutor={nomeExibicao}
-          tituloPost={post.titulo}
-          urlAtual={urlAtual}
-          onFechar={() => setSelecao(null)}
-          onToast={showToast}
+          trechoSelecionado={selecao.trecho} posicao={selecao.posicao} isMobile={selecao.isMobile}
+          nomeAutor={nomeExibicao} tituloPost={post.titulo} urlAtual={urlAtual}
+          onFechar={() => setSelecao(null)} onToast={showToast}
         />
       )}
 
       <article className="post-detail-card">
-        {/* Topo: badge + botões de autor */}
         <div className="post-detail-top">
           <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
             {post.tipo === "sermao" ? "Sermão" : "Estudo"}
           </span>
           {isAutor && (
             <div className="post-detail-owner-btns">
-              <button onClick={() => router.push(`/editar/${postId}`)} className="post-btn-edit">
-                Editar
-              </button>
-              <button onClick={handleDelete} className="post-btn-delete">
-                Apagar
-              </button>
+              <button onClick={() => router.push(`/editar/${postId}`)} className="post-btn-edit">Editar</button>
+              <button onClick={handleDelete} className="post-btn-delete">Apagar</button>
             </div>
           )}
         </div>
 
-        {/* Título */}
         <h1 className="post-detail-title">{post.titulo}</h1>
 
-        {/* Meta */}
         <div className="post-detail-meta">
           <AuthorAvatar src={fotoAutor} name={nomeExibicao} size={32} />
-          <span
-            className="post-detail-autor"
-            onClick={() => { if (post.autorId) router.push(`/perfil/${post.autorId}`); }}
-          >
+          <span className="post-detail-autor" onClick={() => { if (post.autorId) router.push(`/perfil/${post.autorId}`); }}>
             {nomeExibicao}
           </span>
           {formatData(post.data) && (
-            <>
-              <span className="post-detail-sep">·</span>
-              <span>{formatData(post.data)}</span>
-            </>
+            <><span className="post-detail-sep">·</span><span>{formatData(post.data)}</span></>
           )}
           {post.igreja && (
-            <>
-              <span className="post-detail-sep">·</span>
-              <span>{post.igreja}</span>
-            </>
+            <><span className="post-detail-sep">·</span><span>{post.igreja}</span></>
           )}
         </div>
 
         <hr className="post-detail-divider" />
 
-        {/* Imagem de capa */}
         {post.imagemUrl && (
-          <div
-            className="post-detail-cover-wrapper"
-            style={{
-              width: "100%",
-              borderRadius: "var(--radius-lg)",
-              overflow: "hidden",
-              border: "1px solid var(--border)",
-              marginBottom: "1.5rem",
-              background: "#0d1310",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <img
-              src={post.imagemUrl}
-              alt={`Imagem de capa: ${post.titulo}`}
-              style={{
-                width: "100%",
-                maxHeight: "520px",
-                objectFit: "contain",
-                display: "block",
-              }}
-            />
+          <div className="post-detail-cover-wrapper" style={{
+            width: "100%", borderRadius: "var(--radius-lg)", overflow: "hidden",
+            border: "1px solid var(--border)", marginBottom: "1.5rem",
+            background: "#0d1310", display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <img src={post.imagemUrl} alt={`Imagem de capa: ${post.titulo}`}
+              style={{ width: "100%", maxHeight: "520px", objectFit: "contain", display: "block" }} />
           </div>
         )}
 
-        {/* Conteúdo */}
-        <div
-          ref={conteudoRef}
-          className="post-detail-content"
-          onMouseUp={handleMouseUp}
-          onTouchEnd={handleTouchEnd}
-        >
+        <div ref={conteudoRef} className="post-detail-content" onMouseUp={handleMouseUp} onTouchEnd={handleTouchEnd}>
           {post.conteudo}
         </div>
 
-        {/* Rodapé do conteúdo */}
         {post.tipo === "sermao" ? (
           <p className="post-detail-footer-text">
             {post.igreja
               ? `Sermão pregado na ${post.igreja}${formatData(post.data) ? ` em ${formatData(post.data)}` : ""}`
-              : formatData(post.data)
-              ? `Sermão pregado em ${formatData(post.data)}`
-              : ""}
+              : formatData(post.data) ? `Sermão pregado em ${formatData(post.data)}` : ""}
           </p>
         ) : (
           <p className="post-detail-footer-text">
-            Estudo publicado por {nomeExibicao}
-            {formatData(post.data) ? ` em ${formatData(post.data)}` : ""}
+            Estudo publicado por {nomeExibicao}{formatData(post.data) ? ` em ${formatData(post.data)}` : ""}
           </p>
         )}
 
-        {/* Links de Referência */}
-        {post.links && post.links.length > 0 && (
-          <LinksReferencia links={post.links} />
-        )}
+        {post.links && post.links.length > 0 && <LinksReferencia links={post.links} />}
 
         <hr className="post-detail-divider" />
 
-        {/* Barra de ações */}
         <div className="post-detail-actions">
-
-          {/* Amei */}
-          <button
-            onClick={handleLike}
-            disabled={loadingLike}
+          <button onClick={handleLike} disabled={loadingLike}
             className={`post-btn-share ${liked ? "liked" : ""}`}
             style={{ opacity: loadingLike ? 0.6 : 1, ...actionBtnStyle }}
             title={user ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
@@ -1168,45 +1054,21 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             <IconHeart size={14} filled={liked} />
             Amei
             {likeCount > 0 && (
-              <span
-                onClick={(e) => { e.stopPropagation(); setLikesModalAberto(true); }}
+              <span onClick={(e) => { e.stopPropagation(); setLikesModalAberto(true); }}
                 title="Ver quem curtiu"
-                style={{
-                  marginLeft: "2px",
-                  fontSize: "0.78rem", fontWeight: 700,
-                  color: liked ? "inherit" : "var(--emerald)",
-                  cursor: "pointer",
-                }}
-              >
+                style={{ marginLeft: "2px", fontSize: "0.78rem", fontWeight: 700, color: liked ? "inherit" : "var(--emerald)", cursor: "pointer" }}>
                 {likeCount}
               </span>
             )}
           </button>
 
-          {/* Compartilhar */}
-          <button
-            ref={shareButtonRef}
-            onClick={() => setCompartilharAberto((v) => !v)}
-            className="post-btn-share"
-            style={actionBtnStyle}
-          >
-            <IconShare size={14} />
-            Compartilhar
+          <button ref={shareButtonRef} onClick={() => setCompartilharAberto((v) => !v)} className="post-btn-share" style={actionBtnStyle}>
+            <IconShare size={14} />Compartilhar
           </button>
 
-          {/* Salvar PDF */}
-          <button
-            onClick={handleDownloadPdf}
-            disabled={gerandoPdf}
-            className="post-btn-share"
-            style={{ opacity: gerandoPdf ? 0.6 : 1, ...actionBtnStyle }}
-            title="Baixar como PDF"
-          >
-            {gerandoPdf ? (
-              <><span className="btn-spinner" />Gerando…</>
-            ) : (
-              <><IconDownload size={14} />Salvar PDF</>
-            )}
+          <button onClick={handleDownloadPdf} disabled={gerandoPdf} className="post-btn-share"
+            style={{ opacity: gerandoPdf ? 0.6 : 1, ...actionBtnStyle }} title="Baixar como PDF">
+            {gerandoPdf ? <><span className="btn-spinner" />Gerando…</> : <><IconDownload size={14} />Salvar PDF</>}
             {downloadCount > 0 && (
               <span style={{ marginLeft: "2px", fontSize: "0.78rem", fontWeight: 700, color: "var(--text-3)" }}
                 title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
@@ -1215,43 +1077,26 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             )}
           </button>
 
-          {/* Visualizações */}
-          <div
-            style={{
-              display: "inline-flex", alignItems: "center", gap: "5px",
-              fontSize: "0.85rem", fontWeight: 500, color: "var(--text-3)",
-              padding: "7px 12px",
-              border: "1px solid transparent",
-              borderRadius: "var(--radius-full)",
-              userSelect: "none",
-              pointerEvents: "none",
-            }}
-            title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}
-          >
-            <IconEye size={14} />
-            <span>{viewCount}</span>
+          <div style={{
+            display: "inline-flex", alignItems: "center", gap: "5px",
+            fontSize: "0.85rem", fontWeight: 500, color: "var(--text-3)",
+            padding: "7px 12px", border: "1px solid transparent",
+            borderRadius: "var(--radius-full)", userSelect: "none", pointerEvents: "none",
+          }} title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}>
+            <IconEye size={14} /><span>{viewCount}</span>
           </div>
-
         </div>
 
-        {/* Navegação entre posts */}
         <PostNavigation postId={postId} autorIdProp={post.autorId} />
 
-        {/* ── Sistema de comentários ── */}
         <CommentSection postId={postId} />
       </article>
 
       <style>{`
         @media (max-width: 640px) {
-          .post-detail-cover-wrapper img {
-            max-height: 360px !important;
-          }
+          .post-detail-cover-wrapper img { max-height: 360px !important; }
         }
-        /* Nav cards — two columns on desktop, stacked on mobile */
-        .post-nav-grid {
-          display: grid;
-          gap: 0.75rem;
-        }
+        .post-nav-grid { display: grid; gap: 0.75rem; }
         .post-nav-grid--both      { grid-template-columns: 1fr 1fr; }
         .post-nav-grid--prev      { grid-template-columns: 1fr auto; }
         .post-nav-grid--next      { grid-template-columns: auto 1fr; }

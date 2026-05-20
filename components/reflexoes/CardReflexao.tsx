@@ -54,6 +54,7 @@ function IconComment({ size = 13, active = false }: { size?: number; active?: bo
 type Props = {
   reflexao: Reflexao;
   hideActions?: boolean;
+  disableNavigation?: boolean;
 };
 
 export default function CardReflexao({ reflexao, hideActions = false }: Props) {
