@@ -55,9 +55,10 @@ type Props = {
   reflexao: Reflexao;
   hideActions?: boolean;
   disableNavigation?: boolean;
+  botaoOuvir?: React.ReactNode;
 };
 
-export default function CardReflexao({ reflexao, hideActions = false }: Props) {
+export default function CardReflexao({ reflexao, hideActions = false, disableNavigation, botaoOuvir }: Props) {
   const router = useRouter();
   const [hovered, setHovered] = useState(false);
 
@@ -270,6 +271,9 @@ export default function CardReflexao({ reflexao, hideActions = false }: Props) {
           <IconComment size={12} active={showComments} />
           <span>{commentCount > 0 ? commentCount : "Comentar"}</span>
         </button>
+
+        {/* Ouvir — renderizado pelo pai via prop, se fornecido */}
+        {botaoOuvir}
       </div>
 
       {/* ── Banner de login (quando não logado e clicou em Comentar) ─────── */}
