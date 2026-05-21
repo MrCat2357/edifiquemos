@@ -29,6 +29,35 @@ export function getInitials(name: string) {
   return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
+/**
+ * Decodifica HTML duplamente escapado.
+ * Quando o Firestore armazena o conteúdo como entidades HTML
+ * (ex.: "&lt;div&gt;"), o dangerouslySetInnerHTML exibe as tags como texto.
+ * Este helper detecta esse caso e decodifica antes de renderizar.
+ */
+function decodeHtmlContent(str: string): string {
+  if (typeof window === "undefined") return str;
+
+  let html = str;
+
+  // Decodifica entidades caso esteja duplamente escapado
+  if (!/(<[a-zA-Z])/.test(html) && /&lt;/.test(html)) {
+    const ta = document.createElement("textarea");
+    ta.innerHTML = html;
+    html = ta.value;
+  }
+
+  // Remove white-space: pre-wrap que o editor pode ter salvo nos estilos inline
+  // (causava exibição de HTML cru no mobile)
+  html = html.replace(/white-space\s*:\s*pre-wrap\s*[;]?/gi, "");
+  html = html.replace(/white-space\s*:\s*pre\s*[;]?/gi, "");
+
+  // Limpa atributos style que ficaram vazios após a remoção
+  html = html.replace(/\s*style\s*=\s*["']\s*["']/gi, "");
+
+  return html;
+}
+
 export function AuthorAvatar({
   src,
   name,
@@ -155,19 +184,17 @@ function getDataValor(item: any): number {
   return 0;
 }
 
-// Item normalizado para navegação — funciona para post, série e reflexão
 type FeedNavItem = {
   id: string;
   _feedType: "post" | "serie" | "reflexao";
   titulo: string;
   slug?: string;
-  tipo?: string;          // "sermao" | "artigo" | "reflexao"
+  tipo?: string;
   autorId?: string;
   autorNome?: string;
-  autorSlug?: string;     // necessário para reflexões
+  autorSlug?: string;
 };
 
-// Busca o feed global misturado (mesma lógica da home)
 async function fetchFeedGlobal(): Promise<FeedNavItem[]> {
   const [postsSnap, seriesSnap, reflexoesSnap] = await Promise.all([
     getDocs(query(collection(db, "posts"), where("tipo", "in", ["sermao", "artigo"]), orderBy("data", "desc"))),
@@ -189,7 +216,6 @@ async function fetchFeedGlobal(): Promise<FeedNavItem[]> {
   );
 }
 
-// Monta a URL de destino para qualquer item do feed, propagando ?from=home
 function feedItemUrl(item: FeedNavItem): string {
   if (item._feedType === "serie") {
     return `/series/${item.slug ?? item.id}?from=home`;
@@ -198,12 +224,10 @@ function feedItemUrl(item: FeedNavItem): string {
     const aSlug = item.autorSlug ?? item.autorId ?? "";
     return `/${aSlug}/reflexao/${item.slug ?? item.id}?from=home`;
   }
-  // post (sermao | artigo)
   const cat = item.tipo === "sermao" ? "sermoes" : "estudos";
   return `/posts/${cat}/${item.slug ?? item.id}?from=home`;
 }
 
-// Label descritivo para o card de navegação
 function feedItemLabel(item: FeedNavItem, direction: "prev" | "next"): string {
   const prefix = direction === "prev" ? "Anterior" : "Próximo";
   if (item._feedType === "serie") return `${prefix}: série`;
@@ -245,13 +269,12 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
   useEffect(() => {
     async function fetchNav() {
       try {
-        // ── 1. Feed global misturado (?from=home) ──────────────────────────
         if (fromHome) {
           const all = await fetchFeedGlobal();
           const idx = all.findIndex((item) => item.id === postId);
           if (idx === -1) { setLoading(false); return; }
-          const p = idx - 1 >= 0          ? all[idx - 1] : null;
-          const n = idx + 1 < all.length  ? all[idx + 1] : null;
+          const p = idx - 1 >= 0         ? all[idx - 1] : null;
+          const n = idx + 1 < all.length ? all[idx + 1] : null;
           setPrev(p);
           setNext(n);
 
@@ -281,7 +304,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           return;
         }
 
-        // ── 2. Dentro de uma série (?from=serie) ───────────────────────────
         if (fromSerie && serieSlugParam) {
           const serieSnap = await getDocs(
             query(collection(db, "series"), where("slug", "==", serieSlugParam))
@@ -306,8 +328,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
             const idx = all.findIndex((p) => p.id === postId);
             if (idx === -1) { setLoading(false); return; }
-            const p = idx - 1 >= 0          ? all[idx - 1] : null;
-            const n = idx + 1 < all.length  ? all[idx + 1] : null;
+            const p = idx - 1 >= 0         ? all[idx - 1] : null;
+            const n = idx + 1 < all.length ? all[idx + 1] : null;
             setPrev(p);
             setNext(n);
 
@@ -337,7 +359,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           return;
         }
 
-        // ── 3. Perfil do autor (?from=perfil) ─────────────────────────────
         if (fromPerfil && autorIdProp) {
           const snap = await getDocs(
             query(collection(db, "posts"), where("autorId", "==", autorIdProp), orderBy("data", "desc"))
@@ -353,8 +374,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
           const idx = all.findIndex((p) => p.id === postId);
           if (idx === -1) { setLoading(false); return; }
-          const p = idx - 1 >= 0          ? all[idx - 1] : null;
-          const n = idx + 1 < all.length  ? all[idx + 1] : null;
+          const p = idx - 1 >= 0         ? all[idx - 1] : null;
+          const n = idx + 1 < all.length ? all[idx + 1] : null;
           setPrev(p);
           setNext(n);
 
@@ -383,7 +404,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           return;
         }
 
-        // ── 4. Sem parâmetro — feed global de posts apenas (legado) ────────
+        // Legado — feed global de posts
         const snap = await getDocs(
           query(collection(db, "posts"), orderBy("data", "desc"))
         );
@@ -398,8 +419,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
         const idx = all.findIndex((p) => p.id === postId);
         if (idx === -1) { setLoading(false); return; }
-        const p = idx - 1 >= 0          ? all[idx - 1] : null;
-        const n = idx + 1 < all.length  ? all[idx + 1] : null;
+        const p = idx - 1 >= 0         ? all[idx - 1] : null;
+        const n = idx + 1 < all.length ? all[idx + 1] : null;
         setPrev(p);
         setNext(n);
 
@@ -432,13 +453,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
     fetchNav();
   }, [postId, autorIdProp, fromHome, fromPerfil, fromSerie, serieSlugParam]);
 
-  // Monta URL de navegação dependendo do contexto
   function navUrl(item: FeedNavItem | PostNav): string {
-    // Feed global misturado
-    if (fromHome) {
-      return feedItemUrl(item as FeedNavItem);
-    }
-    // Dentro de série
+    if (fromHome) return feedItemUrl(item as FeedNavItem);
     if (fromSerie && serieSlugParam) {
       const p = item as PostNav;
       const base = p.slug
@@ -446,7 +462,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
         : `/posts/${p.id}`;
       return `${base}?from=serie&serieSlug=${serieSlugParam}`;
     }
-    // Perfil
     if (fromPerfil) {
       const p = item as PostNav;
       const base = p.slug
@@ -454,19 +469,15 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
         : `/posts/${p.id}`;
       return `${base}?from=perfil`;
     }
-    // Legado
     const p = item as PostNav;
     return p.slug
       ? `/posts/${p.tipo === "sermao" ? "sermoes" : "estudos"}/${p.slug}`
       : `/posts/${p.id}`;
   }
 
-  // Label do botão
   function navLabel(item: FeedNavItem | PostNav, direction: "prev" | "next"): string {
     if (fromHome) return feedItemLabel(item as FeedNavItem, direction);
-    if (fromSerie) {
-      return direction === "prev" ? "Anterior na série" : "Próximo na série";
-    }
+    if (fromSerie) return direction === "prev" ? "Anterior na série" : "Próximo na série";
     const p = item as PostNav;
     if (direction === "prev") return p.tipo === "sermao" ? "Sermão anterior" : "Estudo anterior";
     return p.tipo === "sermao" ? "Próximo sermão" : "Próximo estudo";
@@ -820,6 +831,9 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
   const [viewCount, setViewCount] = useState<number>(post.visualizacoes ?? 0);
 
+  // FIX: decodifica HTML caso esteja duplamente escapado (problema no mobile)
+  const conteudoHtml = decodeHtmlContent(post.conteudo ?? "");
+
   useEffect(() => {
     async function registrarVisualizacao() {
       const uid = auth.currentUser?.uid;
@@ -1045,9 +1059,14 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           </div>
         )}
 
-        <div ref={conteudoRef} className="post-detail-content" onMouseUp={handleMouseUp} onTouchEnd={handleTouchEnd}>
-          {post.conteudo}
-        </div>
+        {/* FIX: usa conteudoHtml (decodificado) em vez de post.conteudo diretamente */}
+        <div
+          ref={conteudoRef}
+          className="post-detail-content"
+          onMouseUp={handleMouseUp}
+          onTouchEnd={handleTouchEnd}
+          dangerouslySetInnerHTML={{ __html: conteudoHtml }}
+        />
 
         {post.tipo === "sermao" ? (
           <p className="post-detail-footer-text">
@@ -1158,9 +1177,15 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       )}
 
       <style>{`
+        /* ── Layout do card ── */
         @media (max-width: 640px) {
           .post-detail-cover-wrapper img { max-height: 360px !important; }
+          .post-detail-card { padding: 1rem !important; }
+          .post-detail-title { font-size: 1.35rem !important; }
+          .post-detail-actions { flex-wrap: wrap; gap: 0.4rem !important; }
         }
+
+        /* ── Navegação ── */
         .post-nav-grid { display: grid; gap: 0.75rem; }
         .post-nav-grid--both      { grid-template-columns: 1fr 1fr; }
         .post-nav-grid--prev      { grid-template-columns: 1fr auto; }
@@ -1169,6 +1194,79 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           .post-nav-grid--both,
           .post-nav-grid--prev,
           .post-nav-grid--next { grid-template-columns: 1fr; }
+        }
+
+        /* ── Prose: estilos do conteúdo renderizado ──────────────────────────
+           Garante que o HTML do RichTextEditor seja renderizado corretamente
+           em TODOS os dispositivos, incluindo mobile.
+        ── */
+        .post-detail-content {
+          font-size: 0.95rem;
+          line-height: 1.8;
+          color: var(--text-1);
+          word-break: break-word;
+          overflow-wrap: break-word;
+          /* Impede que o conteúdo extrapole a tela no mobile */
+          max-width: 100%;
+          overflow-x: hidden;
+          /* Reseta white-space para evitar exibição de HTML como texto */
+          white-space: normal;
+        }
+
+        /* Garante que NENHUM elemento filho herde white-space:pre-wrap do editor */
+        .post-detail-content,
+        .post-detail-content * {
+          white-space: normal !important;
+          max-width: 100%;
+          overflow-wrap: break-word;
+        }
+
+        /* Blocos de texto */
+        .post-detail-content div,
+        .post-detail-content p {
+          margin-bottom: 0.5em;
+          max-width: 100%;
+        }
+
+        /* Formatação inline */
+        .post-detail-content b,
+        .post-detail-content strong { font-weight: 700; }
+
+        .post-detail-content i,
+        .post-detail-content em { font-style: italic; }
+
+        .post-detail-content u { text-decoration: underline; }
+
+        /* Spans preservam cor herdada */
+        .post-detail-content span {
+          color: inherit;
+          font-size: inherit;
+          font-family: inherit;
+        }
+
+        /* Imagens inseridas pelo editor */
+        .post-detail-content img {
+          max-width: 100%;
+          height: auto;
+          display: block;
+          margin: 0.75rem 0;
+          border-radius: 6px;
+          /* Garante que imagens base64 grandes não quebrem o layout */
+          object-fit: contain;
+        }
+
+        /* Alinhamentos */
+        .post-detail-content [style*="text-align: center"] { text-align: center; }
+        .post-detail-content [style*="text-align: right"]  { text-align: right; }
+        .post-detail-content [style*="text-align: justify"] { text-align: justify; }
+        .post-detail-content [style*="text-align: left"]  { text-align: left; }
+
+        /* Espaçamento mobile da área de conteúdo */
+        @media (max-width: 640px) {
+          .post-detail-content {
+            font-size: 0.92rem;
+            line-height: 1.75;
+          }
         }
       `}</style>
     </>
