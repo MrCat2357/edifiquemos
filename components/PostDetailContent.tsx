@@ -13,6 +13,7 @@ import { gerarPDF } from "@/lib/gerarPDF";
 import LinksReferencia from "@/components/LinksReferencia";
 import BannerLogin from "@/components/BannerLogin";
 import CommentSection from "@/components/comments/CommentSection";
+import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 
 /* ── helpers ─────────────────────────────────────────── */
 
@@ -950,6 +951,25 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
   const actionBtnStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: "5px" };
 
+  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const audioAtivo = isCurrentPublication(postId);
+  const audioTocando = isCurrentlyPlaying(postId);
+  const audioCarregando = audioAtivo && audioLoading;
+
+  const ouvirBtnRef = useRef<HTMLButtonElement>(null);
+  const [ouvirFlutuante, setOuvirFlutuante] = useState(false);
+
+  useEffect(() => {
+  const el = ouvirBtnRef.current;
+  if (!el) return;
+  const observer = new IntersectionObserver(
+      ([entry]) => setOuvirFlutuante(!entry.isIntersecting),
+      { threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <>
       <div style={{
@@ -1046,6 +1066,24 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         <hr className="post-detail-divider" />
 
         <div className="post-detail-actions">
+
+          <button
+            ref={ouvirBtnRef}
+            onClick={() => playOrToggle({
+              id: postId,
+              tipo: post.tipo,
+              titulo: post.titulo,
+              autorNome: nomeExibicao,
+              autorFoto: fotoAutor,
+              slug: post.slug,
+              audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+            })}
+            className="post-btn-share"
+            style={{ ...actionBtnStyle, opacity: audioCarregando ? 0.6 : 1 }}
+          >
+            {audioCarregando ? "Carregando…" : audioTocando ? "⏸ Pausar" : audioAtivo ? "▶ Continuar" : "🎧 Ouvir"}
+          </button>
+
           <button onClick={handleLike} disabled={loadingLike}
             className={`post-btn-share ${liked ? "liked" : ""}`}
             style={{ opacity: loadingLike ? 0.6 : 1, ...actionBtnStyle }}
@@ -1091,6 +1129,48 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         <CommentSection postId={postId} />
       </article>
+
+      {/* Botão flutuante — aparece quando o botão normal sai da tela */}
+      {ouvirFlutuante && (
+        <button
+          onClick={() => playOrToggle({
+            id: postId,
+            tipo: post.tipo,
+            titulo: post.titulo,
+            autorNome: nomeExibicao,
+            autorFoto: fotoAutor,
+            slug: post.slug,
+            audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+          })}
+          aria-label={audioTocando ? "Pausar áudio" : "Ouvir este conteúdo"}
+          style={{
+            position: "fixed",
+            top: "calc(var(--header-h) + 12px)",
+            right: "16px",
+            zIndex: 800,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "8px 16px",
+            borderRadius: "var(--radius-full)",
+            border: "1px solid var(--emerald-dim)",
+            background: audioTocando ? "var(--emerald)" : "var(--bg-card)",
+            color: audioTocando ? "#fff" : "var(--emerald)",
+            fontSize: "0.8rem",
+            fontWeight: 700,
+            cursor: "pointer",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+            backdropFilter: "blur(8px)",
+            transition: "all 0.2s ease",
+            fontFamily: "inherit",
+          }}
+        >
+          {audioCarregando ? "⏳" : audioTocando ? "⏸" : "🎧"}
+          <span style={{ display: "var(--ouvir-label-display, inline)" }}>
+            {audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}
+          </span>
+        </button>
+      )}
 
       <style>{`
         @media (max-width: 640px) {
