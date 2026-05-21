@@ -20,6 +20,7 @@ import Link from "next/link";
 import { useAuth } from "@/lib/useAuth";
 import { gerarPDF } from "@/lib/gerarPDF";
 import CardReflexao from "@/components/reflexoes/CardReflexao";
+import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
 
@@ -27,6 +28,65 @@ const CommentSection = dynamic(
   () => import("@/components/comments/CommentSection"),
   { ssr: false, loading: () => null }
 );
+
+// ─── BotaoOuvirCard ───────────────────────────────────────────────────────────
+
+function BotaoOuvirCard({ post }: { post: any }) {
+  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+
+  if (post._feedType === "serie") return null;
+
+  const audioAtivo = isCurrentPublication(post.id);
+  const audioTocando = isCurrentlyPlaying(post.id);
+  const audioCarregando = audioAtivo && audioLoading;
+
+  function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    playOrToggle({
+      id: post.id,
+      tipo: post.tipo,
+      titulo: post.titulo,
+      autorNome: post.autorNome || "Autor",
+      autorFoto: post.autorFoto ?? null,
+      slug: post.slug,
+      autorSlug: post.autorSlug,
+      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+    });
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      title={audioTocando ? "Pausar" : "Ouvir este conteúdo"}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
+        padding: "4px 8px",
+        borderRadius: "var(--radius-full)",
+        border: "1px solid",
+        borderColor: audioAtivo ? "var(--emerald-dim)" : "transparent",
+        background: audioAtivo ? "var(--emerald-dim)" : "transparent",
+        color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
+        fontSize: "0.72rem",
+        fontWeight: 600,
+        cursor: "pointer",
+        transition: "all 0.15s",
+        fontFamily: "inherit",
+        flexShrink: 0,
+        boxShadow: audioTocando ? "0 0 0 2px var(--emerald-dim)" : "none",
+      }}
+    >
+      {audioCarregando ? "⏳" : audioTocando ? "⏸" : "🎧"}
+      <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
+      {audioTocando && (
+        <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>
+          · agora
+        </span>
+      )}
+    </button>
+  );
+}
 
 const PAGE_SIZE = 8;
 
@@ -451,6 +511,8 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
             <IconEye size={13} />{viewCount}
           </span>
         )}
+
+        <BotaoOuvirCard post={post} />
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(url)}>Ler completo →</span>
     </div>
@@ -553,8 +615,27 @@ function ReflexaoFeedCard({
   const isAutor = !!currentUid && currentUid === reflexao.autorId;
 
   // ── CORREÇÃO: passa ?from=home para que ReflexaoNavigation use o feed global ──
+  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const audioAtivo = isCurrentPublication(reflexao.id);
+  const audioTocando = isCurrentlyPlaying(reflexao.id);
+  const audioCarregando = audioAtivo && audioLoading;
+
   function handleCardClick() {
     router.push(`/${reflexao.autorSlug}/reflexao/${reflexao.slug}?from=home`);
+  }
+
+  function handleOuvir(e: React.MouseEvent) {
+    e.stopPropagation();
+    playOrToggle({
+      id: reflexao.id,
+      tipo: "reflexao",
+      titulo: reflexao.titulo,
+      autorNome: reflexao.autorNome,
+      autorFoto: reflexao.autorFoto ?? null,
+      slug: reflexao.slug,
+      autorSlug: reflexao.autorSlug,
+      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+    });
   }
 
   async function handleDelete(e: React.MouseEvent) {
@@ -582,8 +663,30 @@ function ReflexaoFeedCard({
         style={{ cursor: "pointer" }}
         onClick={handleCardClick}
       >
-        <CardReflexao reflexao={reflexao} disableNavigation />
+        <CardReflexao
+          reflexao={reflexao}
+          disableNavigation
+          botaoOuvir={
+            <button
+              onClick={handleOuvir}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: "0.3rem",
+                padding: "4px 10px", borderRadius: "var(--radius-full)",
+                border: "1px solid",
+                borderColor: audioAtivo ? "var(--emerald-dim)" : "transparent",
+                background: audioAtivo ? "var(--emerald-dim)" : "transparent",
+                color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
+                fontSize: "0.75rem", fontWeight: 600,
+                cursor: "pointer", transition: "all 0.18s ease", fontFamily: "inherit",
+              }}
+            >
+              <span>{audioCarregando ? "⏳" : audioTocando ? "⏸" : "🎧"}</span>
+              <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
+            </button>
+          }
+        />
       </div>
+
       {isAutor && (
         <div className="reflexao-owner-actions" onClick={(e) => e.stopPropagation()}>
           <a

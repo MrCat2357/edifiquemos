@@ -77,7 +77,10 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     audio.addEventListener("canplay", () => setIsLoading(false));
     audio.addEventListener("durationchange", () => setDuration(audio.duration || 0));
     audio.addEventListener("timeupdate", () => setCurrentTime(audio.currentTime));
-    audio.addEventListener("ended", () => setIsPlaying(false));
+    audio.addEventListener("ended", () => {
+      setIsPlaying(false);
+      // FASE 3 — autoplay: aqui será chamado onEnded(current) para avançar a fila
+    });
     audio.addEventListener("play", () => setIsPlaying(true));
     audio.addEventListener("pause", () => setIsPlaying(false));
     audio.addEventListener("error", () => {

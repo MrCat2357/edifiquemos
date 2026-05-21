@@ -17,11 +17,12 @@ import {
   getDocs,
   getDoc,
 } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Reflexao } from "@/lib/reflexoes";
 import CompartilharWhatsapp from "@/components/reflexoes/CompartilharWhatsapp";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
+import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 
 const CommentSection = dynamic(
   () => import("@/components/comments/CommentSection"),
@@ -532,6 +533,40 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
     document.getElementById("reflexao-comments")?.scrollIntoView({ behavior: "smooth" });
   }
 
+  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const audioAtivo = isCurrentPublication(reflexao.id ?? "");
+  const audioTocando = isCurrentlyPlaying(reflexao.id ?? "");
+  const audioCarregando = audioAtivo && audioLoading;
+
+  const ouvirBtnRef = useRef<HTMLSpanElement>(null);
+  const [ouvirFlutuante, setOuvirFlutuante] = useState(false);
+
+  useEffect(() => {
+    const el = ouvirBtnRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setOuvirFlutuante(!entry.isIntersecting),
+      { threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  function handleOuvir(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!reflexao.id) return;
+    playOrToggle({
+      id: reflexao.id,
+      tipo: "reflexao",
+      titulo: reflexao.titulo,
+      autorNome: reflexao.autorNome,
+      autorFoto: null,
+      slug: reflexao.slug,
+      autorSlug: autorSlug,
+      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+    });
+  }
+
   const paragrafos = reflexao.conteudo
     .split(/\n\n+/)
     .map((p) => p.trim())
@@ -684,11 +719,12 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
         </p>
       </div>
 
-      {/* ── Amei + Comentar ── */}
+      {/* ── Amei + Comentar + Ouvir ── */}
       <div style={{
         display: "flex", alignItems: "center", gap: "0.5rem",
         padding: "0.875rem 1.125rem", borderRadius: "var(--radius-lg)",
         background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
+        flexWrap: "wrap",
       }}>
         <button
           onClick={handleLike}
@@ -733,7 +769,68 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
             <span style={{ fontSize: "0.75rem", color: "var(--text-3)" }}>{commentCount}</span>
           )}
         </button>
+
+        <button
+          onClick={handleOuvir}
+          aria-label={audioTocando ? "Pausar áudio" : "Ouvir reflexão"}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "0.4rem",
+            padding: "6px 14px", borderRadius: "var(--radius-full)",
+            border: "1px solid",
+            borderColor: audioAtivo ? "var(--emerald-dim)" : "var(--border-light)",
+            background: audioAtivo ? "var(--emerald-dim)" : "transparent",
+            color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
+            fontSize: "0.82rem", fontWeight: 600,
+            cursor: audioCarregando ? "default" : "pointer",
+            opacity: audioCarregando ? 0.7 : 1,
+            transition: "all 0.2s cubic-bezier(0.4,0,0.2,1)",
+            fontFamily: "inherit",
+          }}
+        >
+          <span>{audioCarregando ? "⏳" : audioTocando ? "⏸" : "🎧"}</span>
+          <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
+          {audioTocando && (
+            <span style={{ fontSize: "0.68rem", fontStyle: "italic", opacity: 0.8 }}>
+              · tocando
+            </span>
+          )}
+        </button>
       </div>
+
+      {/* Âncora invisível para o IntersectionObserver */}
+      <span ref={ouvirBtnRef} style={{ display: "none" }} aria-hidden="true" />
+
+      {/* Botão flutuante — aparece quando a seção de ações sai da tela */}
+      {ouvirFlutuante && (
+        <button
+          onClick={handleOuvir}
+          aria-label={audioTocando ? "Pausar áudio" : "Ouvir reflexão"}
+          style={{
+            position: "fixed",
+            top: "calc(var(--header-h) + 12px)",
+            right: "16px",
+            zIndex: 800,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "8px 16px",
+            borderRadius: "var(--radius-full)",
+            border: "1px solid var(--emerald-dim)",
+            background: audioTocando ? "var(--emerald)" : "var(--bg-card)",
+            color: audioTocando ? "#fff" : "var(--emerald)",
+            fontSize: "0.8rem",
+            fontWeight: 700,
+            cursor: "pointer",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
+            backdropFilter: "blur(8px)",
+            transition: "all 0.2s ease",
+            fontFamily: "inherit",
+          }}
+        >
+          {audioCarregando ? "⏳" : audioTocando ? "⏸" : "🎧"}
+          <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}</span>
+        </button>
+      )}
 
       {showLoginBanner && (
         <div id="reflexao-comments-banner">
