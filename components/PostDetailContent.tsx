@@ -1067,22 +1067,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
         <div className="post-detail-actions">
 
-          <button
-            ref={ouvirBtnRef}
-            onClick={() => playOrToggle({
-              id: postId,
-              tipo: post.tipo,
-              titulo: post.titulo,
-              autorNome: nomeExibicao,
-              autorFoto: fotoAutor,
-              slug: post.slug,
-              audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-            })}
-            className="post-btn-share"
-            style={{ ...actionBtnStyle, opacity: audioCarregando ? 0.6 : 1 }}
-          >
-            {audioCarregando ? "Carregando…" : audioTocando ? "⏸ Pausar" : audioAtivo ? "▶ Continuar" : "🎧 Ouvir"}
-          </button>
+          <span ref={ouvirBtnRef} style={{ display: "none" }} aria-hidden="true" />
 
           <button onClick={handleLike} disabled={loadingLike}
             className={`post-btn-share ${liked ? "liked" : ""}`}
