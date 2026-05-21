@@ -7,6 +7,7 @@ import { addDoc, collection, doc, getDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { gerarSlugUnico } from "@/lib/slug";
 import FileImportButton from "@/components/Button";
+import RichTextEditor from "@/components/RichTextEditor";
 import type { LinkReferencia } from "@/components/LinksReferencia";
 
 const TIPO_LINK_OPTIONS: { value: LinkReferencia["tipo"]; label: string; icon: string }[] = [
@@ -196,8 +197,6 @@ function BannerReflexao({
   onFechar: () => void;
   onGerarReflexoes: () => void;
 }) {
-  const postUrl = `/posts/${slugPublicado.tipo === "sermao" ? "sermoes" : "estudos"}/${slugPublicado.slug}`;
-
   return (
     <div
       style={{
@@ -229,100 +228,34 @@ function BannerReflexao({
           animation: "slideUpCard 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
         }}
       >
-        {/* Botão fechar */}
         <button
           onClick={onFechar}
           title="Fechar e ver publicação"
           style={{
-            position: "absolute",
-            top: "0.875rem",
-            right: "0.875rem",
-            background: "none",
-            border: "none",
-            color: "var(--text-3)",
-            fontSize: "1rem",
-            cursor: "pointer",
-            lineHeight: 1,
-            padding: "4px 7px",
-            borderRadius: "var(--radius-sm)",
-            transition: "color 0.15s",
+            position: "absolute", top: "0.875rem", right: "0.875rem",
+            background: "none", border: "none", color: "var(--text-3)",
+            fontSize: "1rem", cursor: "pointer", lineHeight: 1,
+            padding: "4px 7px", borderRadius: "var(--radius-sm)", transition: "color 0.15s",
           }}
           onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-1)")}
           onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-3)")}
         >
           ✕
         </button>
-
-        {/* Ícone + título */}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "0.625rem",
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "2.5rem",
-              lineHeight: 1,
-              filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.4))",
-            }}
-          >
-            🎉
-          </div>
-          <h2
-            style={{
-              fontSize: "1.2rem",
-              fontWeight: 800,
-              color: "var(--text-1)",
-              letterSpacing: "-0.025em",
-              margin: 0,
-            }}
-          >
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.625rem", textAlign: "center" }}>
+          <div style={{ fontSize: "2.5rem", lineHeight: 1, filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.4))" }}>🎉</div>
+          <h2 style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--text-1)", letterSpacing: "-0.025em", margin: 0 }}>
             Publicação feita com sucesso!
           </h2>
         </div>
-
-        {/* Texto principal */}
-        <p
-          style={{
-            fontSize: "0.875rem",
-            color: "var(--text-2)",
-            lineHeight: 1.7,
-            textAlign: "center",
-            margin: 0,
-          }}
-        >
+        <p style={{ fontSize: "0.875rem", color: "var(--text-2)", lineHeight: 1.7, textAlign: "center", margin: 0 }}>
           Que tal gerar{" "}
           <strong style={{ color: "var(--text-1)" }}>reflexões edificantes</strong> a partir
           dela? São formatos prontos para compartilhar com sua igreja e amigos nas redes sociais
           ao longo da semana.
         </p>
-
-        {/* Card explicativo */}
-        <div
-          style={{
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--border-light)",
-            borderRadius: "var(--radius-sm)",
-            padding: "0.875rem 1rem",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.375rem",
-          }}
-        >
-          <span
-            style={{
-              fontSize: "0.72rem",
-              fontWeight: 700,
-              color: "var(--emerald)",
-              marginBottom: "0.125rem",
-              letterSpacing: "0.02em",
-              textTransform: "uppercase",
-            }}
-          >
+        <div style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-light)", borderRadius: "var(--radius-sm)", padding: "0.875rem 1rem", display: "flex", flexDirection: "column", gap: "0.375rem" }}>
+          <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--emerald)", marginBottom: "0.125rem", letterSpacing: "0.02em", textTransform: "uppercase" }}>
             Cada reflexão inclui
           </span>
           {[
@@ -331,55 +264,17 @@ function BannerReflexao({
             ["📖", "Texto curto (1 min de leitura)"],
             ["🔗", "Link direto para sua publicação"],
           ].map(([icon, label]) => (
-            <div
-              key={label}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                fontSize: "0.8rem",
-                color: "var(--text-2)",
-              }}
-            >
+            <div key={label} style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem", color: "var(--text-2)" }}>
               <span style={{ flexShrink: 0 }}>{icon}</span>
               <span>{label}</span>
             </div>
           ))}
         </div>
-
-        {/* Botão principal */}
-        <button
-          onClick={onGerarReflexoes}
-          className="btn-hero-primary"
-          style={{
-            textAlign: "center",
-            fontSize: "0.95rem",
-            padding: "13px 0",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "0.5rem",
-          }}
-        >
+        <button onClick={onGerarReflexoes} className="btn-hero-primary" style={{ textAlign: "center", fontSize: "0.95rem", padding: "13px 0", display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem" }}>
           <span>✦</span>
           Gerar reflexões agora
         </button>
-
-        {/* Link secundário */}
-        <button
-          onClick={onFechar}
-          style={{
-            background: "none",
-            border: "none",
-            color: "var(--text-3)",
-            fontSize: "0.8rem",
-            cursor: "pointer",
-            textAlign: "center",
-            textDecoration: "underline",
-            textUnderlineOffset: "3px",
-            padding: 0,
-            transition: "color 0.15s",
-          }}
+        <button onClick={onFechar} style={{ background: "none", border: "none", color: "var(--text-3)", fontSize: "0.8rem", cursor: "pointer", textAlign: "center", textDecoration: "underline", textUnderlineOffset: "3px", padding: 0, transition: "color 0.15s" }}
           onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-2)")}
           onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-3)")}
         >
@@ -396,7 +291,7 @@ export default function CriarPost() {
   const router = useRouter();
 
   const [titulo,   setTitulo]   = useState("");
-  const [conteudo, setConteudo] = useState("");
+  const [conteudo, setConteudo] = useState(""); // armazena HTML rico
   const [tipo,     setTipo]     = useState("sermao");
   const [igreja,   setIgreja]   = useState("");
   const [data,     setData]     = useState("");
@@ -418,6 +313,7 @@ export default function CriarPost() {
   const [mostrarBannerReflexao, setMostrarBannerReflexao] = useState(false);
   const [slugPublicado, setSlugPublicado] = useState<{ slug: string; tipo: string } | null>(null);
 
+  /* ── Draft session storage ── */
   useEffect(() => {
     const draft = sessionStorage.getItem("draft-post");
     if (draft) {
@@ -431,8 +327,10 @@ export default function CriarPost() {
     }
   }, []);
 
+  /* Mostra botão de corrigir se há conteúdo real (strip HTML p/ verificar) */
   useEffect(() => {
-    setMostrarBotaoCorrigir(conteudo.trim().length > 20);
+    const textoPlain = conteudo.replace(/<[^>]*>/g, "").trim();
+    setMostrarBotaoCorrigir(textoPlain.length > 20);
     setCorrecaoFeita(false);
   }, [conteudo]);
 
@@ -464,7 +362,10 @@ export default function CriarPost() {
     e.preventDefault();
     if (loading) return;
 
-    if (!titulo.trim() || !conteudo.trim()) {
+    /* Texto puro para validação */
+    const textoPlain = conteudo.replace(/<[^>]*>/g, "").trim();
+
+    if (!titulo.trim() || !textoPlain) {
       setError("Título e conteúdo são obrigatórios.");
       return;
     }
@@ -494,9 +395,10 @@ export default function CriarPost() {
         setUploadProgress(null);
       }
 
+      /* conteudo já vem como HTML — salvo diretamente */
       await addDoc(collection(db, "posts"), {
         titulo:    titulo.trim().toUpperCase(),
-        conteudo:  conteudo.trim(),
+        conteudo:  conteudo.trim(),   // HTML rico preservado
         tipo,
         igreja:    igreja.trim()  || "",
         data:      data.trim()    || "",
@@ -510,7 +412,6 @@ export default function CriarPost() {
 
       sessionStorage.removeItem("draft-post");
 
-      /* Sucesso: mostra o banner em vez de redirecionar imediatamente */
       setSlugPublicado({ slug, tipo });
       setMostrarBannerReflexao(true);
       setLoading(false);
@@ -670,26 +571,10 @@ export default function CriarPost() {
               onChange={setImagemFile}
               onClear={() => setImagemFile(null)}
             />
-            {/* Barra de progresso do upload */}
             {uploadProgress !== null && (
               <div style={{ marginTop: "0.5rem" }}>
-                <div
-                  style={{
-                    height: 4,
-                    background: "var(--border-light)",
-                    borderRadius: "var(--radius-full)",
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${uploadProgress}%`,
-                      background: "var(--emerald)",
-                      borderRadius: "var(--radius-full)",
-                      transition: "width 0.2s ease",
-                    }}
-                  />
+                <div style={{ height: 4, background: "var(--border-light)", borderRadius: "var(--radius-full)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${uploadProgress}%`, background: "var(--emerald)", borderRadius: "var(--radius-full)", transition: "width 0.2s ease" }} />
                 </div>
                 <p style={{ fontSize: "0.72rem", color: "var(--text-3)", marginTop: "0.25rem" }}>
                   Enviando imagem… {uploadProgress}%
@@ -698,7 +583,7 @@ export default function CriarPost() {
             )}
           </div>
 
-          {/* Conteúdo */}
+          {/* ── Conteúdo (editor rico) ── */}
           <div className="auth-field">
             <div
               style={{
@@ -717,7 +602,9 @@ export default function CriarPost() {
                 <FileImportButton
                   onImport={(texto) =>
                     setConteudo((prev) =>
-                      prev.trim() ? prev + "\n\n" + texto : texto
+                      prev.replace(/<[^>]*>/g, "").trim()
+                        ? prev + "<br><br>" + texto
+                        : texto
                     )
                   }
                 />
@@ -768,12 +655,13 @@ export default function CriarPost() {
                 )}
               </div>
             </div>
-            <textarea
-              placeholder="Escreva seu sermão ou estudo aqui, ou importe um arquivo acima..."
+
+            {/* Editor rico substitui o <textarea> */}
+            <RichTextEditor
               value={conteudo}
-              onChange={(e) => setConteudo(e.target.value)}
-              className="auth-input"
-              style={{ minHeight: "14rem", resize: "vertical", lineHeight: 1.75 }}
+              onChange={setConteudo}
+              placeholder="Escreva seu sermão ou estudo aqui, ou importe um arquivo acima…"
+              minHeight="14rem"
             />
           </div>
 
@@ -884,14 +772,7 @@ export default function CriarPost() {
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                      <label
-                        style={{
-                          fontSize: "0.72rem",
-                          color: "var(--text-3)",
-                          fontWeight: 600,
-                          marginRight: "0.25rem",
-                        }}
-                      >
+                      <label style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 600, marginRight: "0.25rem" }}>
                         Tipo:
                       </label>
                       <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", flex: 1 }}>
@@ -903,9 +784,7 @@ export default function CriarPost() {
                             style={{
                               padding: "3px 10px",
                               borderRadius: "var(--radius-full)",
-                              border: link.tipo === opt.value
-                                ? "1px solid var(--emerald)"
-                                : "1px solid var(--border-light)",
+                              border: link.tipo === opt.value ? "1px solid var(--emerald)" : "1px solid var(--border-light)",
                               background: link.tipo === opt.value ? "var(--emerald-dim)" : "var(--bg-card)",
                               color: link.tipo === opt.value ? "var(--emerald)" : "var(--text-3)",
                               fontSize: "0.72rem",
@@ -922,22 +801,15 @@ export default function CriarPost() {
                         type="button"
                         onClick={() => removeLink(i)}
                         style={{
-                          background: "none",
-                          border: "none",
-                          color: "var(--text-3)",
-                          cursor: "pointer",
-                          fontSize: "1rem",
-                          padding: "2px 6px",
-                          borderRadius: "var(--radius-sm)",
-                          transition: "color 0.15s",
-                          flexShrink: 0,
+                          background: "none", border: "none", color: "var(--text-3)",
+                          cursor: "pointer", fontSize: "1rem", padding: "2px 6px",
+                          borderRadius: "var(--radius-sm)", transition: "color 0.15s", flexShrink: 0,
                         }}
                         title="Remover link"
                       >
                         ✕
                       </button>
                     </div>
-
                     <input
                       placeholder={
                         link.tipo === "youtube" ? "Ex: Acompanhe meu canal no YouTube" :
@@ -951,7 +823,6 @@ export default function CriarPost() {
                       className="auth-input"
                       style={{ fontSize: "0.85rem", padding: "8px 12px" }}
                     />
-
                     <input
                       placeholder="https://..."
                       value={link.url}
@@ -972,7 +843,7 @@ export default function CriarPost() {
             </div>
           )}
 
-          {/* Botão */}
+          {/* Botão publicar */}
           <button
             type="button"
             onClick={handleCriarPost}

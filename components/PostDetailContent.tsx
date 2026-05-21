@@ -1025,9 +1025,13 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           </div>
         )}
 
-        <div ref={conteudoRef} className="post-detail-content" onMouseUp={handleMouseUp} onTouchEnd={handleTouchEnd}>
-          {post.conteudo}
-        </div>
+        <div
+          ref={conteudoRef}
+          className="post-detail-content"
+          onMouseUp={handleMouseUp}
+          onTouchEnd={handleTouchEnd}
+          dangerouslySetInnerHTML={{ __html: post.conteudo }}
+        />
 
         {post.tipo === "sermao" ? (
           <p className="post-detail-footer-text">

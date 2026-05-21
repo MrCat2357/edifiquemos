@@ -12,6 +12,7 @@ import {
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { useParams, useRouter } from "next/navigation";
 import FileImportButton from "@/components/Button";
+import RichTextEditor from "@/components/RichTextEditor";
 import type { LinkReferencia } from "@/components/LinksReferencia";
 
 /* ── Opções de tipo de link ─────────────────────────── */
@@ -47,7 +48,6 @@ async function uploadImagem(
   });
 }
 
-/* Tenta deletar a imagem antiga do Storage (falha silenciosa) */
 async function tentarDeletarImagem(url: string) {
   try {
     const storage = getStorage();
@@ -56,7 +56,7 @@ async function tentarDeletarImagem(url: string) {
     const path = decodeURIComponent(match[1]);
     await deleteObject(storageRef(storage, path));
   } catch {
-    /* ignora erros de deleção */
+    /* ignora */
   }
 }
 
@@ -73,8 +73,8 @@ function ImageUpload({
   onFileChange: (f: File) => void;
   onRemoveExisting: () => void;
 }) {
-  const inputRef  = useRef<HTMLInputElement>(null);
-  const [preview, setPreview]  = useState<string | null>(null);
+  const inputRef   = useRef<HTMLInputElement>(null);
+  const [preview, setPreview]   = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
   useEffect(() => {
@@ -97,7 +97,6 @@ function ImageUpload({
     if (f) handleFile(f);
   }
 
-  /* Qual imagem mostrar: nova (preview) > existente > nenhuma */
   const shown = preview ?? existingUrl ?? null;
 
   if (shown) {
@@ -108,7 +107,6 @@ function ImageUpload({
           borderRadius: "var(--radius-sm)",
           overflow: "hidden",
           border: "1px solid var(--border-light)",
-          /* CORREÇÃO: fundo neutro + flex para centralizar imagem de qualquer proporção */
           background: "#0d1310",
           display: "flex",
           alignItems: "center",
@@ -119,19 +117,11 @@ function ImageUpload({
         <img
           src={shown}
           alt="Capa do post"
-          style={{
-            width: "100%",
-            /* CORREÇÃO: contain exibe a imagem completa; max-height evita cards enormes */
-            maxHeight: "380px",
-            objectFit: "contain",
-            display: "block",
-          }}
+          style={{ width: "100%", maxHeight: "380px", objectFit: "contain", display: "block" }}
         />
-
-        {/* Botão remover */}
         <button
           type="button"
-          onClick={preview ? () => { onRemoveExisting(); } : onRemoveExisting}
+          onClick={onRemoveExisting}
           title="Remover imagem"
           style={{
             position: "absolute", top: "0.5rem", right: "0.5rem",
@@ -146,8 +136,6 @@ function ImageUpload({
         >
           ✕
         </button>
-
-        {/* Botão trocar */}
         <button
           type="button"
           onClick={() => inputRef.current?.click()}
@@ -165,7 +153,6 @@ function ImageUpload({
         >
           Trocar
         </button>
-
         <div
           style={{
             position: "absolute", bottom: "0.5rem", left: "0.5rem",
@@ -177,7 +164,6 @@ function ImageUpload({
         >
           {preview ? "Nova imagem" : "Imagem atual"}
         </div>
-
         <input
           ref={inputRef}
           type="file"
@@ -236,7 +222,7 @@ export default function EditarPost() {
   const id = params?.id as string;
 
   const [titulo,   setTitulo]   = useState("");
-  const [conteudo, setConteudo] = useState("");
+  const [conteudo, setConteudo] = useState(""); // HTML rico
   const [tipo,     setTipo]     = useState("sermao");
   const [igreja,   setIgreja]   = useState("");
   const [data,     setData]     = useState("");
@@ -259,7 +245,8 @@ export default function EditarPost() {
   const [correcaoFeita,        setCorrecaoFeita]        = useState(false);
 
   useEffect(() => {
-    setMostrarBotaoCorrigir(conteudo.trim().length > 20);
+    const textoPlain = conteudo.replace(/<[^>]*>/g, "").trim();
+    setMostrarBotaoCorrigir(textoPlain.length > 20);
     setCorrecaoFeita(false);
   }, [conteudo]);
 
@@ -277,7 +264,7 @@ export default function EditarPost() {
           return;
         }
         setTitulo(d.titulo    || "");
-        setConteudo(d.conteudo  || "");
+        setConteudo(d.conteudo  || "");  // já é HTML — o editor recebe direto
         setTipo(d.tipo      || "sermao");
         setIgreja(d.igreja    || "");
         setSlug(d.slug      || "");
@@ -342,10 +329,13 @@ export default function EditarPost() {
 
   async function handleUpdate(e: React.FormEvent) {
     e.preventDefault();
-    if (!titulo.trim() || !conteudo.trim()) {
+
+    const textoPlain = conteudo.replace(/<[^>]*>/g, "").trim();
+    if (!titulo.trim() || !textoPlain) {
       setError("Título e conteúdo são obrigatórios.");
       return;
     }
+
     setSaving(true);
     setError("");
 
@@ -367,7 +357,7 @@ export default function EditarPost() {
 
       await updateDoc(doc(db, "posts", id), {
         titulo:    titulo.trim(),
-        conteudo:  conteudo.trim(),
+        conteudo:  conteudo.trim(),  // HTML rico
         tipo,
         igreja:    igreja.trim()  || "",
         data:      data.trim()    || "",
@@ -398,7 +388,6 @@ export default function EditarPost() {
     <div className="post-detail-notfound">{error}</div>
   );
 
-  /* qual URL exibir no componente */
   const imagemExibida = imagemRemovida ? null : imagemUrlAtual;
 
   /* ── Render ────────────────────────────────────────── */
@@ -491,13 +480,7 @@ export default function EditarPost() {
               Imagem de capa{" "}
               <span className="auth-label-opt">(opcional)</span>
             </label>
-            <p
-              style={{
-                fontSize: "0.72rem",
-                color: "var(--text-3)",
-                marginBottom: "0.5rem",
-              }}
-            >
+            <p style={{ fontSize: "0.72rem", color: "var(--text-3)", marginBottom: "0.5rem" }}>
               Quando presente, o card terá um visual diferenciado com a imagem em destaque
             </p>
             <ImageUpload
@@ -508,38 +491,17 @@ export default function EditarPost() {
             />
             {uploadProgress !== null && (
               <div style={{ marginTop: "0.5rem" }}>
-                <div
-                  style={{
-                    height: 4,
-                    background: "var(--border-light)",
-                    borderRadius: "var(--radius-full)",
-                    overflow: "hidden",
-                  }}
-                >
-                  <div
-                    style={{
-                      height: "100%",
-                      width: `${uploadProgress}%`,
-                      background: "var(--emerald)",
-                      borderRadius: "var(--radius-full)",
-                      transition: "width 0.2s ease",
-                    }}
-                  />
+                <div style={{ height: 4, background: "var(--border-light)", borderRadius: "var(--radius-full)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${uploadProgress}%`, background: "var(--emerald)", borderRadius: "var(--radius-full)", transition: "width 0.2s ease" }} />
                 </div>
-                <p
-                  style={{
-                    fontSize: "0.72rem",
-                    color: "var(--text-3)",
-                    marginTop: "0.25rem",
-                  }}
-                >
+                <p style={{ fontSize: "0.72rem", color: "var(--text-3)", marginTop: "0.25rem" }}>
                   Enviando imagem… {uploadProgress}%
                 </p>
               </div>
             )}
           </div>
 
-          {/* Conteúdo */}
+          {/* ── Conteúdo (editor rico) ── */}
           <div className="auth-field">
             <div
               style={{
@@ -558,7 +520,9 @@ export default function EditarPost() {
                 <FileImportButton
                   onImport={(texto) =>
                     setConteudo((prev) =>
-                      prev.trim() ? prev + "\n\n" + texto : texto
+                      prev.replace(/<[^>]*>/g, "").trim()
+                        ? prev + "<br><br>" + texto
+                        : texto
                     )
                   }
                 />
@@ -609,23 +573,18 @@ export default function EditarPost() {
                 )}
               </div>
             </div>
-            <textarea
-              placeholder="Escreva seu sermão ou estudo aqui, ou importe um arquivo acima..."
+
+            {/* Editor rico substitui o <textarea> */}
+            <RichTextEditor
               value={conteudo}
-              onChange={(e) => setConteudo(e.target.value)}
-              className="auth-input"
-              style={{ minHeight: "14rem", resize: "vertical", lineHeight: 1.75 }}
+              onChange={setConteudo}
+              placeholder="Escreva seu sermão ou estudo aqui, ou importe um arquivo acima…"
+              minHeight="14rem"
             />
           </div>
 
           {/* Igreja e Data */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "0.75rem",
-            }}
-          >
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
             <div className="auth-field">
               <label className="auth-label">
                 Igreja <span className="auth-label-opt">(opcional)</span>
@@ -653,26 +612,13 @@ export default function EditarPost() {
 
           {/* Links de Referência */}
           <div className="auth-field">
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: "0.5rem",
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.5rem" }}>
               <div>
                 <label className="auth-label" style={{ margin: 0 }}>
                   Links de referência{" "}
                   <span className="auth-label-opt">(opcional)</span>
                 </label>
-                <p
-                  style={{
-                    fontSize: "0.72rem",
-                    color: "var(--text-3)",
-                    marginTop: "2px",
-                  }}
-                >
+                <p style={{ fontSize: "0.72rem", color: "var(--text-3)", marginTop: "2px" }}>
                   YouTube, blog, livro, site… aparecem como botões visuais no post
                 </p>
               </div>
@@ -680,19 +626,11 @@ export default function EditarPost() {
                 type="button"
                 onClick={addLink}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.3rem",
-                  padding: "5px 12px",
-                  borderRadius: "var(--radius-full)",
-                  border: "1px solid var(--border-light)",
-                  background: "var(--bg-elevated)",
-                  color: "var(--emerald)",
-                  fontWeight: 600,
-                  fontSize: "0.78rem",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  transition: "all 0.15s",
+                  display: "flex", alignItems: "center", gap: "0.3rem",
+                  padding: "5px 12px", borderRadius: "var(--radius-full)",
+                  border: "1px solid var(--border-light)", background: "var(--bg-elevated)",
+                  color: "var(--emerald)", fontWeight: 600, fontSize: "0.78rem",
+                  cursor: "pointer", whiteSpace: "nowrap", transition: "all 0.15s",
                 }}
               >
                 + Adicionar
@@ -700,25 +638,9 @@ export default function EditarPost() {
             </div>
 
             {links.length === 0 && (
-              <div
-                style={{
-                  border: "1px dashed var(--border-light)",
-                  borderRadius: "var(--radius-lg)",
-                  padding: "1.25rem",
-                  textAlign: "center",
-                  color: "var(--text-3)",
-                  fontSize: "0.82rem",
-                }}
-              >
+              <div style={{ border: "1px dashed var(--border-light)", borderRadius: "var(--radius-lg)", padding: "1.25rem", textAlign: "center", color: "var(--text-3)", fontSize: "0.82rem" }}>
                 Nenhum link adicionado ainda.{" "}
-                <span
-                  style={{
-                    color: "var(--emerald)",
-                    cursor: "pointer",
-                    fontWeight: 600,
-                  }}
-                  onClick={addLink}
-                >
+                <span style={{ color: "var(--emerald)", cursor: "pointer", fontWeight: 600 }} onClick={addLink}>
                   Clique em "+ Adicionar"
                 </span>{" "}
                 para inserir um link de referência.
@@ -726,130 +648,56 @@ export default function EditarPost() {
             )}
 
             {links.length > 0 && (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "0.75rem",
-                }}
-              >
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
                 {links.map((link, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      background: "var(--bg-elevated)",
-                      border: "1px solid var(--border-light)",
-                      borderRadius: "var(--radius-lg)",
-                      padding: "0.875rem 1rem",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "0.625rem",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.5rem",
-                      }}
-                    >
-                      <label
-                        style={{
-                          fontSize: "0.72rem",
-                          color: "var(--text-3)",
-                          fontWeight: 600,
-                          marginRight: "0.25rem",
-                          flexShrink: 0,
-                        }}
-                      >
+                  <div key={i} style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-light)", borderRadius: "var(--radius-lg)", padding: "0.875rem 1rem", display: "flex", flexDirection: "column", gap: "0.625rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <label style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 600, marginRight: "0.25rem", flexShrink: 0 }}>
                         Tipo:
                       </label>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "0.375rem",
-                          flexWrap: "wrap",
-                          flex: 1,
-                        }}
-                      >
+                      <div style={{ display: "flex", gap: "0.375rem", flexWrap: "wrap", flex: 1 }}>
                         {TIPO_LINK_OPTIONS.map((opt) => (
                           <button
                             key={opt.value}
                             type="button"
                             onClick={() => updateLink(i, "tipo", opt.value)}
                             style={{
-                              padding: "3px 10px",
-                              borderRadius: "var(--radius-full)",
-                              border:
-                                link.tipo === opt.value
-                                  ? "1px solid var(--emerald)"
-                                  : "1px solid var(--border-light)",
-                              background:
-                                link.tipo === opt.value
-                                  ? "var(--emerald-dim)"
-                                  : "var(--bg-card)",
-                              color:
-                                link.tipo === opt.value
-                                  ? "var(--emerald)"
-                                  : "var(--text-3)",
-                              fontSize: "0.72rem",
-                              fontWeight: 600,
-                              cursor: "pointer",
-                              transition: "all 0.15s",
+                              padding: "3px 10px", borderRadius: "var(--radius-full)",
+                              border: link.tipo === opt.value ? "1px solid var(--emerald)" : "1px solid var(--border-light)",
+                              background: link.tipo === opt.value ? "var(--emerald-dim)" : "var(--bg-card)",
+                              color: link.tipo === opt.value ? "var(--emerald)" : "var(--text-3)",
+                              fontSize: "0.72rem", fontWeight: 600, cursor: "pointer", transition: "all 0.15s",
                             }}
                           >
                             {opt.icon} {opt.label}
                           </button>
                         ))}
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => removeLink(i)}
-                        title="Remover link"
-                        style={{
-                          background: "none",
-                          border: "none",
-                          color: "var(--text-3)",
-                          cursor: "pointer",
-                          fontSize: "1rem",
-                          padding: "2px 6px",
-                          borderRadius: "var(--radius-sm)",
-                          transition: "color 0.15s",
-                          flexShrink: 0,
-                        }}
+                      <button type="button" onClick={() => removeLink(i)} title="Remover link"
+                        style={{ background: "none", border: "none", color: "var(--text-3)", cursor: "pointer", fontSize: "1rem", padding: "2px 6px", borderRadius: "var(--radius-sm)", transition: "color 0.15s", flexShrink: 0 }}
                       >
                         ✕
                       </button>
                     </div>
-
                     <input
                       placeholder={
-                        link.tipo === "youtube"
-                          ? "Ex: Acompanhe meu canal no YouTube"
-                          : link.tipo === "blog"
-                          ? "Ex: Veja o conteúdo completo no meu blog"
-                          : link.tipo === "livro"
-                          ? "Ex: Adquira já seu exemplar do livro"
-                          : link.tipo === "site"
-                          ? "Ex: Acesse nosso site"
-                          : "Ex: Veja mais conteúdo aqui"
+                        link.tipo === "youtube" ? "Ex: Acompanhe meu canal no YouTube" :
+                        link.tipo === "blog"    ? "Ex: Veja o conteúdo completo no meu blog" :
+                        link.tipo === "livro"   ? "Ex: Adquira já seu exemplar do livro" :
+                        link.tipo === "site"    ? "Ex: Acesse nosso site" :
+                        "Ex: Veja mais conteúdo aqui"
                       }
                       value={link.label}
                       onChange={(e) => updateLink(i, "label", e.target.value)}
                       className="auth-input"
                       style={{ fontSize: "0.85rem", padding: "8px 12px" }}
                     />
-
                     <input
                       placeholder="https://..."
                       value={link.url}
                       onChange={(e) => updateLink(i, "url", e.target.value)}
                       className="auth-input"
-                      style={{
-                        fontSize: "0.82rem",
-                        padding: "8px 12px",
-                        color: "var(--text-3)",
-                      }}
+                      style={{ fontSize: "0.82rem", padding: "8px 12px", color: "var(--text-3)" }}
                     />
                   </div>
                 ))}
