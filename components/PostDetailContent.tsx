@@ -81,6 +81,7 @@ export function AuthorAvatar({
         }}
       />
     );
+
   return (
     <div
       style={{
