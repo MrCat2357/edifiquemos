@@ -28,6 +28,24 @@ export function getInitials(name: string) {
   return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
+function decodeHtmlContent(str: string): string {
+  if (typeof window === "undefined") return str;
+
+  let html = str;
+
+  if (!/(<[a-zA-Z])/.test(html) && /&lt;/.test(html)) {
+    const ta = document.createElement("textarea");
+    ta.innerHTML = html;
+    html = ta.value;
+  }
+
+  html = html.replace(/white-space\s*:\s*pre-wrap\s*[;]?/gi, "");
+  html = html.replace(/white-space\s*:\s*pre\s*[;]?/gi, "");
+  html = html.replace(/\s*style\s*=\s*["']\s*["']/gi, "");
+
+  return html;
+}
+
 export function AuthorAvatar({
   src,
   name,
@@ -51,6 +69,7 @@ export function AuthorAvatar({
         }}
       />
     );
+
   return (
     <div
       style={{
@@ -1030,7 +1049,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           className="post-detail-content"
           onMouseUp={handleMouseUp}
           onTouchEnd={handleTouchEnd}
-          dangerouslySetInnerHTML={{ __html: post.conteudo }}
+          dangerouslySetInnerHTML={{ __html: decodeHtmlContent(post.conteudo ?? "") }}
         />
 
         {post.tipo === "sermao" ? (
