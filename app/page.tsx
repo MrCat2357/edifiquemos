@@ -31,9 +31,9 @@ const CommentSection = dynamic(
 
 // ─── BotaoOuvirCard ───────────────────────────────────────────────────────────
 
-function BotaoOuvirCard({ post }: { post: any }) {
+function BotaoOuvirCard({ post, filaAudio = [] }: { post: any; filaAudio?: any[] }) {
   const router = useRouter();
-  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   if (post._feedType === "serie") return null;
 
@@ -47,7 +47,7 @@ function BotaoOuvirCard({ post }: { post: any }) {
       router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       return;
     }
-    playOrToggle({
+    const pub = {
       id: post.id,
       tipo: post.tipo,
       titulo: post.titulo,
@@ -56,7 +56,12 @@ function BotaoOuvirCard({ post }: { post: any }) {
       slug: post.slug,
       autorSlug: post.autorSlug,
       audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    });
+    };
+    if (filaAudio.length > 0) {
+      playQueue(pub, filaAudio, "home");
+    } else {
+      playOrToggle(pub);
+    }
   }
 
   return (
@@ -409,10 +414,11 @@ function SerieCardMeuPerfil({
 
 // ─── PostCard ─────────────────────────────────────────────────────────────────
 
-function PostCard({ post, index, onAuthorClick, onToast }: {
+function PostCard({ post, index, onAuthorClick, onToast, filaAudio = [] }: {
   post: any; index: number;
   onAuthorClick: (e: React.MouseEvent, id: string) => void;
   onToast: (msg: string) => void;
+  filaAudio?: any[];
 }) {
   const router = useRouter();
   const uid = auth.currentUser?.uid;
@@ -523,7 +529,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
           </span>
         )}
 
-        <BotaoOuvirCard post={post} />
+        <BotaoOuvirCard post={post} filaAudio={filaAudio} />
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(url)}>Ler completo →</span>
     </div>
@@ -610,23 +616,17 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
 // ─── ReflexaoFeedCard ─────────────────────────────────────────────────────────
 
 function ReflexaoFeedCard({
-  reflexao,
-  index,
-  currentUid,
-  onDeleted,
-  onToast,
+  reflexao, index, currentUid, onDeleted, onToast, filaAudio = [],
 }: {
-  reflexao: any;
-  index: number;
-  currentUid: string | null;
-  onDeleted: (id: string) => void;
-  onToast: (msg: string) => void;
+  reflexao: any; index: number; currentUid: string | null;
+  onDeleted: (id: string) => void; onToast: (msg: string) => void;
+  filaAudio?: any[];
 }) {
   const router = useRouter();
   const isAutor = !!currentUid && currentUid === reflexao.autorId;
 
   // ── CORREÇÃO: passa ?from=home para que ReflexaoNavigation use o feed global ──
-  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
   const audioAtivo = isCurrentPublication(reflexao.id);
   const audioTocando = isCurrentlyPlaying(reflexao.id);
   const audioCarregando = audioAtivo && audioLoading;
@@ -637,16 +637,25 @@ function ReflexaoFeedCard({
 
   function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
-    playOrToggle({
+    if (!auth.currentUser) {
+      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      return;
+    }
+    const pub = {
       id: reflexao.id,
-      tipo: "reflexao",
+      tipo: "reflexao" as const,
       titulo: reflexao.titulo,
       autorNome: reflexao.autorNome,
       autorFoto: reflexao.autorFoto ?? null,
       slug: reflexao.slug,
       autorSlug: reflexao.autorSlug,
       audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    });
+    };
+    if (filaAudio.length > 0) {
+      playQueue(pub, filaAudio, "home");
+    } else {
+      playOrToggle(pub);
+    }
   }
 
   async function handleDelete(e: React.MouseEvent) {
@@ -728,12 +737,13 @@ function ReflexaoFeedCard({
 
 // ─── FeedItem ─────────────────────────────────────────────────────────────────
 
-function FeedItem({ item, index, onAuthorClick, onToast, currentUid, onReflexaoDeleted }: {
+function FeedItem({ item, index, onAuthorClick, onToast, currentUid, onReflexaoDeleted, filaAudio }: {
   item: any; index: number;
   onAuthorClick: (e: React.MouseEvent, id: string) => void;
   onToast: (msg: string) => void;
   currentUid: string | null;
   onReflexaoDeleted: (id: string) => void;
+  filaAudio: any[];
 }) {
   if (item._feedType === "serie") return <SerieCardMeuPerfil serie={item} index={index} onToast={onToast} />;
   if (item._feedType === "reflexao") {
@@ -744,10 +754,11 @@ function FeedItem({ item, index, onAuthorClick, onToast, currentUid, onReflexaoD
         currentUid={currentUid}
         onDeleted={onReflexaoDeleted}
         onToast={onToast}
+        filaAudio={filaAudio}
       />
     );
   }
-  return <PostCard post={item} index={index} onAuthorClick={onAuthorClick} onToast={onToast} />;
+  return <PostCard post={item} index={index} onAuthorClick={onAuthorClick} onToast={onToast} filaAudio={filaAudio} />;
 }
 
 // ─── HomePageContent ──────────────────────────────────────────────────────────
@@ -863,6 +874,20 @@ function HomePageContent() {
   const visibleItems = itensFiltrados.slice(0, visibleCount);
   const hasMore = visibleCount < itensFiltrados.length;
 
+  // Fila de áudio — feed completo sem séries e sem itens sem audioUrl
+  const filaAudio = feedItems
+    .filter((item) => item._feedType !== "serie" && !!item.audioUrl)
+    .map((item) => ({
+      id: item.id,
+      tipo: item.tipo,
+      titulo: item.titulo,
+      autorNome: item.autorNome || "Autor",
+      autorFoto: item.autorFoto ?? null,
+      slug: item.slug,
+      autorSlug: item.autorSlug,
+      audioUrl: item.audioUrl,
+    }));
+
   return (
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
@@ -941,6 +966,7 @@ function HomePageContent() {
                     onToast={showToast}
                     currentUid={currentUid}
                     onReflexaoDeleted={handleReflexaoDeleted}
+                    filaAudio={filaAudio}
                   />
                 ))}
               </div>

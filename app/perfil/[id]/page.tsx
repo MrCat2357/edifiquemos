@@ -145,9 +145,9 @@ async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: U
 
 // ─── BotaoOuvirPerfil ─────────────────────────────────────────────────────────
 
-function BotaoOuvirPerfil({ post }: { post: any }) {
+function BotaoOuvirPerfil({ post, filaAudio = [] }: { post: any; filaAudio?: any[] }) {
   const router = useRouter();
-  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   const audioAtivo = isCurrentPublication(post.id);
   const audioTocando = isCurrentlyPlaying(post.id);
@@ -159,7 +159,7 @@ function BotaoOuvirPerfil({ post }: { post: any }) {
       router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       return;
     }
-    playOrToggle({
+    const pub = {
       id: post.id,
       tipo: post.tipo,
       titulo: post.titulo,
@@ -168,7 +168,12 @@ function BotaoOuvirPerfil({ post }: { post: any }) {
       slug: post.slug,
       autorSlug: post.autorSlug,
       audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    });
+    };
+    if (filaAudio.length > 0) {
+      playQueue(pub, filaAudio, "perfil");
+    } else {
+      playOrToggle(pub);
+    }
   }
 
   return (
@@ -471,10 +476,11 @@ function SerieCardPublico({
 /* ── PostCardPerfil ─────────────────────────────────── */
 
 function PostCardPerfil({
-  post, index, user, nomeExibicao, autorUid, isOwner, onToast,
+  post, index, user, nomeExibicao, autorUid, isOwner, onToast, filaAudio = [],
 }: {
   post: any; index: number; user: User; nomeExibicao: string;
   autorUid: string; isOwner: boolean; onToast: (msg: string) => void;
+  filaAudio?: any[];
 }) {
   const router = useRouter();
   const currentUid = auth.currentUser?.uid;
@@ -649,7 +655,7 @@ function PostCardPerfil({
           </span>
         )}
 
-        <BotaoOuvirPerfil post={post} />
+        <BotaoOuvirPerfil post={post} filaAudio={filaAudio} />
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
         Ler completo →
@@ -930,15 +936,37 @@ export default function PerfilPublico() {
           {aba === "posts" && (
             <>
               {posts.length === 0 && <div className="empty-state">Nenhuma publicação ainda.</div>}
-              <div className="posts-list">
-                {posts.map((post, i) => (
-                  <PostCardPerfil
-                    key={post.id} post={post} index={i}
-                    user={user} nomeExibicao={nomeExibicao}
-                    autorUid={uid!} isOwner={isOwner} onToast={showToast}
-                  />
-                ))}
-              </div>
+              {(() => {
+                const filaPerfilAudio = posts
+                  .filter((p) => !!p.audioUrl)
+                  .map((p) => ({
+                    id: p.id,
+                    tipo: p.tipo,
+                    titulo: p.titulo,
+                    autorNome: p.autorNome || "Autor",
+                    autorFoto: p.autorFoto ?? null,
+                    slug: p.slug,
+                    autorSlug: p.autorSlug,
+                    audioUrl: p.audioUrl,
+                  }));
+                return (
+                  <div className="posts-list">
+                    {posts.map((post, i) => (
+                      <PostCardPerfil
+                        key={post.id}
+                        post={post}
+                        index={i}
+                        user={user}
+                        nomeExibicao={nomeExibicao}
+                        autorUid={uid!}
+                        isOwner={isOwner}
+                        onToast={showToast}
+                        filaAudio={filaPerfilAudio}
+                      />
+                    ))}
+                  </div>
+                );
+              })()}
             </>
           )}
 

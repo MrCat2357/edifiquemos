@@ -14,17 +14,12 @@ function formatTime(seconds: number): string {
 
 function getInitials(name: string): string {
   if (!name) return "?";
-  return name
-    .split(" ")
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join("")
-    .toUpperCase();
+  return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
 function typeBadge(tipo: string): string {
-  if (tipo === "sermao") return "Sermão";
-  if (tipo === "artigo") return "Estudo";
+  if (tipo === "sermao")   return "Sermão";
+  if (tipo === "artigo")   return "Estudo";
   if (tipo === "reflexao") return "Reflexão";
   return "";
 }
@@ -45,6 +40,24 @@ function IconPause({ size = 20 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"
       xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+    </svg>
+  );
+}
+
+function IconSkipPrev({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" />
+    </svg>
+  );
+}
+
+function IconSkipNext({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M6 18l8.5-6L6 6v12zm2.5-6 5.5 3.9V8.1L8.5 12zM16 6h2v12h-2z" />
     </svg>
   );
 }
@@ -74,48 +87,25 @@ function IconVolume({ size = 16, muted = false }: { size?: number; muted?: boole
 
 // ─── Avatar do autor ──────────────────────────────────────────────────────────
 
-function AuthorThumb({
-  src,
-  name,
-  size = 40,
-}: {
-  src?: string | null;
-  name: string;
-  size?: number;
-}) {
+function AuthorThumb({ src, name, size = 40 }: { src?: string | null; name: string; size?: number }) {
   if (src) {
     return (
-      <img
-        src={src}
-        alt={name}
-        style={{
-          width: size,
-          height: size,
-          borderRadius: "var(--radius-sm, 6px)",
-          objectFit: "cover",
-          flexShrink: 0,
-        }}
-      />
+      <img src={src} alt={name} style={{
+        width: size, height: size,
+        borderRadius: "var(--radius-sm, 6px)",
+        objectFit: "cover", flexShrink: 0,
+      }} />
     );
   }
   return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "var(--radius-sm, 6px)",
-        background: "linear-gradient(135deg, var(--emerald-dark, #064e3b), var(--emerald, #10b981))",
-        color: "#fff",
-        fontSize: Math.round(size * 0.36) + "px",
-        fontWeight: 700,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-        userSelect: "none",
-        letterSpacing: "0.02em",
-      }}
-    >
+    <div style={{
+      width: size, height: size,
+      borderRadius: "var(--radius-sm, 6px)",
+      background: "linear-gradient(135deg, var(--emerald-dark, #064e3b), var(--emerald, #10b981))",
+      color: "#fff", fontSize: Math.round(size * 0.36) + "px", fontWeight: 700,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      flexShrink: 0, userSelect: "none", letterSpacing: "0.02em",
+    }}>
       {getInitials(name)}
     </div>
   );
@@ -123,14 +113,8 @@ function AuthorThumb({
 
 // ─── Barra de progresso ───────────────────────────────────────────────────────
 
-function ProgressBar({
-  currentTime,
-  duration,
-  onSeek,
-}: {
-  currentTime: number;
-  duration: number;
-  onSeek: (time: number) => void;
+function ProgressBar({ currentTime, duration, onSeek }: {
+  currentTime: number; duration: number; onSeek: (time: number) => void;
 }) {
   const percent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -142,32 +126,52 @@ function ProgressBar({
   }
 
   return (
-    <div
-      onClick={handleClick}
+    <div onClick={handleClick}
       title={`${formatTime(currentTime)} / ${formatTime(duration)}`}
       style={{
-        width: "100%",
-        height: 3,
+        width: "100%", height: 3,
         background: "rgba(255,255,255,0.12)",
-        borderRadius: 99,
-        cursor: duration ? "pointer" : "default",
-        position: "relative",
-        overflow: "hidden",
+        borderRadius: 99, cursor: duration ? "pointer" : "default",
+        position: "relative", overflow: "hidden",
       }}
     >
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          height: "100%",
-          width: `${percent}%`,
-          background: "var(--emerald, #10b981)",
-          borderRadius: 99,
-          transition: "width 0.25s linear",
-        }}
-      />
+      <div style={{
+        position: "absolute", top: 0, left: 0,
+        height: "100%", width: `${percent}%`,
+        background: "var(--emerald, #10b981)",
+        borderRadius: 99, transition: "width 0.25s linear",
+      }} />
     </div>
+  );
+}
+
+// ─── Botão de skip (anterior / próximo) ──────────────────────────────────────
+
+function SkipButton({ onClick, disabled, label, children }: {
+  onClick: () => void;
+  disabled: boolean;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      style={{
+        background: "none", border: "none",
+        color: disabled
+          ? "rgba(255,255,255,0.15)"
+          : "var(--text-2, rgba(255,255,255,0.7))",
+        cursor: disabled ? "default" : "pointer",
+        display: "flex", alignItems: "center",
+        padding: "4px", flexShrink: 0,
+        transition: "color 0.15s",
+      }}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -181,10 +185,14 @@ export default function GlobalAudioPlayer() {
     currentTime,
     duration,
     volume,
+    hasNext,
+    hasPrevious,
     toggle,
     seek,
     setVolume,
     close,
+    playNext,
+    playPrevious,
   } = useAudioPlayer();
 
   const handleVolumeClick = useCallback(() => {
@@ -198,103 +206,70 @@ export default function GlobalAudioPlayer() {
 
   return (
     <>
-      {/* ── Barra fixa no fundo ─────────────────────────────────────────── */}
       <div
         role="region"
         aria-label="Player de áudio"
         style={{
-          position: "fixed",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          zIndex: 900,
+          position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 900,
           background: "var(--bg-card, #0f1a12)",
           borderTop: "1px solid var(--border-light, rgba(255,255,255,0.08))",
           boxShadow: "0 -8px 32px rgba(0,0,0,0.45)",
-          display: "flex",
-          flexDirection: "column",
-          userSelect: "none",
+          display: "flex", flexDirection: "column", userSelect: "none",
         }}
       >
-        {/* Progresso no topo da barra */}
-        <div style={{ padding: "0 0", lineHeight: 0 }}>
+        {/* Progresso */}
+        <div style={{ lineHeight: 0 }}>
           <ProgressBar currentTime={currentTime} duration={duration} onSeek={seek} />
         </div>
 
-        {/* Conteúdo principal */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.875rem",
-            padding: "0.625rem 1.25rem",
-            maxWidth: 960,
-            margin: "0 auto",
-            width: "100%",
-          }}
-        >
-          {/* Thumbnail / avatar */}
+        {/* Conteúdo */}
+        <div style={{
+          display: "flex", alignItems: "center", gap: "0.75rem",
+          padding: "0.625rem 1.25rem",
+          maxWidth: 960, margin: "0 auto", width: "100%",
+        }}>
+          {/* Thumbnail */}
           <AuthorThumb src={current.autorFoto} name={current.autorNome} size={40} />
 
           {/* Título e autor */}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
               {badge && (
-                <span
-                  style={{
-                    fontSize: "0.6rem",
-                    fontWeight: 700,
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                    color: "var(--emerald, #10b981)",
-                    background: "var(--emerald-dim, rgba(16,185,129,0.12))",
-                    padding: "1px 6px",
-                    borderRadius: 99,
-                    flexShrink: 0,
-                  }}
-                >
+                <span style={{
+                  fontSize: "0.6rem", fontWeight: 700,
+                  letterSpacing: "0.08em", textTransform: "uppercase",
+                  color: "var(--emerald, #10b981)",
+                  background: "var(--emerald-dim, rgba(16,185,129,0.12))",
+                  padding: "1px 6px", borderRadius: 99, flexShrink: 0,
+                }}>
                   {badge}
                 </span>
               )}
-              <span
-                style={{
-                  fontSize: "0.85rem",
-                  fontWeight: 700,
-                  color: "var(--text-1, #f0fdf4)",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
+              <span style={{
+                fontSize: "0.85rem", fontWeight: 700,
+                color: "var(--text-1, #f0fdf4)",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
                 {current.titulo}
               </span>
             </div>
-            <span
-              style={{
-                fontSize: "0.72rem",
-                color: "var(--text-3, rgba(255,255,255,0.4))",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                display: "block",
-                marginTop: 1,
-              }}
-            >
+            <span style={{
+              fontSize: "0.72rem",
+              color: "var(--text-3, rgba(255,255,255,0.4))",
+              overflow: "hidden", textOverflow: "ellipsis",
+              whiteSpace: "nowrap", display: "block", marginTop: 1,
+            }}>
               {current.autorNome}
             </span>
           </div>
 
           {/* Tempo */}
-          <span
-            style={{
-              fontSize: "0.72rem",
-              color: "var(--text-3, rgba(255,255,255,0.4))",
-              fontVariantNumeric: "tabular-nums",
-              flexShrink: 0,
-              display: "flex",
-              gap: "2px",
-            }}
-          >
+          <span style={{
+            fontSize: "0.72rem",
+            color: "var(--text-3, rgba(255,255,255,0.4))",
+            fontVariantNumeric: "tabular-nums",
+            flexShrink: 0, display: "flex", gap: "2px",
+          }}>
             <span>{formatTime(currentTime)}</span>
             {duration > 0 && (
               <>
@@ -304,48 +279,60 @@ export default function GlobalAudioPlayer() {
             )}
           </span>
 
-          {/* Botão play/pause */}
-          <button
-            onClick={toggle}
-            disabled={isLoading}
-            aria-label={isPlaying ? "Pausar" : "Reproduzir"}
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: "50%",
-              border: "none",
-              background: "var(--emerald, #10b981)",
-              color: "#fff",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: isLoading ? "default" : "pointer",
-              opacity: isLoading ? 0.6 : 1,
-              flexShrink: 0,
-              transition: "opacity 0.15s, transform 0.15s",
-              boxShadow: "0 2px 12px rgba(16,185,129,0.35)",
-            }}
-            onMouseEnter={(e) => { if (!isLoading) e.currentTarget.style.transform = "scale(1.08)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
-          >
-            {isLoading ? (
-              <span
-                style={{
-                  width: 16,
-                  height: 16,
+          {/* ── Controles de navegação + play/pause ── */}
+          <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+            {/* Anterior */}
+            <SkipButton
+              onClick={playPrevious}
+              disabled={!hasPrevious}
+              label="Anterior"
+            >
+              <IconSkipPrev size={18} />
+            </SkipButton>
+
+            {/* Play / Pause */}
+            <button
+              onClick={toggle}
+              disabled={isLoading}
+              aria-label={isPlaying ? "Pausar" : "Reproduzir"}
+              style={{
+                width: 40, height: 40, borderRadius: "50%",
+                border: "none", background: "var(--emerald, #10b981)",
+                color: "#fff", display: "flex", alignItems: "center",
+                justifyContent: "center",
+                cursor: isLoading ? "default" : "pointer",
+                opacity: isLoading ? 0.6 : 1, flexShrink: 0,
+                transition: "opacity 0.15s, transform 0.15s",
+                boxShadow: "0 2px 12px rgba(16,185,129,0.35)",
+                margin: "0 2px",
+              }}
+              onMouseEnter={(e) => { if (!isLoading) e.currentTarget.style.transform = "scale(1.08)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
+            >
+              {isLoading ? (
+                <span style={{
+                  width: 16, height: 16,
                   border: "2px solid rgba(255,255,255,0.3)",
-                  borderTopColor: "#fff",
-                  borderRadius: "50%",
+                  borderTopColor: "#fff", borderRadius: "50%",
                   display: "inline-block",
                   animation: "audio-spin 0.7s linear infinite",
-                }}
-              />
-            ) : isPlaying ? (
-              <IconPause size={18} />
-            ) : (
-              <IconPlay size={18} />
-            )}
-          </button>
+                }} />
+              ) : isPlaying ? (
+                <IconPause size={18} />
+              ) : (
+                <IconPlay size={18} />
+              )}
+            </button>
+
+            {/* Próximo */}
+            <SkipButton
+              onClick={playNext}
+              disabled={!hasNext}
+              label="Próximo"
+            >
+              <IconSkipNext size={18} />
+            </SkipButton>
+          </div>
 
           {/* Volume */}
           <button
@@ -353,15 +340,10 @@ export default function GlobalAudioPlayer() {
             aria-label={muted ? "Ativar volume" : "Silenciar"}
             title={muted ? "Ativar volume" : "Silenciar"}
             style={{
-              background: "none",
-              border: "none",
+              background: "none", border: "none",
               color: muted ? "var(--text-3, rgba(255,255,255,0.4))" : "var(--text-2, rgba(255,255,255,0.7))",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              padding: "4px",
-              flexShrink: 0,
-              transition: "color 0.15s",
+              cursor: "pointer", display: "flex", alignItems: "center",
+              padding: "4px", flexShrink: 0, transition: "color 0.15s",
             }}
           >
             <IconVolume size={16} muted={muted} />
@@ -373,15 +355,10 @@ export default function GlobalAudioPlayer() {
             aria-label="Fechar player"
             title="Fechar player"
             style={{
-              background: "none",
-              border: "none",
+              background: "none", border: "none",
               color: "var(--text-3, rgba(255,255,255,0.4))",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              padding: "4px",
-              flexShrink: 0,
-              transition: "color 0.15s",
+              cursor: "pointer", display: "flex", alignItems: "center",
+              padding: "4px", flexShrink: 0, transition: "color 0.15s",
             }}
             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-1, #f0fdf4)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-3, rgba(255,255,255,0.4))"; }}

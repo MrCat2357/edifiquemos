@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 
-// ─── Tipo unificado de publicação com áudio ───────────────────────────────────
+// ─── Tipos ────────────────────────────────────────────────────────────────────
 
 export type AudioPublication = {
   id: string;
@@ -18,11 +18,13 @@ export type AudioPublication = {
   autorNome: string;
   autorFoto?: string | null;
   slug: string;
-  autorSlug?: string; // obrigatório para reflexões
+  autorSlug?: string;
   audioUrl: string;
 };
 
-// ─── Estado e ações do player ─────────────────────────────────────────────────
+export type AudioContextType = "home" | "perfil" | "reflexoes" | "serie" | null;
+
+// ─── Estado e ações ───────────────────────────────────────────────────────────
 
 type AudioState = {
   current: AudioPublication | null;
@@ -31,6 +33,10 @@ type AudioState = {
   currentTime: number;
   volume: number;
   isLoading: boolean;
+  // Fase 3
+  queue: AudioPublication[];
+  currentIndex: number;
+  contextType: AudioContextType;
 };
 
 type AudioActions = {
@@ -41,6 +47,10 @@ type AudioActions = {
   seek: (time: number) => void;
   setVolume: (vol: number) => void;
   close: () => void;
+  // Fase 3
+  playQueue: (pub: AudioPublication, queue: AudioPublication[], context: AudioContextType) => void;
+  playNext: () => void;
+  playPrevious: () => void;
 };
 
 export type AudioContextValue = AudioState & AudioActions;
@@ -67,6 +77,17 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   const [volume, setVolumeState] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Fase 3
+  const [queue, setQueue] = useState<AudioPublication[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(-1);
+  const [contextType, setContextType] = useState<AudioContextType>(null);
+
+  // Refs para closures estáveis no evento ended
+  const queueRef = useRef<AudioPublication[]>([]);
+  const currentIndexRef = useRef(-1);
+  queueRef.current = queue;
+  currentIndexRef.current = currentIndex;
+
   // Cria o elemento <audio> uma única vez
   useEffect(() => {
     const audio = new Audio();
@@ -74,18 +95,34 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     audio.volume = 1;
 
     audio.addEventListener("loadstart", () => setIsLoading(true));
-    audio.addEventListener("canplay", () => setIsLoading(false));
+    audio.addEventListener("canplay",   () => setIsLoading(false));
     audio.addEventListener("durationchange", () => setDuration(audio.duration || 0));
     audio.addEventListener("timeupdate", () => setCurrentTime(audio.currentTime));
-    audio.addEventListener("ended", () => {
-      setIsPlaying(false);
-      // FASE 3 — autoplay: aqui será chamado onEnded(current) para avançar a fila
-    });
-    audio.addEventListener("play", () => setIsPlaying(true));
+    audio.addEventListener("play",  () => setIsPlaying(true));
     audio.addEventListener("pause", () => setIsPlaying(false));
     audio.addEventListener("error", () => {
       setIsLoading(false);
       setIsPlaying(false);
+    });
+    audio.addEventListener("ended", () => {
+      setIsPlaying(false);
+      // FASE 4 — autoplay contínuo
+      const idx = currentIndexRef.current;
+      const q   = queueRef.current;
+      if (idx >= 0 && idx < q.length - 1) {
+        const nextIdx = idx + 1;
+        const nextPub = q[nextIdx];
+        setCurrentIndex(nextIdx);
+        const a = audioRef.current;
+        if (!a) return;
+        a.src = nextPub.audioUrl;
+        a.currentTime = 0;
+        setCurrentTime(0);
+        setDuration(0);
+        setCurrent(nextPub);
+        setIsLoading(true);
+        a.play().catch(console.error);
+      }
     });
 
     audioRef.current = audio;
@@ -97,19 +134,17 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // ── Ações ────────────────────────────────────────────────────────────────
+  // ── Ação interna: tocar uma publicação no <audio> ─────────────────────────
 
-  const play = useCallback((pub: AudioPublication) => {
+  const _playAudio = useCallback((pub: AudioPublication) => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    // Mesma publicação: retoma de onde parou
     if (current?.id === pub.id) {
       audio.play().catch(console.error);
       return;
     }
 
-    // Nova publicação: troca o src e dá play
     audio.src = pub.audioUrl;
     audio.currentTime = 0;
     setCurrentTime(0);
@@ -118,6 +153,12 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(true);
     audio.play().catch(console.error);
   }, [current]);
+
+  // ── Ações públicas base (mantidas intactas) ───────────────────────────────
+
+  const play = useCallback((pub: AudioPublication) => {
+    _playAudio(pub);
+  }, [_playAudio]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
@@ -157,9 +198,66 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+    // Fase 3: limpar fila
+    setQueue([]);
+    setCurrentIndex(-1);
+    setContextType(null);
   }, []);
 
-  // ── Value ────────────────────────────────────────────────────────────────
+  // ── Fase 3: playQueue ─────────────────────────────────────────────────────
+
+  const playQueue = useCallback((
+    pub: AudioPublication,
+    newQueue: AudioPublication[],
+    context: AudioContextType,
+  ) => {
+    // Filtra itens sem audioUrl defensivamente
+    const filaLimpa = newQueue.filter((p) => !!p.audioUrl);
+    const idx = filaLimpa.findIndex((p) => p.id === pub.id);
+
+    setQueue(filaLimpa);
+    setCurrentIndex(idx >= 0 ? idx : 0);
+    setContextType(context);
+
+    _playAudio(pub);
+  }, [_playAudio]);
+
+  // ── Fase 3: playNext ──────────────────────────────────────────────────────
+
+  const playNext = useCallback(() => {
+    const idx = currentIndexRef.current;
+    const q   = queueRef.current;
+    if (idx < 0 || idx >= q.length - 1) return; // já é o último
+
+    const nextIdx = idx + 1;
+    const nextPub = q[nextIdx];
+    setCurrentIndex(nextIdx);
+    _playAudio(nextPub);
+  }, [_playAudio]);
+
+  // ── Fase 3: playPrevious ──────────────────────────────────────────────────
+
+  const playPrevious = useCallback(() => {
+    const audio = audioRef.current;
+    const idx   = currentIndexRef.current;
+    const q     = queueRef.current;
+
+    // Se passou mais de 3s, reinicia a faixa atual em vez de voltar
+    if (audio && audio.currentTime > 3) {
+      audio.currentTime = 0;
+      setCurrentTime(0);
+      return;
+    }
+
+    if (idx <= 0) return; // já é o primeiro
+
+    const prevIdx = idx - 1;
+    const prevPub = q[prevIdx];
+    setCurrentIndex(prevIdx);
+    _playAudio(prevPub);
+  }, [_playAudio]);
+
+  // ── Value ─────────────────────────────────────────────────────────────────
 
   const value: AudioContextValue = {
     current,
@@ -168,6 +266,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     currentTime,
     volume,
     isLoading,
+    queue,
+    currentIndex,
+    contextType,
     play,
     pause,
     resume,
@@ -175,6 +276,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     seek,
     setVolume,
     close,
+    playQueue,
+    playNext,
+    playPrevious,
   };
 
   return (
