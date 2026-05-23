@@ -28,22 +28,16 @@ export function getInitials(name: string) {
   return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
-function decodeHtmlContent(str: string): string {
-  if (typeof window === "undefined") return str;
-
-  let html = str;
-
-  if (!/(<[a-zA-Z])/.test(html) && /&lt;/.test(html)) {
-    const ta = document.createElement("textarea");
-    ta.innerHTML = html;
-    html = ta.value;
+function prepararConteudo(str: string): string {
+  if (!str) return "";
+  if (/<[a-zA-Z][\s\S]*?>/.test(str)) {
+    return str;
   }
-
-  html = html.replace(/white-space\s*:\s*pre-wrap\s*[;]?/gi, "");
-  html = html.replace(/white-space\s*:\s*pre\s*[;]?/gi, "");
-  html = html.replace(/\s*style\s*=\s*["']\s*["']/gi, "");
-
-  return html;
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
 }
 
 export function AuthorAvatar({
@@ -1049,7 +1043,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           className="post-detail-content"
           onMouseUp={handleMouseUp}
           onTouchEnd={handleTouchEnd}
-          dangerouslySetInnerHTML={{ __html: decodeHtmlContent(post.conteudo ?? "") }}
+          dangerouslySetInnerHTML={{ __html: prepararConteudo(post.conteudo ?? "") }}
         />
 
         {post.tipo === "sermao" ? (
