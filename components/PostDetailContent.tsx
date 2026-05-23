@@ -1119,15 +1119,22 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       {/* Botão flutuante — aparece quando o botão normal sai da tela */}
       {ouvirFlutuante && (
         <button
-          onClick={() => playOrToggle({
-            id: postId,
-            tipo: post.tipo,
-            titulo: post.titulo,
-            autorNome: nomeExibicao,
-            autorFoto: fotoAutor,
-            slug: post.slug,
-            audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-          })}
+          onClick={() => {
+            if (!auth.currentUser) {
+              const destino = window.location.pathname + window.location.search;
+              router.push(`/entrar?next=${encodeURIComponent(destino)}`);
+              return;
+            }
+            playOrToggle({
+              id: postId,
+              tipo: post.tipo,
+              titulo: post.titulo,
+              autorNome: nomeExibicao,
+              autorFoto: fotoAutor,
+              slug: post.slug,
+              audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+            });
+          }}
           aria-label={audioTocando ? "Pausar áudio" : "Ouvir este conteúdo"}
           style={{
             position: "fixed",

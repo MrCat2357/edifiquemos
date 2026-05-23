@@ -155,6 +155,7 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
 // ─── BotaoOuvirPerfil ─────────────────────────────────────────────────────────
 
 function BotaoOuvirPerfil({ post }: { post: any }) {
+  const router = useRouter();
   const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   const audioAtivo = isCurrentPublication(post.id);
@@ -163,6 +164,10 @@ function BotaoOuvirPerfil({ post }: { post: any }) {
 
   function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
+    if (!auth.currentUser) {
+      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      return;
+    }
     playOrToggle({
       id: post.id,
       tipo: post.tipo,
@@ -208,6 +213,7 @@ function BotaoOuvirPerfil({ post }: { post: any }) {
 }
 
 function CardReflexaoComOuvir({ reflexao }: { reflexao: Reflexao }) {
+  const router = useRouter();
   const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   const audioAtivo = isCurrentPublication(reflexao.id ?? "");
@@ -216,6 +222,10 @@ function CardReflexaoComOuvir({ reflexao }: { reflexao: Reflexao }) {
 
   function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
+    if (!auth.currentUser) {
+      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      return;
+    }
     if (!reflexao.id) return;
     playOrToggle({
       id: reflexao.id,

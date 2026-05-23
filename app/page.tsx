@@ -32,6 +32,7 @@ const CommentSection = dynamic(
 // ─── BotaoOuvirCard ───────────────────────────────────────────────────────────
 
 function BotaoOuvirCard({ post }: { post: any }) {
+  const router = useRouter();
   const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   if (post._feedType === "serie") return null;
@@ -42,6 +43,10 @@ function BotaoOuvirCard({ post }: { post: any }) {
 
   function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
+    if (!auth.currentUser) {
+      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      return;
+    }
     playOrToggle({
       id: post.id,
       tipo: post.tipo,

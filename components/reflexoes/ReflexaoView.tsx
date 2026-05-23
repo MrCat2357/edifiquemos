@@ -554,6 +554,11 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
   function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
+    if (!auth.currentUser) {
+      const destino = window.location.pathname + window.location.search;
+      router.push(`/entrar?next=${encodeURIComponent(destino)}`);
+      return;
+    }
     if (!reflexao.id) return;
     playOrToggle({
       id: reflexao.id,
