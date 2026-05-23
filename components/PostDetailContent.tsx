@@ -816,8 +816,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [viewCount, setViewCount] = useState<number>(post.visualizacoes ?? 0);
 
   // FIX: decodifica HTML caso esteja duplamente escapado (problema no mobile)
-  const conteudoHtml = decodeHtmlContent(post.conteudo ?? "");
-
   useEffect(() => {
     async function registrarVisualizacao() {
       const uid = auth.currentUser?.uid;
