@@ -208,9 +208,9 @@ function BotaoOuvirPerfil({ post, filaAudio = [] }: { post: any; filaAudio?: any
   );
 }
 
-function CardReflexaoComOuvir({ reflexao }: { reflexao: Reflexao }) {
+function CardReflexaoComOuvir({ reflexao, filaAudio = [] }: { reflexao: Reflexao; filaAudio?: any[] }) {
   const router = useRouter();
-  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   const audioAtivo = isCurrentPublication(reflexao.id ?? "");
   const audioTocando = isCurrentlyPlaying(reflexao.id ?? "");
@@ -223,16 +223,21 @@ function CardReflexaoComOuvir({ reflexao }: { reflexao: Reflexao }) {
       return;
     }
     if (!reflexao.id) return;
-    playOrToggle({
+    const pub = {
       id: reflexao.id,
-      tipo: "reflexao",
+      tipo: "reflexao" as const,
       titulo: reflexao.titulo,
       autorNome: reflexao.autorNome,
       autorFoto: null,
       slug: reflexao.slug,
       autorSlug: reflexao.autorSlug,
       audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    });
+    };
+    if (filaAudio.length > 0) {
+      playQueue(pub, filaAudio, "perfil");
+    } else {
+      playOrToggle(pub);
+    }
   }
 
   return (
@@ -498,7 +503,6 @@ function PostCardPerfil({
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
-  // ?from=perfil — indica ao PostDetailContent que deve navegar pelos posts do mesmo autor
   const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}?from=perfil`;
   const fullUrl = typeof window !== "undefined"
     ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`
@@ -747,28 +751,30 @@ function PostCardPerfil({
 /* ── CardReflexaoComControles ─────────────────────────── */
 
 function CardReflexaoComControles({
-  reflexao, index, isOwner, onToast,
+  reflexao, index, isOwner, onToast, filaAudio = [],
 }: {
   reflexao: Reflexao; index: number; isOwner: boolean; onToast: (msg: string) => void;
+  filaAudio?: any[];
 }) {
   const router = useRouter();
 
+  // FIX: handleDeletar agora está dentro do escopo correto do componente
   async function handleDeletar(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!confirm("Tem certeza que deseja apagar esta reflexão?")) return;
+    if (!confirm("Tem certeza que deseja excluir esta reflexão? Esta ação não pode ser desfeita.")) return;
     try {
-      await deleteDoc(doc(db, "reflexoes", reflexao.id!));
-      onToast("Reflexão apagada.");
+      await deleteDoc(doc(db, "posts", reflexao.id!));
+      onToast("Reflexão excluída.");
       router.refresh();
     } catch (err) {
       console.error(err);
-      onToast("Erro ao apagar reflexão.");
+      onToast("Erro ao excluir reflexão.");
     }
   }
 
   return (
     <div style={{ position: "relative" }}>
-      <CardReflexaoComOuvir reflexao={reflexao} />
+      <CardReflexaoComOuvir reflexao={reflexao} filaAudio={filaAudio} />
       {isOwner && (
         <div
           style={{ display: "flex", gap: "0.5rem", padding: "0 1.125rem 0.875rem", marginTop: "-0.25rem" }}
@@ -878,6 +884,31 @@ export default function PerfilPublico() {
 
   const isOwner = !!visitorUid && visitorUid === uid;
 
+  // FIX: filas construídas antes do JSX para evitar IIFE inválido
+  const filaPerfilAudio = posts.map((p) => ({
+    id: p.id,
+    tipo: p.tipo,
+    titulo: p.titulo,
+    autorNome: p.autorNome || "Autor",
+    autorFoto: p.autorFoto ?? null,
+    slug: p.slug,
+    autorSlug: p.autorSlug,
+    audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+  }));
+
+  const filaReflexoesAudio = reflexoes
+    .filter((r) => !!r.id)
+    .map((r) => ({
+      id: r.id!,
+      tipo: "reflexao" as const,
+      titulo: r.titulo,
+      autorNome: r.autorNome || "Autor",
+      autorFoto: null,
+      slug: r.slug,
+      autorSlug: r.autorSlug,
+      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+    }));
+
   return (
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
@@ -936,37 +967,22 @@ export default function PerfilPublico() {
           {aba === "posts" && (
             <>
               {posts.length === 0 && <div className="empty-state">Nenhuma publicação ainda.</div>}
-              {(() => {
-                const filaPerfilAudio = posts
-                  .filter((p) => !!p.audioUrl)
-                  .map((p) => ({
-                    id: p.id,
-                    tipo: p.tipo,
-                    titulo: p.titulo,
-                    autorNome: p.autorNome || "Autor",
-                    autorFoto: p.autorFoto ?? null,
-                    slug: p.slug,
-                    autorSlug: p.autorSlug,
-                    audioUrl: p.audioUrl,
-                  }));
-                return (
-                  <div className="posts-list">
-                    {posts.map((post, i) => (
-                      <PostCardPerfil
-                        key={post.id}
-                        post={post}
-                        index={i}
-                        user={user}
-                        nomeExibicao={nomeExibicao}
-                        autorUid={uid!}
-                        isOwner={isOwner}
-                        onToast={showToast}
-                        filaAudio={filaPerfilAudio}
-                      />
-                    ))}
-                  </div>
-                );
-              })()}
+              {/* FIX: sem IIFE — fila já construída acima */}
+              <div className="posts-list">
+                {posts.map((post, i) => (
+                  <PostCardPerfil
+                    key={post.id}
+                    post={post}
+                    index={i}
+                    user={user}
+                    nomeExibicao={nomeExibicao}
+                    autorUid={uid!}
+                    isOwner={isOwner}
+                    onToast={showToast}
+                    filaAudio={filaPerfilAudio}
+                  />
+                ))}
+              </div>
             </>
           )}
 
@@ -991,11 +1007,13 @@ export default function PerfilPublico() {
               {reflexoes.length === 0 && (
                 <div className="empty-state">Este autor ainda não criou nenhuma reflexão.</div>
               )}
+              {/* FIX: sem IIFE — fila já construída acima */}
               <div className="posts-list">
                 {reflexoes.map((r, i) => (
                   <CardReflexaoComControles
                     key={r.id ?? i} reflexao={r} index={i}
                     isOwner={isOwner} onToast={showToast}
+                    filaAudio={filaReflexoesAudio}
                   />
                 ))}
               </div>

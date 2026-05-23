@@ -20,6 +20,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { gerarPDF } from "@/lib/gerarPDF";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
+import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 
 const CommentSection = dynamic(
   () => import("@/components/comments/CommentSection"),
@@ -277,9 +278,6 @@ function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => vo
 }
 
 // ─── SerieNavigation ──────────────────────────────────────────────────────────
-// Suporta dois modos:
-//   ?from=home  → feed global misturado
-//   sem param   → séries do mesmo autor (comportamento original)
 
 type SerieNav = { id: string; titulo: string; slug: string; postCount: number };
 type NavAutor = { nome: string; fotoUrl: string | null };
@@ -308,7 +306,6 @@ function SerieNavigation({
   useEffect(() => {
     async function fetchNav() {
       try {
-        // ── Modo A: feed global misturado (?from=home) ─────────────────────
         if (fromHome) {
           const all = await fetchFeedGlobal();
           const idx = all.findIndex((item) => item.id === serieId);
@@ -347,7 +344,6 @@ function SerieNavigation({
           return;
         }
 
-        // ── Modo B: séries do mesmo autor (comportamento original) ──────────
         const snap = await getDocs(
           query(collection(db, "series"), where("autorId", "==", autorId), orderBy("criadoEm", "desc"))
         );
@@ -366,7 +362,6 @@ function SerieNavigation({
         const n = idx + 1 < todas.length ? todas[idx + 1] : null;
         setPrev(p);
         setNext(n);
-        // Mesmo autor para ambos os lados no modo padrão
         const navAutor: NavAutor = { nome: autorNome, fotoUrl: autorFoto };
         if (p) setPrevAutor(navAutor);
         if (n) setNextAutor(navAutor);
@@ -378,13 +373,11 @@ function SerieNavigation({
     fetchNav();
   }, [serieId, autorId, autorNome, autorFoto, fromHome]);
 
-  // Monta URL de navegação
   function navUrl(item: FeedNavItem | SerieNav): string {
     if (fromHome) return feedItemUrl(item as FeedNavItem);
     return `/series/${(item as SerieNav).slug}`;
   }
 
-  // Label do botão
   function navLabel(item: FeedNavItem | SerieNav, direction: "prev" | "next"): string {
     if (fromHome) return feedItemLabel(item as FeedNavItem, direction);
     return direction === "prev" ? "Série anterior" : "Próxima série";
@@ -504,12 +497,39 @@ function SerieNavigation({
 // ─── PostCardSerie ─────────────────────────────────────────────────────────────
 
 function PostCardSerie({
-  post, index, serieSlug, onToast,
+  post, index, serieSlug, onToast, filaAudio = [],
 }: {
   post: any; index: number; serieSlug: string; onToast: (msg: string) => void;
+  filaAudio?: any[];
 }) {
   const router = useRouter();
   const uid = auth.currentUser?.uid;
+
+  // FIX: useAudioPlayer agora está corretamente importado no topo do arquivo
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const audioAtivo = isCurrentPublication(post.id);
+  const audioTocando = isCurrentlyPlaying(post.id);
+  const audioCarregando = audioAtivo && audioLoading;
+
+  function handleOuvir(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!uid) { setShowLoginBanner(true); return; }
+    const pub = {
+      id: post.id,
+      tipo: post.tipo,
+      titulo: post.titulo,
+      autorNome: post.autorNome || "Autor",
+      autorFoto: post.autorFoto ?? null,
+      slug: post.slug,
+      autorSlug: post.autorSlug,
+      audioUrl: post.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+    };
+    if (filaAudio.length > 0) {
+      playQueue(pub, filaAudio, "serie");
+    } else {
+      playOrToggle(pub);
+    }
+  }
 
   const [liked, setLiked] = useState<boolean>(() => (uid ? (post.likedBy ?? []).includes(uid) : false));
   const [likeCount, setLikeCount] = useState<number>(post.likes ?? 0);
@@ -625,6 +645,35 @@ function PostCardSerie({
             <IconEye size={13} />{viewCount}
           </span>
         )}
+
+        <button
+          onClick={handleOuvir}
+          title={audioTocando ? "Pausar" : "Ouvir este conteúdo"}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "4px",
+            padding: "4px 8px", borderRadius: "var(--radius-full)",
+            border: "1px solid",
+            borderColor: audioAtivo ? "var(--emerald-dim)" : "transparent",
+            background: audioAtivo ? "var(--emerald-dim)" : "transparent",
+            color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
+            fontSize: "0.72rem", fontWeight: 600,
+            cursor: "pointer", transition: "all 0.15s",
+            fontFamily: "inherit", flexShrink: 0,
+            boxShadow: audioTocando ? "0 0 0 2px var(--emerald-dim)" : "none",
+          }}
+        >
+          {audioCarregando ? (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          ) : audioTocando ? (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+          )}
+          <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
+          {audioTocando && (
+            <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>
+          )}
+        </button>
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPathSerie)}>
         Ler completo →
@@ -818,6 +867,18 @@ export default function SeriePage() {
     ? window.location.pathname + window.location.search
     : `/series/${serieSlug}`;
 
+  // FIX: fila de áudio construída antes do JSX, sem IIFE
+  const filaSerieAudio = posts.map((p) => ({
+    id: p.id,
+    tipo: p.tipo,
+    titulo: p.titulo,
+    autorNome: p.autorNome || "Autor",
+    autorFoto: p.autorFoto ?? null,
+    slug: p.slug,
+    autorSlug: p.autorSlug,
+    audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+  }));
+
   return (
     <>
       <div style={{
@@ -952,12 +1013,17 @@ export default function SeriePage() {
 
         <hr style={{ border: "none", borderTop: "1px solid var(--border)", marginBottom: "1.5rem" }} />
 
+        {/* FIX: sem IIFE — fila construída acima, renderização direta */}
         {posts.length === 0 ? (
           <div className="empty-state">Esta série ainda não tem publicações.</div>
         ) : (
           <div className="posts-list">
             {posts.map((post, i) => (
-              <PostCardSerie key={post.id} post={post} index={i} serieSlug={serieSlug} onToast={showToast} />
+              <PostCardSerie
+                key={post.id} post={post} index={i}
+                serieSlug={serieSlug} onToast={showToast}
+                filaAudio={filaSerieAudio}
+              />
             ))}
           </div>
         )}

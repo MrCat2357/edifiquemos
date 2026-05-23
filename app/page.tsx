@@ -874,9 +874,9 @@ function HomePageContent() {
   const visibleItems = itensFiltrados.slice(0, visibleCount);
   const hasMore = visibleCount < itensFiltrados.length;
 
-  // Fila de áudio — feed completo sem séries e sem itens sem audioUrl
+  // Fila de áudio — feed completo sem séries
   const filaAudio = feedItems
-    .filter((item) => item._feedType !== "serie" && !!item.audioUrl)
+    .filter((item) => item._feedType !== "serie")
     .map((item) => ({
       id: item.id,
       tipo: item.tipo,
@@ -885,7 +885,7 @@ function HomePageContent() {
       autorFoto: item.autorFoto ?? null,
       slug: item.slug,
       autorSlug: item.autorSlug,
-      audioUrl: item.audioUrl,
+      audioUrl: item.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
     }));
 
   return (
