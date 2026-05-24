@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { db, auth } from "@/lib/firebase";
@@ -15,7 +15,7 @@ import BannerLogin from "@/components/BannerLogin";
 import CommentSection from "@/components/comments/CommentSection";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 
-/* ── helpers ───────────────────────────────────────────────────────────────── */
+/* â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export function formatData(data: any) {
   if (!data) return "";
@@ -87,7 +87,7 @@ export function AuthorAvatar({
   );
 }
 
-/* ── SVG Icons ─────────────────────────────────────────────────────────────── */
+/* â”€â”€ SVG Icons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function IconDownload({ size = 14 }: { size?: number }) {
   return (
@@ -157,7 +157,7 @@ function IconArrowRight({ size = 12 }: { size?: number }) {
   );
 }
 
-/* ── helpers de feed global ──────────────────────────────────────────────── */
+/* â”€â”€ helpers de feed global â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function getDataValor(item: any): number {
   if (!item) return 0;
@@ -213,14 +213,14 @@ function feedItemUrl(item: FeedNavItem): string {
 }
 
 function feedItemLabel(item: FeedNavItem, direction: "prev" | "next"): string {
-  const prefix = direction === "prev" ? "Anterior" : "Próximo";
-  if (item._feedType === "serie") return `${prefix}: série`;
-  if (item._feedType === "reflexao") return `Reflexão ${direction === "prev" ? "anterior" : "próxima"}`;
-  if (item.tipo === "sermao") return `Sermão ${direction === "prev" ? "anterior" : "próximo"}`;
-  return `Estudo ${direction === "prev" ? "anterior" : "próximo"}`;
+  const prefix = direction === "prev" ? "Anterior" : "PrÃ³ximo";
+  if (item._feedType === "serie") return `${prefix}: sÃ©rie`;
+  if (item._feedType === "reflexao") return `ReflexÃ£o ${direction === "prev" ? "anterior" : "prÃ³xima"}`;
+  if (item.tipo === "sermao") return `SermÃ£o ${direction === "prev" ? "anterior" : "prÃ³ximo"}`;
+  return `Estudo ${direction === "prev" ? "anterior" : "prÃ³ximo"}`;
 }
 
-/* ── Navegação entre posts ───────────────────────────────────────────────── */
+/* â”€â”€ NavegaÃ§Ã£o entre posts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 type PostNav = {
   id: string;
@@ -253,13 +253,12 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
   useEffect(() => {
     async function fetchNav() {
       try {
-        // ── 1. Feed global misturado (?from=home) ──────────────────────────────
         if (fromHome) {
           const all = await fetchFeedGlobal();
           const idx = all.findIndex((item) => item.id === postId);
           if (idx === -1) { setLoading(false); return; }
-          const p = idx - 1 >= 0          ? all[idx - 1] : null;
-          const n = idx + 1 < all.length  ? all[idx + 1] : null;
+          const p = idx - 1 >= 0         ? all[idx - 1] : null;
+          const n = idx + 1 < all.length ? all[idx + 1] : null;
           setPrev(p);
           setNext(n);
 
@@ -289,7 +288,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           return;
         }
 
-        // ── 2. Dentro de uma série (?from=serie) ───────────────────────────────
         if (fromSerie && serieSlugParam) {
           const serieSnap = await getDocs(
             query(collection(db, "series"), where("slug", "==", serieSlugParam))
@@ -305,7 +303,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
               .filter((s) => s.exists())
               .map((s) => ({
                 id: s.id,
-                titulo: s.data()?.titulo || "Sem título",
+                titulo: s.data()?.titulo || "Sem tÃ­tulo",
                 slug: s.data()?.slug,
                 tipo: s.data()?.tipo,
                 autorId: s.data()?.autorId,
@@ -314,8 +312,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
             const idx = all.findIndex((p) => p.id === postId);
             if (idx === -1) { setLoading(false); return; }
-            const p = idx - 1 >= 0          ? all[idx - 1] : null;
-            const n = idx + 1 < all.length  ? all[idx + 1] : null;
+            const p = idx - 1 >= 0         ? all[idx - 1] : null;
+            const n = idx + 1 < all.length ? all[idx + 1] : null;
             setPrev(p);
             setNext(n);
 
@@ -345,14 +343,13 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           return;
         }
 
-        // ── 3. Perfil do autor (?from=perfil) ──────────────────────────────────
         if (fromPerfil && autorIdProp) {
           const snap = await getDocs(
             query(collection(db, "posts"), where("autorId", "==", autorIdProp), orderBy("data", "desc"))
           );
           const all: PostNav[] = snap.docs.map((d) => ({
             id: d.id,
-            titulo: d.data().titulo || "Sem título",
+            titulo: d.data().titulo || "Sem tÃ­tulo",
             slug: d.data().slug,
             tipo: d.data().tipo,
             autorId: d.data().autorId,
@@ -361,8 +358,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
           const idx = all.findIndex((p) => p.id === postId);
           if (idx === -1) { setLoading(false); return; }
-          const p = idx - 1 >= 0          ? all[idx - 1] : null;
-          const n = idx + 1 < all.length  ? all[idx + 1] : null;
+          const p = idx - 1 >= 0         ? all[idx - 1] : null;
+          const n = idx + 1 < all.length ? all[idx + 1] : null;
           setPrev(p);
           setNext(n);
 
@@ -391,13 +388,13 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           return;
         }
 
-        // ── 4. Sem parâmetro — feed global de posts apenas (legado) ────────────
+        // Legado â€” feed global de posts
         const snap = await getDocs(
           query(collection(db, "posts"), orderBy("data", "desc"))
         );
         const all: PostNav[] = snap.docs.map((d) => ({
           id: d.id,
-          titulo: d.data().titulo || "Sem título",
+          titulo: d.data().titulo || "Sem tÃ­tulo",
           slug: d.data().slug,
           tipo: d.data().tipo,
           autorId: d.data().autorId,
@@ -406,8 +403,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
         const idx = all.findIndex((p) => p.id === postId);
         if (idx === -1) { setLoading(false); return; }
-        const p = idx - 1 >= 0          ? all[idx - 1] : null;
-        const n = idx + 1 < all.length  ? all[idx + 1] : null;
+        const p = idx - 1 >= 0         ? all[idx - 1] : null;
+        const n = idx + 1 < all.length ? all[idx + 1] : null;
         setPrev(p);
         setNext(n);
 
@@ -441,9 +438,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
   }, [postId, autorIdProp, fromHome, fromPerfil, fromSerie, serieSlugParam]);
 
   function navUrl(item: FeedNavItem | PostNav): string {
-    if (fromHome) {
-      return feedItemUrl(item as FeedNavItem);
-    }
+    if (fromHome) return feedItemUrl(item as FeedNavItem);
     if (fromSerie && serieSlugParam) {
       const p = item as PostNav;
       const base = p.slug
@@ -466,12 +461,10 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
   function navLabel(item: FeedNavItem | PostNav, direction: "prev" | "next"): string {
     if (fromHome) return feedItemLabel(item as FeedNavItem, direction);
-    if (fromSerie) {
-      return direction === "prev" ? "Anterior na série" : "Próximo na série";
-    }
+    if (fromSerie) return direction === "prev" ? "Anterior na sÃ©rie" : "PrÃ³ximo na sÃ©rie";
     const p = item as PostNav;
-    if (direction === "prev") return p.tipo === "sermao" ? "Sermão anterior" : "Estudo anterior";
-    return p.tipo === "sermao" ? "Próximo sermão" : "Próximo estudo";
+    if (direction === "prev") return p.tipo === "sermao" ? "SermÃ£o anterior" : "Estudo anterior";
+    return p.tipo === "sermao" ? "PrÃ³ximo sermÃ£o" : "PrÃ³ximo estudo";
   }
 
   if (loading || (!prev && !next && !serieInfo)) return null;
@@ -497,15 +490,15 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
             fontSize: "0.8rem", color: "var(--emerald)", fontWeight: 600,
           }}
         >
-          <span>📚</span>
-          <span>Você está lendo a série <strong>{serieInfo.titulo}</strong></span>
-          <span style={{ marginLeft: "auto", fontSize: "0.72rem", opacity: 0.8 }}>Ver série →</span>
+          <span>ðŸ“š</span>
+          <span>VocÃª estÃ¡ lendo a sÃ©rie <strong>{serieInfo.titulo}</strong></span>
+          <span style={{ marginLeft: "auto", fontSize: "0.72rem", opacity: 0.8 }}>Ver sÃ©rie â†’</span>
         </div>
       )}
 
       <nav
         className={`post-nav post-nav-grid ${prev && next ? "post-nav-grid--both" : prev ? "post-nav-grid--prev" : "post-nav-grid--next"}`}
-        aria-label="Navegação entre publicações"
+        aria-label="NavegaÃ§Ã£o entre publicaÃ§Ãµes"
       >
         {prev ? (
           <button
@@ -549,7 +542,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           <button
             onClick={() => router.push(navUrl(next))}
             className="post-nav-btn post-nav-btn--next"
-            aria-label={`Próximo: ${next.titulo}`}
+            aria-label={`PrÃ³ximo: ${next.titulo}`}
             style={{ ...cardBase, alignItems: "flex-end", textAlign: "right" }}
             onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--emerald-dim)"; e.currentTarget.style.background = "var(--bg-card)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border-light)"; e.currentTarget.style.background = "var(--bg-elevated)"; }}
@@ -587,7 +580,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
   );
 }
 
-/* ── Modal: quem curtiu ──────────────────────────────────────────────────── */
+/* â”€â”€ Modal: quem curtiu â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => void }) {
   const [pessoas, setPessoas] = useState<{ uid: string; nome: string; foto: string | null }[]>([]);
@@ -604,7 +597,7 @@ function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => vo
               const d = snap.data();
               resultado.push({
                 uid,
-                nome: d.titulo && d.nome ? `${d.titulo.trim()} ${d.nome.trim()}` : d.nome?.trim() || "Usuário",
+                nome: d.titulo && d.nome ? `${d.titulo.trim()} ${d.nome.trim()}` : d.nome?.trim() || "UsuÃ¡rio",
                 foto: d.fotoUrl ?? null,
               });
             }
@@ -640,7 +633,7 @@ function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => vo
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <h3 style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text-1)", display: "flex", alignItems: "center", gap: "6px" }}>
             <IconHeart size={15} filled />
-            Amaram este conteúdo
+            Amaram este conteÃºdo
             {likedBy.length > 0 && (
               <span style={{ fontSize: "0.8rem", color: "var(--text-3)", fontWeight: 400 }}>
                 ({likedBy.length}{likedBy.length > 50 ? ", mostrando 50" : ""})
@@ -648,14 +641,14 @@ function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => vo
             )}
           </h3>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-3)", fontSize: "1.2rem", lineHeight: 1, padding: "2px 6px", borderRadius: "var(--radius-sm)" }}>
-            ×
+            Ã—
           </button>
         </div>
         <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {loadingModal ? (
             <div style={{ display: "flex", justifyContent: "center", padding: "2rem" }}><div className="spinner" /></div>
           ) : pessoas.length === 0 ? (
-            <p style={{ color: "var(--text-3)", fontSize: "0.85rem", textAlign: "center", padding: "1.5rem 0" }}>Nenhum usuário encontrado.</p>
+            <p style={{ color: "var(--text-3)", fontSize: "0.85rem", textAlign: "center", padding: "1.5rem 0" }}>Nenhum usuÃ¡rio encontrado.</p>
           ) : (
             pessoas.map((p) => (
               <div key={p.uid} style={{ display: "flex", alignItems: "center", gap: "0.625rem", padding: "0.375rem 0.5rem", borderRadius: "var(--radius-sm)" }}>
@@ -670,7 +663,7 @@ function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => vo
   );
 }
 
-/* ── ShareDropdown ───────────────────────────────────────────────────────── */
+/* â”€â”€ ShareDropdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function ShareDropdown({
   anchorRef, dropdownRef, urlAtual, textoCompartilhar,
@@ -708,12 +701,12 @@ function ShareDropdown({
       <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-twitter" onClick={onClose}>X (Twitter)</a>
       <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-linkedin" onClick={onClose}>LinkedIn</a>
       <a href={`https://mail.google.com/mail/?view=cm&su=${textoCompartilhar}&body=${emailBody}`} className="share-btn share-email" onClick={onClose}>Email</a>
-      <button onClick={onCopiar} className="share-btn share-copy">{copiado ? "✔ Copiado!" : "Copiar link"}</button>
+      <button onClick={onCopiar} className="share-btn share-copy">{copiado ? "âœ“ Copiado!" : "Copiar link"}</button>
     </div>
   );
 }
 
-/* ── SelectionPopup ──────────────────────────────────────────────────────── */
+/* â”€â”€ SelectionPopup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 function SelectionPopup({
   trechoSelecionado, posicao, isMobile, nomeAutor, tituloPost, urlAtual, onFechar, onToast,
@@ -726,10 +719,10 @@ function SelectionPopup({
   const [copiado, setCopiado] = useState(false);
 
   const mensagem =
-    `Li essa passagem e me lembrei de você:\n\n` +
+    `Li essa passagem e me lembrei de vocÃª:\n\n` +
     `"${trechoSelecionado}"\n\n` +
-    `— ${nomeAutor}, em "${tituloPost}"\n\n` +
-    `Leia a versão completa:\n${urlAtual}`;
+    `â€” ${nomeAutor}, em "${tituloPost}"\n\n` +
+    `Leia a versÃ£o completa:\n${urlAtual}`;
   const mensagemEncoded = encodeURIComponent(mensagem);
 
   async function handleCopiar() {
@@ -738,7 +731,7 @@ function SelectionPopup({
       setCopiado(true);
       onToast("Trecho copiado!");
       setTimeout(() => { setCopiado(false); onFechar(); }, 1800);
-    } catch { onToast("Não foi possível copiar."); }
+    } catch { onToast("NÃ£o foi possÃ­vel copiar."); }
   }
 
   const POPUP_W = 260, POPUP_H = 44, MARGIN = 8;
@@ -789,12 +782,12 @@ function SelectionPopup({
       >WhatsApp</a>
       <button onClick={handleCopiar}
         style={{ display: "inline-flex", alignItems: "center", background: copiado ? "var(--emerald-dim)" : "var(--bg-card)", color: copiado ? "var(--emerald)" : "var(--text-2)", border: "1px solid var(--border-light)", fontSize: "0.72rem", fontWeight: 600, padding: "4px 10px", borderRadius: "var(--radius-full)", cursor: "pointer", transition: "all 0.15s" }}
-      >{copiado ? "✔ Copiado!" : "Copiar"}</button>
+      >{copiado ? "âœ“ Copiado!" : "Copiar"}</button>
     </div>
   );
 }
 
-/* ── Componente principal ────────────────────────────────────────────────── */
+/* â”€â”€ Componente principal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export type PostDetailProps = {
   post: any;
@@ -822,6 +815,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
   const [viewCount, setViewCount] = useState<number>(post.visualizacoes ?? 0);
 
+  // FIX: decodifica HTML caso esteja duplamente escapado (problema no mobile)
   useEffect(() => {
     async function registrarVisualizacao() {
       const uid = auth.currentUser?.uid;
@@ -832,7 +826,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         await updateDoc(doc(db, "posts", postId), { visualizacoes: increment(1) });
         localStorage.setItem(sessionKey, "1");
         setViewCount((n) => n + 1);
-      } catch (err) { console.error("Erro ao registrar visualização:", err); }
+      } catch (err) { console.error("Erro ao registrar visualizaÃ§Ã£o:", err); }
     }
     if (postId) registrarVisualizacao();
   }, [postId]);
@@ -953,19 +947,18 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
   const actionBtnStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: "5px" };
 
-  // ── Áudio ────────────────────────────────────────────────────────────────
   const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading, current } = useAudioPlayer();
   const audioAtivo = isCurrentPublication(postId);
   const audioTocando = isCurrentlyPlaying(postId);
   const audioCarregando = audioAtivo && audioLoading;
 
-  const ouvirBtnRef = useRef<HTMLSpanElement>(null);
+  const ouvirBtnRef = useRef<HTMLButtonElement>(null);
   const [ouvirFlutuante, setOuvirFlutuante] = useState(false);
 
   useEffect(() => {
-    const el = ouvirBtnRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
+  const el = ouvirBtnRef.current;
+  if (!el) return;
+  const observer = new IntersectionObserver(
       ([entry]) => setOuvirFlutuante(!entry.isIntersecting),
       { threshold: 0 }
     );
@@ -1010,7 +1003,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       <article className="post-detail-card">
         <div className="post-detail-top">
           <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-            {post.tipo === "sermao" ? "Sermão" : "Estudo"}
+            {post.tipo === "sermao" ? "SermÃ£o" : "Estudo"}
           </span>
           {isAutor && (
             <div className="post-detail-owner-btns">
@@ -1028,10 +1021,10 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             {nomeExibicao}
           </span>
           {formatData(post.data) && (
-            <><span className="post-detail-sep">·</span><span>{formatData(post.data)}</span></>
+            <><span className="post-detail-sep">Â·</span><span>{formatData(post.data)}</span></>
           )}
           {post.igreja && (
-            <><span className="post-detail-sep">·</span><span>{post.igreja}</span></>
+            <><span className="post-detail-sep">Â·</span><span>{post.igreja}</span></>
           )}
         </div>
 
@@ -1048,6 +1041,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           </div>
         )}
 
+        {/* FIX: usa conteudoHtml (decodificado) em vez de post.conteudo diretamente */}
         <div
           ref={conteudoRef}
           className="post-detail-content"
@@ -1059,8 +1053,8 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         {post.tipo === "sermao" ? (
           <p className="post-detail-footer-text">
             {post.igreja
-              ? `Sermão pregado na ${post.igreja}${formatData(post.data) ? ` em ${formatData(post.data)}` : ""}`
-              : formatData(post.data) ? `Sermão pregado em ${formatData(post.data)}` : ""}
+              ? `SermÃ£o pregado na ${post.igreja}${formatData(post.data) ? ` em ${formatData(post.data)}` : ""}`
+              : formatData(post.data) ? `SermÃ£o pregado em ${formatData(post.data)}` : ""}
           </p>
         ) : (
           <p className="post-detail-footer-text">
@@ -1073,7 +1067,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         <hr className="post-detail-divider" />
 
         <div className="post-detail-actions">
-          {/* Âncora invisível para o IntersectionObserver */}
+
           <span ref={ouvirBtnRef} style={{ display: "none" }} aria-hidden="true" />
 
           <button onClick={handleLike} disabled={loadingLike}
@@ -1098,7 +1092,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
           <button onClick={handleDownloadPdf} disabled={gerandoPdf} className="post-btn-share"
             style={{ opacity: gerandoPdf ? 0.6 : 1, ...actionBtnStyle }} title="Baixar como PDF">
-            {gerandoPdf ? <><span className="btn-spinner" />Gerando…</> : <><IconDownload size={14} />Salvar PDF</>}
+            {gerandoPdf ? <><span className="btn-spinner" />Gerandoâ€¦</> : <><IconDownload size={14} />Salvar PDF</>}
             {downloadCount > 0 && (
               <span style={{ marginLeft: "2px", fontSize: "0.78rem", fontWeight: 700, color: "var(--text-3)" }}
                 title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
@@ -1112,7 +1106,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             fontSize: "0.85rem", fontWeight: 500, color: "var(--text-3)",
             padding: "7px 12px", border: "1px solid transparent",
             borderRadius: "var(--radius-full)", userSelect: "none", pointerEvents: "none",
-          }} title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}>
+          }} title={`${viewCount} visualizaÃ§Ã£o${viewCount !== 1 ? "Ãµes" : ""}`}>
             <IconEye size={14} /><span>{viewCount}</span>
           </div>
         </div>
@@ -1122,8 +1116,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         <CommentSection postId={postId} />
       </article>
 
-      {/* Botão flutuante — aparece quando a área de ações sai da tela.
-          Só aparece se o player NÃO estiver ativo (!current) */}
+      {/* BotÃ£o flutuante â€” aparece quando o botÃ£o normal sai da tela */}
       {ouvirFlutuante && !current && (
         <button
           onClick={() => {
@@ -1142,7 +1135,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
               audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
             });
           }}
-          aria-label={audioTocando ? "Pausar áudio" : "Ouvir este conteúdo"}
+          aria-label={audioTocando ? "Pausar Ã¡udio" : "Ouvir este conteÃºdo"}
           style={{
             position: "fixed",
             top: "calc(var(--header-h) + 12px)",
@@ -1173,18 +1166,21 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
           )}
           <span style={{ display: "var(--ouvir-label-display, inline)" }}>
-            {audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}
+            {audioCarregando ? "Carregandoâ€¦" : audioTocando ? "Pausar" : "Ouvir"}
           </span>
         </button>
       )}
 
       <style>{`
+        /* â”€â”€ Layout do card â”€â”€ */
         @media (max-width: 640px) {
           .post-detail-cover-wrapper img { max-height: 360px !important; }
           .post-detail-card { padding: 1rem !important; }
           .post-detail-title { font-size: 1.35rem !important; }
           .post-detail-actions { flex-wrap: wrap; gap: 0.4rem !important; }
         }
+
+        /* â”€â”€ NavegaÃ§Ã£o â”€â”€ */
         .post-nav-grid { display: grid; gap: 0.75rem; }
         .post-nav-grid--both      { grid-template-columns: 1fr 1fr; }
         .post-nav-grid--prev      { grid-template-columns: 1fr auto; }
@@ -1194,40 +1190,78 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           .post-nav-grid--prev,
           .post-nav-grid--next { grid-template-columns: 1fr; }
         }
+
+        /* â”€â”€ Prose: estilos do conteÃºdo renderizado â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+           Garante que o HTML do RichTextEditor seja renderizado corretamente
+           em TODOS os dispositivos, incluindo mobile.
+        â”€â”€ */
         .post-detail-content {
           font-size: 0.95rem;
           line-height: 1.8;
           color: var(--text-1);
           word-break: break-word;
           overflow-wrap: break-word;
+          /* Impede que o conteÃºdo extrapole a tela no mobile */
           max-width: 100%;
           overflow-x: hidden;
+          /* Reseta white-space para evitar exibiÃ§Ã£o de HTML como texto */
           white-space: normal;
         }
+
+        /* Garante que NENHUM elemento filho herde white-space:pre-wrap do editor */
         .post-detail-content,
         .post-detail-content * {
           white-space: normal !important;
           max-width: 100%;
           overflow-wrap: break-word;
         }
+
+        /* Blocos de texto */
         .post-detail-content div,
-        .post-detail-content p { margin-bottom: 0.5em; max-width: 100%; }
+        .post-detail-content p {
+          margin-bottom: 0.5em;
+          max-width: 100%;
+        }
+
+        /* FormataÃ§Ã£o inline */
         .post-detail-content b,
         .post-detail-content strong { font-weight: 700; }
+
         .post-detail-content i,
         .post-detail-content em { font-style: italic; }
+
         .post-detail-content u { text-decoration: underline; }
-        .post-detail-content span { color: inherit; font-size: inherit; font-family: inherit; }
-        .post-detail-content img {
-          max-width: 100%; height: auto; display: block;
-          margin: 0.75rem 0; border-radius: 6px; object-fit: contain;
+
+        /* Spans preservam cor herdada */
+        .post-detail-content span {
+          color: inherit;
+          font-size: inherit;
+          font-family: inherit;
         }
+
+        /* Imagens inseridas pelo editor */
+        .post-detail-content img {
+          max-width: 100%;
+          height: auto;
+          display: block;
+          margin: 0.75rem 0;
+          border-radius: 6px;
+          /* Garante que imagens base64 grandes nÃ£o quebrem o layout */
+          object-fit: contain;
+        }
+
+        /* Alinhamentos */
         .post-detail-content [style*="text-align: center"] { text-align: center; }
         .post-detail-content [style*="text-align: right"]  { text-align: right; }
         .post-detail-content [style*="text-align: justify"] { text-align: justify; }
         .post-detail-content [style*="text-align: left"]  { text-align: left; }
+
+        /* EspaÃ§amento mobile da Ã¡rea de conteÃºdo */
         @media (max-width: 640px) {
-          .post-detail-content { font-size: 0.92rem; line-height: 1.75; }
+          .post-detail-content {
+            font-size: 0.92rem;
+            line-height: 1.75;
+          }
         }
       `}</style>
     </>

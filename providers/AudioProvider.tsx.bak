@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 
-// ─── Tipos ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Tipos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export type AudioPublication = {
   id: string;
@@ -24,7 +24,7 @@ export type AudioPublication = {
 
 export type AudioContextType = "home" | "perfil" | "reflexoes" | "serie" | null;
 
-// ─── Estado e ações ──────────────────────────────────────────────────────────
+// â”€â”€â”€ Estado e aÃ§Ãµes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type AudioState = {
   current: AudioPublication | null;
@@ -55,7 +55,7 @@ type AudioActions = {
 
 export type AudioContextValue = AudioState & AudioActions;
 
-// ─── Context ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const AudioContext = createContext<AudioContextValue | null>(null);
 
@@ -65,11 +65,10 @@ export function useAudioContext(): AudioContextValue {
   return ctx;
 }
 
-// ─── Provider ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Provider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function AudioProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const playPromiseRef = useRef<Promise<void> | null>(null);
 
   const [current, setCurrent] = useState<AudioPublication | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -83,13 +82,13 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [contextType, setContextType] = useState<AudioContextType>(null);
 
-  // Refs para closures estáveis no evento ended
+  // Refs para closures estÃ¡veis no evento ended
   const queueRef = useRef<AudioPublication[]>([]);
   const currentIndexRef = useRef(-1);
   queueRef.current = queue;
   currentIndexRef.current = currentIndex;
 
-  // Cria o elemento <audio> uma única vez
+  // Cria o elemento <audio> uma Ãºnica vez
   useEffect(() => {
     const audio = new Audio();
     audio.preload = "metadata";
@@ -107,7 +106,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     });
     audio.addEventListener("ended", () => {
       setIsPlaying(false);
-      // FASE 4 – autoplay contínuo
+      // FASE 4 â€” autoplay contÃ­nuo
       const idx = currentIndexRef.current;
       const q   = queueRef.current;
       if (idx >= 0 && idx < q.length - 1) {
@@ -122,8 +121,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         setDuration(0);
         setCurrent(nextPub);
         setIsLoading(true);
-        playPromiseRef.current = a.play();
-        playPromiseRef.current?.catch(() => {});
+        a.play().catch(console.error);
       }
     });
 
@@ -136,15 +134,14 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // ── Ação interna: tocar uma publicação no <audio> ─────────────────────────
+  // â”€â”€ AÃ§Ã£o interna: tocar uma publicaÃ§Ã£o no <audio> â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const _playAudio = useCallback((pub: AudioPublication) => {
     const audio = audioRef.current;
     if (!audio) return;
 
     if (current?.id === pub.id) {
-      playPromiseRef.current = audio.play();
-      playPromiseRef.current?.catch(() => {});
+      audio.play().catch(console.error);
       return;
     }
 
@@ -154,41 +151,28 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     setDuration(0);
     setCurrent(pub);
     setIsLoading(true);
-    playPromiseRef.current = audio.play();
-    playPromiseRef.current?.catch(() => {});
+    audio.play().catch(console.error);
   }, [current]);
 
-  // ── Ações públicas base ───────────────────────────────────────────────────
+  // â”€â”€ AÃ§Ãµes pÃºblicas base (mantidas intactas) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const play = useCallback((pub: AudioPublication) => {
     _playAudio(pub);
   }, [_playAudio]);
 
   const pause = useCallback(() => {
-    const p = playPromiseRef.current;
-    if (p) {
-      p.then(() => audioRef.current?.pause()).catch(() => {});
-    } else {
-      audioRef.current?.pause();
-    }
+    audioRef.current?.pause();
   }, []);
 
   const resume = useCallback(() => {
-    playPromiseRef.current = audioRef.current?.play() ?? null;
-    playPromiseRef.current?.catch(() => {});
+    audioRef.current?.play().catch(console.error);
   }, []);
 
   const toggle = useCallback(() => {
     if (isPlaying) {
-      const p = playPromiseRef.current;
-      if (p) {
-        p.then(() => audioRef.current?.pause()).catch(() => {});
-      } else {
-        audioRef.current?.pause();
-      }
+      audioRef.current?.pause();
     } else {
-      playPromiseRef.current = audioRef.current?.play() ?? null;
-      playPromiseRef.current?.catch(() => {});
+      audioRef.current?.play().catch(console.error);
     }
   }, [isPlaying]);
 
@@ -208,13 +192,8 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   const close = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    const p = playPromiseRef.current;
-    if (p) {
-      p.then(() => { audio.pause(); audio.src = ""; }).catch(() => {});
-    } else {
-      audio.pause();
-      audio.src = "";
-    }
+    audio.pause();
+    audio.src = "";
     setCurrent(null);
     setIsPlaying(false);
     setCurrentTime(0);
@@ -225,13 +204,14 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     setContextType(null);
   }, []);
 
-  // ── Fase 3: playQueue ─────────────────────────────────────────────────────
+  // â”€â”€ Fase 3: playQueue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const playQueue = useCallback((
     pub: AudioPublication,
     newQueue: AudioPublication[],
     context: AudioContextType,
   ) => {
+    // Filtra itens sem audioUrl defensivamente
     const filaLimpa = newQueue.filter((p) => !!p.audioUrl);
     const idx = filaLimpa.findIndex((p) => p.id === pub.id);
 
@@ -242,12 +222,12 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     _playAudio(pub);
   }, [_playAudio]);
 
-  // ── Fase 3: playNext ──────────────────────────────────────────────────────
+  // â”€â”€ Fase 3: playNext â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const playNext = useCallback(() => {
     const idx = currentIndexRef.current;
     const q   = queueRef.current;
-    if (idx < 0 || idx >= q.length - 1) return; // já é o último
+    if (idx < 0 || idx >= q.length - 1) return; // jÃ¡ Ã© o Ãºltimo
 
     const nextIdx = idx + 1;
     const nextPub = q[nextIdx];
@@ -255,7 +235,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     _playAudio(nextPub);
   }, [_playAudio]);
 
-  // ── Fase 3: playPrevious ──────────────────────────────────────────────────
+  // â”€â”€ Fase 3: playPrevious â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const playPrevious = useCallback(() => {
     const audio = audioRef.current;
@@ -269,7 +249,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (idx <= 0) return; // já é o primeiro
+    if (idx <= 0) return; // jÃ¡ Ã© o primeiro
 
     const prevIdx = idx - 1;
     const prevPub = q[prevIdx];
@@ -277,7 +257,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     _playAudio(prevPub);
   }, [_playAudio]);
 
-  // ── Value ─────────────────────────────────────────────────────────────────
+  // â”€â”€ Value â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const value: AudioContextValue = {
     current,

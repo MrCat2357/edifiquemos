@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -201,7 +201,7 @@ function ReflexaoNavigation({
   useEffect(() => {
     async function fetchNav() {
       try {
-        // ── Modo A: feed global misturado (?from=home) ─────────────────────
+        // ── Modo A: feed global misturado (?from=home) ─────────────────────────
         if (fromHome) {
           const all = await fetchFeedGlobal();
           const idx = all.findIndex((item) => item.id === reflexaoId);
@@ -240,7 +240,7 @@ function ReflexaoNavigation({
           return;
         }
 
-        // ── Modo B: reflexões do mesmo autor (comportamento original) ───────
+        // ── Modo B: reflexões do mesmo autor (comportamento original) ──────────
         const autorSnap = await getDoc(doc(db, "users", autorId));
         let fotoUrl: string | null = null;
         let nomeCompleto = "";
@@ -533,7 +533,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
     document.getElementById("reflexao-comments")?.scrollIntoView({ behavior: "smooth" });
   }
 
-  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading, current } = useAudioPlayer();
   const audioAtivo = isCurrentPublication(reflexao.id ?? "");
   const audioTocando = isCurrentlyPlaying(reflexao.id ?? "");
   const audioCarregando = audioAtivo && audioLoading;
@@ -602,7 +602,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       gap: "2rem",
     }}>
 
-      {/* ── Barra de ações do autor ─────────────────────────────────── */}
+      {/* ── Barra de ações do autor ─────────────────────────────────────────── */}
       {isOwner && (
         <div style={{
           display: "flex", gap: "0.625rem", padding: "0.875rem 1.125rem",
@@ -812,7 +812,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       <span ref={ouvirBtnRef} style={{ display: "none" }} aria-hidden="true" />
 
       {/* Botão flutuante — aparece quando a seção de ações sai da tela */}
-      {ouvirFlutuante && (
+      {ouvirFlutuante && !current && (
         <button
           onClick={handleOuvir}
           aria-label={audioTocando ? "Pausar áudio" : "Ouvir reflexão"}

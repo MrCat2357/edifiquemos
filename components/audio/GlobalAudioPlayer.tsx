@@ -1,379 +1,120 @@
 "use client";
 
+import { useState, useCallback } from "react";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
-import { useCallback } from "react";
+import MiniPlayer from "./MiniPlayer";
+import ExpandedPlayer from "./ExpandedPlayer";
+import NowPlayingSidebar from "./NowPlayingSidebar";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatTime(seconds: number): string {
-  if (!seconds || isNaN(seconds)) return "0:00";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-function getInitials(name: string): string {
-  if (!name) return "?";
-  return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
-}
-
-function typeBadge(tipo: string): string {
-  if (tipo === "sermao")   return "Sermão";
-  if (tipo === "artigo")   return "Estudo";
-  if (tipo === "reflexao") return "Reflexão";
-  return "";
-}
-
-// ─── Ícones SVG ───────────────────────────────────────────────────────────────
-
-function IconPlay({ size = 20 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M8 5.14v14l11-7-11-7z" />
-    </svg>
-  );
-}
-
-function IconPause({ size = 20 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-    </svg>
-  );
-}
-
-function IconSkipPrev({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" />
-    </svg>
-  );
-}
-
-function IconSkipNext({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      <path d="M6 18l8.5-6L6 6v12zm2.5-6 5.5 3.9V8.1L8.5 12zM16 6h2v12h-2z" />
-    </svg>
-  );
-}
-
-function IconClose({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <path d="M18 6L6 18M6 6l12 12" />
-    </svg>
-  );
-}
-
-function IconVolume({ size = 16, muted = false }: { size?: number; muted?: boolean }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-      {muted ? (
-        <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
-      ) : (
-        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-      )}
-    </svg>
-  );
-}
-
-// ─── Avatar do autor ──────────────────────────────────────────────────────────
-
-function AuthorThumb({ src, name, size = 40 }: { src?: string | null; name: string; size?: number }) {
-  if (src) {
-    return (
-      <img src={src} alt={name} style={{
-        width: size, height: size,
-        borderRadius: "var(--radius-sm, 6px)",
-        objectFit: "cover", flexShrink: 0,
-      }} />
-    );
-  }
-  return (
-    <div style={{
-      width: size, height: size,
-      borderRadius: "var(--radius-sm, 6px)",
-      background: "linear-gradient(135deg, var(--emerald-dark, #064e3b), var(--emerald, #10b981))",
-      color: "#fff", fontSize: Math.round(size * 0.36) + "px", fontWeight: 700,
-      display: "flex", alignItems: "center", justifyContent: "center",
-      flexShrink: 0, userSelect: "none", letterSpacing: "0.02em",
-    }}>
-      {getInitials(name)}
-    </div>
-  );
-}
-
-// ─── Barra de progresso ───────────────────────────────────────────────────────
-
-function ProgressBar({ currentTime, duration, onSeek }: {
-  currentTime: number; duration: number; onSeek: (time: number) => void;
-}) {
-  const percent = duration > 0 ? (currentTime / duration) * 100 : 0;
-
-  function handleClick(e: React.MouseEvent<HTMLDivElement>) {
-    if (!duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = (e.clientX - rect.left) / rect.width;
-    onSeek(ratio * duration);
-  }
-
-  return (
-    <div onClick={handleClick}
-      title={`${formatTime(currentTime)} / ${formatTime(duration)}`}
-      style={{
-        width: "100%", height: 3,
-        background: "rgba(255,255,255,0.12)",
-        borderRadius: 99, cursor: duration ? "pointer" : "default",
-        position: "relative", overflow: "hidden",
-      }}
-    >
-      <div style={{
-        position: "absolute", top: 0, left: 0,
-        height: "100%", width: `${percent}%`,
-        background: "var(--emerald, #10b981)",
-        borderRadius: 99, transition: "width 0.25s linear",
-      }} />
-    </div>
-  );
-}
-
-// ─── Botão de skip (anterior / próximo) ──────────────────────────────────────
-
-function SkipButton({ onClick, disabled, label, children }: {
-  onClick: () => void;
-  disabled: boolean;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      title={label}
-      style={{
-        background: "none", border: "none",
-        color: disabled
-          ? "rgba(255,255,255,0.15)"
-          : "var(--text-2, rgba(255,255,255,0.7))",
-        cursor: disabled ? "default" : "pointer",
-        display: "flex", alignItems: "center",
-        padding: "4px", flexShrink: 0,
-        transition: "color 0.15s",
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-// ─── GlobalAudioPlayer ────────────────────────────────────────────────────────
-
+/**
+ * GlobalAudioPlayer — Fase 5
+ *
+ * Mobile  (<1024px): MiniPlayer (bottom bar) + ExpandedPlayer (fullscreen)
+ * Desktop (≥1024px): NowPlayingSidebar (fixed right panel)
+ *
+ * Correções 5.2:
+ * - Remove botão "▶ Ouvir" flutuante que sobrepunha a sidebar no desktop.
+ *   Esse botão é suprimido via CSS quando o player está ativo.
+ *   Seletores cobertos:
+ *     • .audio-listen-btn        — classe recomendada nos botões dos cards
+ *     • [data-audio-listen-btn]  — alternativa via data-attribute
+ *   No desktop com player ativo ambos somem via display:none.
+ *
+ * - NowPlayingSidebar tem zIndex:80 (abaixo do header, acima do conteúdo).
+ *   O botão × dentro dela tem zIndex:10 relativo ao aside, sempre clicável.
+ */
 export default function GlobalAudioPlayer() {
-  const {
-    current,
-    isPlaying,
-    isLoading,
-    currentTime,
-    duration,
-    volume,
-    hasNext,
-    hasPrevious,
-    toggle,
-    seek,
-    setVolume,
-    close,
-    playNext,
-    playPrevious,
-  } = useAudioPlayer();
+  const { current } = useAudioPlayer();
+  const [expanded, setExpanded] = useState(false);
 
-  const handleVolumeClick = useCallback(() => {
-    setVolume(volume > 0 ? 0 : 1);
-  }, [volume, setVolume]);
-
-  if (!current) return null;
-
-  const badge = typeBadge(current.tipo);
-  const muted = volume === 0;
+  const handleExpand   = useCallback(() => setExpanded(true),  []);
+  const handleMinimize = useCallback(() => setExpanded(false), []);
 
   return (
     <>
-      <div
-        role="region"
-        aria-label="Player de áudio"
-        style={{
-          position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 900,
-          background: "var(--bg-card, #0f1a12)",
-          borderTop: "1px solid var(--border-light, rgba(255,255,255,0.08))",
-          boxShadow: "0 -8px 32px rgba(0,0,0,0.45)",
-          display: "flex", flexDirection: "column", userSelect: "none",
-        }}
-      >
-        {/* Progresso */}
-        <div style={{ lineHeight: 0 }}>
-          <ProgressBar currentTime={currentTime} duration={duration} onSeek={seek} />
-        </div>
-
-        {/* Conteúdo */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: "0.75rem",
-          padding: "0.625rem 1.25rem",
-          maxWidth: 960, margin: "0 auto", width: "100%",
-        }}>
-          {/* Thumbnail */}
-          <AuthorThumb src={current.autorFoto} name={current.autorNome} size={40} />
-
-          {/* Título e autor */}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-              {badge && (
-                <span style={{
-                  fontSize: "0.6rem", fontWeight: 700,
-                  letterSpacing: "0.08em", textTransform: "uppercase",
-                  color: "var(--emerald, #10b981)",
-                  background: "var(--emerald-dim, rgba(16,185,129,0.12))",
-                  padding: "1px 6px", borderRadius: 99, flexShrink: 0,
-                }}>
-                  {badge}
-                </span>
-              )}
-              <span style={{
-                fontSize: "0.85rem", fontWeight: 700,
-                color: "var(--text-1, #f0fdf4)",
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {current.titulo}
-              </span>
-            </div>
-            <span style={{
-              fontSize: "0.72rem",
-              color: "var(--text-3, rgba(255,255,255,0.4))",
-              overflow: "hidden", textOverflow: "ellipsis",
-              whiteSpace: "nowrap", display: "block", marginTop: 1,
-            }}>
-              {current.autorNome}
-            </span>
-          </div>
-
-          {/* Tempo */}
-          <span style={{
-            fontSize: "0.72rem",
-            color: "var(--text-3, rgba(255,255,255,0.4))",
-            fontVariantNumeric: "tabular-nums",
-            flexShrink: 0, display: "flex", gap: "2px",
-          }}>
-            <span>{formatTime(currentTime)}</span>
-            {duration > 0 && (
-              <>
-                <span style={{ opacity: 0.4 }}>/</span>
-                <span>{formatTime(duration)}</span>
-              </>
-            )}
-          </span>
-
-          {/* ── Controles de navegação + play/pause ── */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
-            {/* Anterior */}
-            <SkipButton
-              onClick={playPrevious}
-              disabled={!hasPrevious}
-              label="Anterior"
-            >
-              <IconSkipPrev size={18} />
-            </SkipButton>
-
-            {/* Play / Pause */}
-            <button
-              onClick={toggle}
-              disabled={isLoading}
-              aria-label={isPlaying ? "Pausar" : "Reproduzir"}
+      {/* ── Mobile ──────────────────────────────────────────────────────── */}
+      <div className="gap-mobile-player">
+        {current && (
+          <>
+            <div
               style={{
-                width: 40, height: 40, borderRadius: "50%",
-                border: "none", background: "var(--emerald, #10b981)",
-                color: "#fff", display: "flex", alignItems: "center",
-                justifyContent: "center",
-                cursor: isLoading ? "default" : "pointer",
-                opacity: isLoading ? 0.6 : 1, flexShrink: 0,
-                transition: "opacity 0.15s, transform 0.15s",
-                boxShadow: "0 2px 12px rgba(16,185,129,0.35)",
-                margin: "0 2px",
+                position: "fixed",
+                bottom: 0,
+                left: 0,
+                right: 0,
+                zIndex: 900,
+                background: "var(--bg-card, #0f1a12)",
+                borderTop: "1px solid var(--border-light, rgba(255,255,255,0.08))",
+                boxShadow: "0 -6px 24px rgba(0,0,0,0.4)",
               }}
-              onMouseEnter={(e) => { if (!isLoading) e.currentTarget.style.transform = "scale(1.08)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
             >
-              {isLoading ? (
-                <span style={{
-                  width: 16, height: 16,
-                  border: "2px solid rgba(255,255,255,0.3)",
-                  borderTopColor: "#fff", borderRadius: "50%",
-                  display: "inline-block",
-                  animation: "audio-spin 0.7s linear infinite",
-                }} />
-              ) : isPlaying ? (
-                <IconPause size={18} />
-              ) : (
-                <IconPlay size={18} />
-              )}
-            </button>
-
-            {/* Próximo */}
-            <SkipButton
-              onClick={playNext}
-              disabled={!hasNext}
-              label="Próximo"
-            >
-              <IconSkipNext size={18} />
-            </SkipButton>
-          </div>
-
-          {/* Volume */}
-          <button
-            onClick={handleVolumeClick}
-            aria-label={muted ? "Ativar volume" : "Silenciar"}
-            title={muted ? "Ativar volume" : "Silenciar"}
-            style={{
-              background: "none", border: "none",
-              color: muted ? "var(--text-3, rgba(255,255,255,0.4))" : "var(--text-2, rgba(255,255,255,0.7))",
-              cursor: "pointer", display: "flex", alignItems: "center",
-              padding: "4px", flexShrink: 0, transition: "color 0.15s",
-            }}
-          >
-            <IconVolume size={16} muted={muted} />
-          </button>
-
-          {/* Fechar */}
-          <button
-            onClick={close}
-            aria-label="Fechar player"
-            title="Fechar player"
-            style={{
-              background: "none", border: "none",
-              color: "var(--text-3, rgba(255,255,255,0.4))",
-              cursor: "pointer", display: "flex", alignItems: "center",
-              padding: "4px", flexShrink: 0, transition: "color 0.15s",
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-1, #f0fdf4)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-3, rgba(255,255,255,0.4))"; }}
-          >
-            <IconClose size={14} />
-          </button>
-        </div>
+              <MiniPlayer onExpand={handleExpand} />
+            </div>
+            <ExpandedPlayer open={expanded} onMinimize={handleMinimize} />
+          </>
+        )}
       </div>
 
-      {/* Espaço para não cobrir conteúdo */}
-      <div style={{ height: 68 }} />
+      {/* ── Desktop ─────────────────────────────────────────────────────── */}
+      <div className="gap-desktop-sidebar">
+        <NowPlayingSidebar />
+      </div>
 
       <style>{`
-        @keyframes audio-spin {
-          to { transform: rotate(360deg); }
+        /* Variáveis base — sempre presentes */
+        :root {
+          --header-h: 64px;
+          --sidebar-player-w: 0px;
+        }
+
+        /* ── Mobile (<1024px) ─────────────────────────────────────────── */
+        @media (max-width: 1023px) {
+          .gap-desktop-sidebar { display: none !important; }
+
+          ${current ? `
+            main { padding-bottom: 72px; }
+          ` : ""}
+        }
+
+        /* ── Desktop (≥1024px) ────────────────────────────────────────── */
+        @media (min-width: 1024px) {
+          .gap-mobile-player { display: none !important; }
+
+          ${current ? `
+            :root { --sidebar-player-w: 280px; }
+
+            /*
+              Empurra o conteúdo principal para não ficar atrás da sidebar.
+              Usa transition para suavizar a abertura/fechamento.
+            */
+            main {
+              padding-right: calc(280px + 1rem);
+              transition: padding-right 250ms cubic-bezier(0.32, 0.72, 0, 1);
+            }
+
+            /*
+              Oculta QUALQUER botão "Ouvir" flutuante enquanto a sidebar
+              do player estiver aberta, evitando sobreposição com o botão ×.
+
+              Adicione UMA das marcações abaixo nos seus botões "Ouvir":
+                • className="audio-listen-btn"
+                • data-audio-listen-btn="true"
+
+              O componente AudioListenButton (se existir) já pode usar
+              useAudioPlayer().current para se auto-ocultar em vez de
+              depender só do CSS — mas este CSS é o fallback garantido.
+            */
+            .audio-listen-btn,
+            [data-audio-listen-btn] {
+              display: none !important;
+              pointer-events: none !important;
+            }
+          ` : `
+            :root { --sidebar-player-w: 0px; }
+            main {
+              transition: padding-right 250ms cubic-bezier(0.32, 0.72, 0, 1);
+            }
+          `}
         }
       `}</style>
     </>
