@@ -23,6 +23,7 @@ export function useAudioPlayer() {
     playQueue,
     playNext,
     playPrevious,
+    registerOnEndedCallback,
   } = useAudioContext();
 
   // ── Utilitários de estado ──────────────────────────────────────────────────
@@ -38,26 +39,18 @@ export function useAudioPlayer() {
   }
 
   // ── playOrToggle — compatibilidade com Fase 2 ─────────────────────────────
-  /**
-   * Mantido para compatibilidade.
-   * Se já existe uma fila ativa, usa playQueue internamente para
-   * preservar o contexto. Caso contrário, chama play() diretamente.
-   */
   function playOrToggle(pub: AudioPublication): void {
     if (current?.id === pub.id) {
       toggle();
       return;
     }
-    // Se já existe fila, insere a publicação no contexto atual
     if (queue.length > 0) {
       const existeNaFila = queue.findIndex((p) => p.id === pub.id);
       if (existeNaFila >= 0) {
-        // Está na fila: navega para ela sem recriar a fila
         playQueue(pub, queue, contextType);
         return;
       }
     }
-    // Sem fila: toca isolado (comportamento original da Fase 2)
     play(pub);
   }
 
@@ -98,6 +91,9 @@ export function useAudioPlayer() {
     playQueue,
     playNext,
     playPrevious,
+
+    // Fase 6 — navegação entre páginas
+    registerOnEndedCallback,
 
     // Utilitários
     isCurrentPublication,

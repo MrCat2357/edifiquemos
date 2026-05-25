@@ -51,6 +51,8 @@ type AudioActions = {
   playQueue: (pub: AudioPublication, queue: AudioPublication[], context: AudioContextType) => void;
   playNext: () => void;
   playPrevious: () => void;
+  // Fase 6 — navegação entre páginas
+  registerOnEndedCallback: (cb: (() => void) | null) => void;
 };
 
 export type AudioContextValue = AudioState & AudioActions;
@@ -89,6 +91,15 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   queueRef.current = queue;
   currentIndexRef.current = currentIndex;
 
+  // Fase 6 — callback registrado pela página atual para navegação entre rotas
+  // Quando preenchido, o onEnded do áudio chama este callback ANTES de avançar
+  // na fila interna, permitindo que a página navegue para o próximo post.
+  const onEndedCallbackRef = useRef<(() => void) | null>(null);
+
+  const registerOnEndedCallback = useCallback((cb: (() => void) | null) => {
+    onEndedCallbackRef.current = cb;
+  }, []);
+
   // Cria o elemento <audio> uma única vez
   useEffect(() => {
     const audio = new Audio();
@@ -105,12 +116,24 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
       setIsPlaying(false);
     });
+
     audio.addEventListener("ended", () => {
       setIsPlaying(false);
-      // FASE 4 – autoplay contínuo
+
       const idx = currentIndexRef.current;
       const q   = queueRef.current;
-      if (idx >= 0 && idx < q.length - 1) {
+      const hasNext = idx >= 0 && idx < q.length - 1;
+
+      // Se há um callback de navegação registrado pela página atual,
+      // delegamos para ele. Ele é responsável por navegar e iniciar o áudio.
+      // Apenas chamamos se há próximo na fila (para não navegar sem destino).
+      if (onEndedCallbackRef.current && hasNext) {
+        onEndedCallbackRef.current();
+        return;
+      }
+
+      // Comportamento padrão Fase 4: autoplay interno na fila sem navegação
+      if (hasNext) {
         const nextIdx = idx + 1;
         const nextPub = q[nextIdx];
         setCurrentIndex(nextIdx);
@@ -223,6 +246,8 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     setQueue([]);
     setCurrentIndex(-1);
     setContextType(null);
+    // Fase 6: limpar callback
+    onEndedCallbackRef.current = null;
   }, []);
 
   // ── Fase 3: playQueue ─────────────────────────────────────────────────────
@@ -247,7 +272,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   const playNext = useCallback(() => {
     const idx = currentIndexRef.current;
     const q   = queueRef.current;
-    if (idx < 0 || idx >= q.length - 1) return; // já é o último
+    if (idx < 0 || idx >= q.length - 1) return;
 
     const nextIdx = idx + 1;
     const nextPub = q[nextIdx];
@@ -262,14 +287,13 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     const idx   = currentIndexRef.current;
     const q     = queueRef.current;
 
-    // Se passou mais de 3s, reinicia a faixa atual em vez de voltar
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0;
       setCurrentTime(0);
       return;
     }
 
-    if (idx <= 0) return; // já é o primeiro
+    if (idx <= 0) return;
 
     const prevIdx = idx - 1;
     const prevPub = q[prevIdx];
@@ -299,6 +323,8 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     playQueue,
     playNext,
     playPrevious,
+    // Fase 6
+    registerOnEndedCallback,
   };
 
   return (

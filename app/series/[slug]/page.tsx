@@ -494,6 +494,161 @@ function SerieNavigation({
   );
 }
 
+// ─── BotaoOuvirSerie (botão flutuante da série) ────────────────────────────────
+//
+// CORREÇÕES aplicadas:
+// 1. Posição: usa top fixo (calc(var(--header-h) + 1rem)) igual ao botão "Ouvir"
+//    dos posts individuais, em vez de bottom dinâmico.
+// 2. Sumir/reaparecer: some quando a série está ativa no player (barra lateral
+//    visível) e reaparece quando o player é fechado/inativo.
+// 3. Fallback audioUrl: posts sem audioUrl usam a URL de teste.
+
+type AudioPub = {
+  id: string;
+  tipo: "sermao" | "artigo" | "reflexao";
+  titulo: string;
+  autorNome: string;
+  autorFoto?: string | null;
+  slug: string;
+  autorSlug?: string;
+  audioUrl: string;
+};
+
+function BotaoOuvirSerie({
+  posts,
+  serieSlug,
+}: {
+  posts: AudioPub[];
+  serieSlug: string;
+}) {
+  const router = useRouter();
+  const {
+    playQueue,
+    pause,
+    resume,
+    isPlaying,
+    isLoading,
+    contextType,
+    current,
+  } = useAudioPlayer();
+
+  const serieAtiva =
+    contextType === "serie" &&
+    current !== null &&
+    posts.some((p) => p.id === current.id);
+
+  const tocando = serieAtiva && isPlaying;
+  const carregando = serieAtiva && isLoading;
+
+  // CORREÇÃO 2: some quando a série está ativa (barra lateral aberta),
+  // reaparece quando o player é fechado ou está em outro contexto.
+  const visivel = !serieAtiva;
+
+  function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+
+    if (!auth.currentUser) {
+      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      return;
+    }
+
+    if (serieAtiva) {
+      tocando ? pause() : resume();
+      return;
+    }
+
+    // CORREÇÃO 3: todos os posts já chegam com audioUrl preenchido via fallback
+    const fila = posts;
+    if (fila.length === 0) return;
+
+    playQueue(fila[0], fila, "serie");
+  }
+
+  if (posts.length === 0) return null;
+
+  return (
+    <button
+      onClick={handleClick}
+      title={tocando ? "Pausar série" : serieAtiva ? "Continuar série" : "Ouvir série completa"}
+      aria-label={tocando ? "Pausar série" : "Ouvir série completa"}
+      style={{
+        position: "fixed",
+        // CORREÇÃO 1: mesma posição vertical do botão "Ouvir" dos posts individuais
+        top: "calc(var(--header-h) + 1rem)",
+        right: "1.25rem",
+        zIndex: 800,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "8px",
+        padding: "12px 20px",
+        borderRadius: "var(--radius-full)",
+        border: "none",
+        background: serieAtiva
+          ? "var(--emerald)"
+          : "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
+        color: "#fff",
+        fontSize: "0.85rem",
+        fontWeight: 700,
+        cursor: "pointer",
+        boxShadow: serieAtiva
+          ? "0 0 0 3px var(--emerald-dim), 0 8px 24px rgba(0,0,0,0.4)"
+          : "0 8px 24px rgba(0,0,0,0.4)",
+        transition: "all 0.2s ease",
+        fontFamily: "inherit",
+        letterSpacing: "-0.01em",
+        // CORREÇÃO 2: oculta via opacity+pointer-events quando série ativa
+        opacity: visivel ? 1 : 0,
+        pointerEvents: visivel ? "auto" : "none",
+        transform: visivel ? "translateY(0)" : "translateY(-8px)",
+      }}
+      className="serie-play-fab"
+    >
+      {carregando ? (
+        <svg
+          width="16" height="16" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+          style={{ animation: "spin 0.8s linear infinite" }}
+        >
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+        </svg>
+      ) : tocando ? (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+        </svg>
+      ) : (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M8 5.14v14l11-7-11-7z" />
+        </svg>
+      )}
+      <span>
+        {carregando
+          ? "Carregando…"
+          : tocando
+          ? "Pausar série"
+          : serieAtiva
+          ? "Continuar série"
+          : "Ouvir série"}
+      </span>
+      {serieAtiva && !carregando && (
+        <span style={{
+          display: "flex", gap: "2px", alignItems: "flex-end", height: "12px",
+        }}>
+          {[0, 1, 2].map((i) => (
+            <span key={i} style={{
+              width: "3px",
+              height: tocando ? `${6 + i * 3}px` : "4px",
+              background: "rgba(255,255,255,0.8)",
+              borderRadius: "2px",
+              animation: tocando ? `eq-bar 0.8s ease-in-out ${i * 0.15}s infinite alternate` : "none",
+              transition: "height 0.3s ease",
+            }} />
+          ))}
+        </span>
+      )}
+    </button>
+  );
+}
+
 // ─── PostCardSerie ─────────────────────────────────────────────────────────────
 
 function PostCardSerie({
@@ -505,7 +660,6 @@ function PostCardSerie({
   const router = useRouter();
   const uid = auth.currentUser?.uid;
 
-  // FIX: useAudioPlayer agora está corretamente importado no topo do arquivo
   const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
   const audioAtivo = isCurrentPublication(post.id);
   const audioTocando = isCurrentlyPlaying(post.id);
@@ -792,6 +946,44 @@ export default function SeriePage() {
 
   const serieSlug = Array.isArray(slug) ? slug[0] : (slug ?? "");
 
+  const { registerOnEndedCallback, current: currentAudio, queue, currentIndex, contextType } = useAudioPlayer();
+
+  useEffect(() => {
+    if (posts.length === 0) return;
+
+    const fila = posts;
+    if (fila.length === 0) return;
+
+    const cb = () => {
+      const nextIdx = currentIndex + 1;
+      const nextPub = queue[nextIdx];
+      if (!nextPub) return;
+
+      const cat = nextPub.tipo === "sermao" ? "sermoes" : "estudos";
+      const url = `/posts/${cat}/${nextPub.slug}?from=serie&serieSlug=${serieSlug}`;
+      router.push(url);
+    };
+
+    if (contextType === "serie" && currentAudio && fila.some((p) => p.id === currentAudio.id)) {
+      registerOnEndedCallback(cb);
+    } else {
+      registerOnEndedCallback(null);
+    }
+
+    return () => {
+      registerOnEndedCallback(null);
+    };
+  }, [
+    posts,
+    currentAudio,
+    currentIndex,
+    queue,
+    contextType,
+    serieSlug,
+    router,
+    registerOnEndedCallback,
+  ]);
+
   function showToast(msg: string) {
     setToastMsg(msg); setToastVisible(true);
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -867,10 +1059,10 @@ export default function SeriePage() {
     ? window.location.pathname + window.location.search
     : `/series/${serieSlug}`;
 
-  // FIX: fila de áudio construída antes do JSX, sem IIFE
+  // CORREÇÃO 3: fila com fallback de audioUrl para todos os posts
   const filaSerieAudio = posts.map((p) => ({
     id: p.id,
-    tipo: p.tipo,
+    tipo: p.tipo as "sermao" | "artigo" | "reflexao",
     titulo: p.titulo,
     autorNome: p.autorNome || "Autor",
     autorFoto: p.autorFoto ?? null,
@@ -897,6 +1089,9 @@ export default function SeriePage() {
       {serieLikesModalAberto && (
         <LikesModal likedBy={serieLikedBy} onClose={() => setSerieLikesModalAberto(false)} />
       )}
+
+      {/* ── Botão flutuante da série ── */}
+      <BotaoOuvirSerie posts={filaSerieAudio} serieSlug={serieSlug} />
 
       <div style={{ maxWidth: "680px", margin: "0 auto", padding: "calc(var(--header-h) + 2rem) 1.25rem 4rem" }}>
         {/* Capa */}
@@ -1013,7 +1208,6 @@ export default function SeriePage() {
 
         <hr style={{ border: "none", borderTop: "1px solid var(--border)", marginBottom: "1.5rem" }} />
 
-        {/* FIX: sem IIFE — fila construída acima, renderização direta */}
         {posts.length === 0 ? (
           <div className="empty-state">Esta série ainda não tem publicações.</div>
         ) : (
@@ -1040,16 +1234,33 @@ export default function SeriePage() {
       </div>
 
       <style>{`
+        /* ── Cards ── */
         .post-card-image { cursor: pointer; }
         .card-cover-wrapper {
           position: relative; width: 100%; max-height: 420px; min-height: 160px;
           overflow: hidden; border-radius: var(--radius-lg) var(--radius-lg) 0 0;
           background: #0d1310; display: flex; align-items: center; justify-content: center;
         }
-        .card-cover-img { width: 100%; height: 100%; object-fit: contain; display: block; max-height: 420px; transition: transform 0.35s ease; }
+        .card-cover-img {
+          width: 100%; height: 100%; object-fit: contain; display: block;
+          max-height: 420px; transition: transform 0.35s ease;
+        }
         .post-card-image:hover .card-cover-img { transform: scale(1.025); }
-        .card-cover-badge { position: absolute; top: 0.625rem; right: 0.75rem; backdrop-filter: blur(6px); background: rgba(10, 15, 10, 0.72) !important; }
+        .card-cover-badge {
+          position: absolute; top: 0.625rem; right: 0.75rem;
+          backdrop-filter: blur(6px); background: rgba(10, 15, 10, 0.72) !important;
+        }
         .card-image-content { display: flex; flex-direction: column; }
+
+        /* ── Animações ── */
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes eq-bar {
+          from { transform: scaleY(0.4); }
+          to   { transform: scaleY(1); }
+        }
+
         @media (max-width: 640px) {
           .card-cover-wrapper { max-height: 320px; min-height: 120px; }
           .card-cover-img { max-height: 320px; }

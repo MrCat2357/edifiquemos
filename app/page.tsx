@@ -8,6 +8,7 @@ import {
   query,
   orderBy,
   doc,
+  getDoc,
   updateDoc,
   deleteDoc,
   arrayUnion,
@@ -219,6 +220,144 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   );
 }
 
+// ─── BotaoOuvirSerieCard ──────────────────────────────────────────────────────
+
+function BotaoOuvirSerieCard({ serie }: { serie: any }) {
+  const router = useRouter();
+  const {
+    playQueue,
+    pause,
+    resume,
+    isPlaying,
+    isLoading: audioLoading,
+    contextType,
+    current: currentAudio,
+  } = useAudioPlayer();
+
+  const [carregandoPosts, setCarregandoPosts] = useState(false);
+  const [postsCarregados, setPostsCarregados] = useState<any[] | null>(null);
+
+  const serieAtiva =
+    contextType === "serie" &&
+    currentAudio !== null &&
+    postsCarregados !== null &&
+    postsCarregados.some((p: any) => p.id === currentAudio.id);
+
+  const tocando = serieAtiva && isPlaying;
+  const carregando = (serieAtiva && audioLoading) || carregandoPosts;
+
+  async function buscarPostsDaSerie(): Promise<any[]> {
+    if (postsCarregados !== null) return postsCarregados;
+    const postIds: string[] = serie.postIds ?? [];
+    if (postIds.length === 0) return [];
+
+    const snaps = await Promise.all(
+      postIds.map((id: string) => getDoc(doc(db, "posts", id)))
+    );
+    // CORREÇÃO: removido .filter((p) => !!p.audioUrl) — posts não têm audioUrl no Firestore
+    const lista = snaps
+      .filter((s) => s.exists())
+      .map((s) => ({ id: s.id, ...s.data() }));
+
+    setPostsCarregados(lista);
+    return lista;
+  }
+
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+
+    if (!auth.currentUser) {
+      router.push(
+        `/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`
+      );
+      return;
+    }
+
+    if (serieAtiva) {
+      tocando ? pause() : resume();
+      return;
+    }
+
+    setCarregandoPosts(true);
+    try {
+      const posts = await buscarPostsDaSerie();
+      if (posts.length === 0) return;
+
+      const fila = posts.map((p: any) => ({
+        id: p.id,
+        tipo: p.tipo as "sermao" | "artigo" | "reflexao",
+        titulo: p.titulo,
+        autorNome: p.autorNome || "Autor",
+        autorFoto: p.autorFoto ?? null,
+        slug: p.slug,
+        autorSlug: p.autorSlug,
+        // CORREÇÃO: fallback para posts sem audioUrl
+        audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+      }));
+
+      playQueue(fila[0], fila, "serie");
+    } catch (err) {
+      console.error("Erro ao carregar posts da série:", err);
+    }
+    setCarregandoPosts(false);
+  }
+
+  if (!serie.postIds || serie.postIds.length === 0) return null;
+
+  return (
+    <button
+      onClick={handleClick}
+      title={tocando ? "Pausar série" : serieAtiva ? "Continuar série" : "Ouvir série completa"}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
+        padding: "4px 8px",
+        borderRadius: "var(--radius-full)",
+        border: "1px solid",
+        borderColor: serieAtiva ? "var(--emerald-dim)" : "transparent",
+        background: serieAtiva ? "var(--emerald-dim)" : "transparent",
+        color: serieAtiva ? "var(--emerald)" : "var(--text-3)",
+        fontSize: "0.72rem",
+        fontWeight: 600,
+        cursor: "pointer",
+        transition: "all 0.15s",
+        fontFamily: "inherit",
+        flexShrink: 0,
+        boxShadow: tocando ? "0 0 0 2px var(--emerald-dim)" : "none",
+      }}
+    >
+      {carregando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+        </svg>
+      ) : tocando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+        </svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M8 5.14v14l11-7-11-7z" />
+        </svg>
+      )}
+      <span>
+        {carregando
+          ? "Carregando…"
+          : tocando
+          ? "Pausar"
+          : serieAtiva
+          ? "Continuar"
+          : "Ouvir série"}
+      </span>
+      {tocando && (
+        <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>
+          · agora
+        </span>
+      )}
+    </button>
+  );
+}
+
 // ─── SerieCard ────────────────────────────────────────────────────────────────
 
 function SerieCardMeuPerfil({
@@ -240,7 +379,6 @@ function SerieCardMeuPerfil({
   const [showComments, setShowComments] = useState(false);
   const [commentCount, setCommentCount] = useState<number>(serie.commentCount ?? 0);
 
-  // ── CORREÇÃO: passa ?from=home para que SerieNavigation use o feed global ──
   const serieUrl = `/series/${serie.slug}?from=home`;
 
   async function handleLike(e: React.MouseEvent) {
@@ -346,7 +484,6 @@ function SerieCardMeuPerfil({
           onClick={(e) => e.stopPropagation()}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-            {/* Curtir */}
             <button
               className={`action-btn ${liked ? "liked" : ""}`}
               onClick={handleLike}
@@ -363,7 +500,6 @@ function SerieCardMeuPerfil({
               )}
             </button>
 
-            {/* Comentários */}
             <button
               onClick={handleToggleComments}
               title="Ver comentários"
@@ -383,6 +519,8 @@ function SerieCardMeuPerfil({
                 </span>
               )}
             </button>
+
+            <BotaoOuvirSerieCard serie={serie} />
           </div>
 
           <span
@@ -433,7 +571,6 @@ function PostCard({ post, index, onAuthorClick, onToast, filaAudio = [] }: {
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
-  // ── CORREÇÃO: passa ?from=home para que PostNavigation use o feed global ──
   const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}?from=home`;
   const urlSemContexto = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
   const fullUrl = typeof window !== "undefined" ? window.location.origin + urlSemContexto : urlSemContexto;
@@ -625,7 +762,6 @@ function ReflexaoFeedCard({
   const router = useRouter();
   const isAutor = !!currentUid && currentUid === reflexao.autorId;
 
-  // ── CORREÇÃO: passa ?from=home para que ReflexaoNavigation use o feed global ──
   const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
   const audioAtivo = isCurrentPublication(reflexao.id);
   const audioTocando = isCurrentlyPlaying(reflexao.id);
@@ -673,12 +809,6 @@ function ReflexaoFeedCard({
 
   return (
     <div style={{ position: "relative", animationDelay: `${index * 60}ms` }} className="reflexao-feed-item">
-      {/*
-        CardReflexao não aceita um override de URL internamente, então
-        envolvemos o card num wrapper clicável que intercepta o clique
-        antes que o card navegue para a URL padrão (sem ?from=home).
-        O CardReflexao continua renderizando normalmente.
-      */}
       <div
         style={{ cursor: "pointer" }}
         onClick={handleCardClick}
@@ -874,7 +1004,6 @@ function HomePageContent() {
   const visibleItems = itensFiltrados.slice(0, visibleCount);
   const hasMore = visibleCount < itensFiltrados.length;
 
-  // Fila de áudio — feed completo sem séries
   const filaAudio = feedItems
     .filter((item) => item._feedType !== "serie")
     .map((item) => ({
@@ -1029,7 +1158,6 @@ function HomePageContent() {
         .card-cover-badge { position: absolute; top: 0.625rem; right: 0.75rem; backdrop-filter: blur(6px); background: rgba(10, 15, 10, 0.72) !important; }
         .card-image-content { display: flex; flex-direction: column; }
 
-        /* Reflexão no feed */
         .reflexao-feed-item { position: relative; }
         .reflexao-owner-actions {
           display: flex;
