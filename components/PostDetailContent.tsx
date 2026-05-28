@@ -796,6 +796,8 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
   const [viewCount, setViewCount] = useState<number>(post.visualizacoes ?? 0);
+  const [modalLoginVisivel, setModalLoginVisivel] = useState(false);
+  const [bannerLoginVisivel, setBannerLoginVisivel] = useState(false);
 
   useEffect(() => {
     async function registrarVisualizacao() {
@@ -877,8 +879,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   async function handleLike() {
     const uid = auth.currentUser?.uid;
     if (!uid) {
-      const destino = window.location.pathname + window.location.search;
-      router.push(`/entrar?next=${encodeURIComponent(destino)}`);
+      setModalLoginVisivel(true);
       return;
     }
     if (loadingLike) return;
@@ -971,11 +972,10 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [buildingQueue, setBuildingQueue] = useState(false);
 
   async function buildAndPlay() {
-    if (!auth.currentUser) {
-      const destino = window.location.pathname + window.location.search;
-      router.push(`/entrar?next=${encodeURIComponent(destino)}`);
-      return;
-    }
+  if (!auth.currentUser) {
+    setModalLoginVisivel(true);
+    return;
+  }
 
     // Só faz toggle se a fila E o contexto já estão corretos para esta página
     const filaTemEstePost = queue.length > 0 && queue.some((p) => p.id === postId);
@@ -1085,6 +1085,14 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         {toastMsg}
       </div>
 
+      {modalLoginVisivel && (
+        <BannerLogin
+          modal
+          onClose={() => setModalLoginVisivel(false)}
+          redirectTo={typeof window !== "undefined" ? window.location.pathname + window.location.search : undefined}
+        />
+      )}
+
       {likesModalAberto && <LikesModal likedBy={likedBy} onClose={() => setLikesModalAberto(false)} />}
 
       {compartilharAberto && (
@@ -1102,6 +1110,15 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           nomeAutor={nomeExibicao} tituloPost={post.titulo} urlAtual={urlAtual}
           onFechar={() => setSelecao(null)} onToast={showToast}
         />
+      )}
+
+      {bannerLoginVisivel && (
+        <div style={{ marginBottom: "1rem" }}>
+          <BannerLogin
+            onClose={() => setBannerLoginVisivel(false)}
+            redirectTo={typeof window !== "undefined" ? window.location.pathname + window.location.search : undefined}
+          />
+        </div>
       )}
 
       <article className="post-detail-card">

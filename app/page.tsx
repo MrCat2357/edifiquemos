@@ -32,8 +32,7 @@ const CommentSection = dynamic(
 
 // ─── BotaoOuvirCard ───────────────────────────────────────────────────────────
 
-function BotaoOuvirCard({ post, filaAudio = [] }: { post: any; filaAudio?: any[] }) {
-  const router = useRouter();
+function BotaoOuvirCard({ post, filaAudio = [], onLoginRequired }: { post: any; filaAudio?: any[]; onLoginRequired?: () => void }) {
   const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   if (post._feedType === "serie") return null;
@@ -45,7 +44,7 @@ function BotaoOuvirCard({ post, filaAudio = [] }: { post: any; filaAudio?: any[]
   function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
     if (!auth.currentUser) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      onLoginRequired?.();
       return;
     }
     const pub = {
@@ -224,8 +223,7 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
 
 // ─── BotaoOuvirSerieCard ──────────────────────────────────────────────────────
 
-function BotaoOuvirSerieCard({ serie }: { serie: any }) {
-  const router = useRouter();
+function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRequired?: () => void }) {
   const {
     playQueue,
     pause,
@@ -252,38 +250,30 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
     if (postsCarregados !== null) return postsCarregados;
     const postIds: string[] = serie.postIds ?? [];
     if (postIds.length === 0) return [];
-
     const snaps = await Promise.all(
       postIds.map((id: string) => getDoc(doc(db, "posts", id)))
     );
     const lista = snaps
       .filter((s) => s.exists())
       .map((s) => ({ id: s.id, ...s.data() }));
-
     setPostsCarregados(lista);
     return lista;
   }
 
   async function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
-
     if (!auth.currentUser) {
-      router.push(
-        `/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`
-      );
+      onLoginRequired?.();
       return;
     }
-
     if (serieAtiva) {
       tocando ? pause() : resume();
       return;
     }
-
     setCarregandoPosts(true);
     try {
       const posts = await buscarPostsDaSerie();
       if (posts.length === 0) return;
-
       const fila = posts.map((p: any) => ({
         id: p.id,
         tipo: p.tipo as "sermao" | "artigo" | "reflexao",
@@ -294,7 +284,6 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
         autorSlug: p.autorSlug,
         audioUrl: p.audioUrl || FALLBACK_AUDIO,
       }));
-
       playQueue(fila[0], fila, "serie");
     } catch (err) {
       console.error("Erro ao carregar posts da série:", err);
@@ -341,13 +330,7 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
         </svg>
       )}
       <span>
-        {carregando
-          ? "Carregando…"
-          : tocando
-          ? "Pausar"
-          : serieAtiva
-          ? "Continuar"
-          : "Ouvir série"}
+        {carregando ? "Carregando…" : tocando ? "Pausar" : serieAtiva ? "Continuar" : "Ouvir série"}
       </span>
       {tocando && (
         <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>
@@ -384,7 +367,7 @@ function SerieCardMeuPerfil({
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      setShowLoginBanner(true);
       return;
     }
     if (loadingLike) return;
@@ -409,7 +392,7 @@ function SerieCardMeuPerfil({
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      setShowLoginBanner(true);
       return;
     }
     setShowComments((v) => !v);
@@ -520,7 +503,7 @@ function SerieCardMeuPerfil({
               )}
             </button>
 
-            <BotaoOuvirSerieCard serie={serie} />
+            <BotaoOuvirSerieCard serie={serie} onLoginRequired={() => setShowLoginBanner(true)} />
           </div>
 
           <span
@@ -578,7 +561,7 @@ function PostCard({ post, index, onAuthorClick, onToast, filaAudio = [] }: {
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      setShowLoginBanner(true);
       return;
     }
     if (loadingLike) return;
@@ -630,7 +613,7 @@ function PostCard({ post, index, onAuthorClick, onToast, filaAudio = [] }: {
           onClick={(e) => {
             e.stopPropagation();
             if (!uid) {
-              router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+              setShowLoginBanner(true);
               return;
             }
             setShowComments((v) => !v);
@@ -666,7 +649,7 @@ function PostCard({ post, index, onAuthorClick, onToast, filaAudio = [] }: {
           </span>
         )}
 
-        <BotaoOuvirCard post={post} filaAudio={filaAudio} />
+        <BotaoOuvirCard post={post} filaAudio={filaAudio} onLoginRequired={() => setShowLoginBanner(true)} />
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(url)}>Ler completo →</span>
     </div>
@@ -761,6 +744,7 @@ function ReflexaoFeedCard({
 }) {
   const router = useRouter();
   const isAutor = !!currentUid && currentUid === reflexao.autorId;
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
 
   const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
   const audioAtivo = isCurrentPublication(reflexao.id);
@@ -774,7 +758,7 @@ function ReflexaoFeedCard({
   function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
     if (!auth.currentUser) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      setShowLoginBanner(true);
       return;
     }
     const pub = {
@@ -809,10 +793,7 @@ function ReflexaoFeedCard({
 
   return (
     <div style={{ position: "relative", animationDelay: `${index * 60}ms` }} className="reflexao-feed-item">
-      <div
-        style={{ cursor: "pointer" }}
-        onClick={handleCardClick}
-      >
+      <div style={{ cursor: "pointer" }} onClick={handleCardClick}>
         <CardReflexao
           reflexao={reflexao}
           disableNavigation
@@ -842,6 +823,12 @@ function ReflexaoFeedCard({
           }
         />
       </div>
+
+      {showLoginBanner && (
+        <div style={{ padding: "0 0.75rem 0.75rem" }} onClick={(e) => e.stopPropagation()}>
+          <BannerLogin onClose={() => setShowLoginBanner(false)} />
+        </div>
+      )}
 
       {isAutor && (
         <div className="reflexao-owner-actions" onClick={(e) => e.stopPropagation()}>
@@ -912,21 +899,6 @@ function HomePageContent() {
 
   const currentUid = auth.currentUser?.uid ?? null;
 
-  // ── Fila de áudio com séries expandidas (lazy/background) ─────────────────
-  //
-  // A fila começa com posts e reflexões apenas (construção imediata).
-  // Em background, as séries são expandidas nos seus posts individuais e a fila
-  // é atualizada. Isso garante que:
-  //
-  //   1. O player pode ser iniciado imediatamente sem esperar pelas séries.
-  //   2. Quando a fila é atualizada com os posts de séries, o player já em
-  //      execução percebe a nova fila (pois o estado é reativo).
-  //   3. A posição do item atualmente tocando é preservada na nova fila
-  //      (via playQueue com o mesmo pub).
-  //
-  // Usamos uma ref para não travar a UI durante os fetches assíncronos de
-  // posts de séries.
-
   const [filaAudio, setFilaAudio] = useState<any[]>([]);
   const seriesExpandidasRef = useRef<Map<string, any[]>>(new Map());
   const filaExpandidaBuiltRef = useRef(false);
@@ -955,7 +927,6 @@ function HomePageContent() {
         setAllPosts(posts);
         setFeedItems(mixed);
 
-        // Fila imediata: apenas posts e reflexões (sem séries)
         const filaImediata = mixed
           .filter((item) => item._feedType !== "serie")
           .map((item) => ({
@@ -970,9 +941,6 @@ function HomePageContent() {
           }));
         setFilaAudio(filaImediata);
 
-        // Em background, expande os posts de cada série e reconstrói a fila
-        // na ordem cronológica do feed original, inserindo os posts da série
-        // na posição em que ela aparece.
         expandirSeriesBackground(mixed, series);
       } catch (error) {
         console.error("Erro ao buscar feed:", error);
@@ -982,23 +950,11 @@ function HomePageContent() {
     fetchAll();
   }, []);
 
-  /**
-   * Expande as séries em seus posts individuais e reconstrói a filaAudio
-   * mantendo a ordem cronológica do feed.
-   *
-   * Feito em background (sem bloquear a UI) usando Promise.all para buscar
-   * os posts de todas as séries em paralelo.
-   *
-   * A fila resultante substitui a filaImediata assim que os dados chegam.
-   * O player já em execução continuará funcionando pois o estado é reativo
-   * e a fila é passada via props para os cards.
-   */
   async function expandirSeriesBackground(mixed: any[], series: any[]) {
     if (filaExpandidaBuiltRef.current) return;
     filaExpandidaBuiltRef.current = true;
 
     try {
-      // Busca os posts de cada série em paralelo
       await Promise.all(
         series.map(async (serie) => {
           if (!serie.postIds || serie.postIds.length === 0) return;
@@ -1020,7 +976,6 @@ function HomePageContent() {
         })
       );
 
-      // Reconstrói a fila na ordem do feed, expandindo séries nos seus posts
       const novaFila: any[] = [];
       for (const item of mixed) {
         if (item._feedType === "serie") {
@@ -1039,8 +994,6 @@ function HomePageContent() {
               });
             }
           }
-          // Se a série não tem posts expandidos (erro de fetch ou série vazia),
-          // simplesmente pulamos — não adicionamos nada na posição da série.
         } else {
           novaFila.push({
             id: item.id,
@@ -1055,8 +1008,6 @@ function HomePageContent() {
         }
       }
 
-      // Remove duplicatas (um post pode aparecer tanto no feed direto quanto
-      // dentro de uma série)
       const vistos = new Set<string>();
       const filaDeduplicada = novaFila.filter((item) => {
         if (vistos.has(item.id)) return false;
@@ -1067,7 +1018,6 @@ function HomePageContent() {
       setFilaAudio(filaDeduplicada);
     } catch (err) {
       console.error("Erro ao expandir séries para fila de áudio:", err);
-      // Mantém a fila imediata (sem séries) em caso de erro
     }
   }
 
