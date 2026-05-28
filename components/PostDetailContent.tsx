@@ -14,6 +14,7 @@ import LinksReferencia from "@/components/LinksReferencia";
 import BannerLogin from "@/components/BannerLogin";
 import CommentSection from "@/components/comments/CommentSection";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import type { AudioPublication } from "@/providers/AudioProvider";
 
 /* ── helpers ───────────────────────────────────────────────────────────────── */
 
@@ -220,6 +221,36 @@ function feedItemLabel(item: FeedNavItem, direction: "prev" | "next"): string {
   return `Estudo ${direction === "prev" ? "anterior" : "próximo"}`;
 }
 
+/* ── helpers para construir a fila de áudio da home ─────────────────────── */
+
+const FALLBACK_AUDIO = "https://archive.org/download/testmp3testfile/mpthreetest.mp3";
+
+/**
+ * A partir de uma lista de FeedNavItems (feed global já ordenado), expande as
+ * séries nos seus posts individuais e devolve somente itens com áudio
+ * (posts e reflexões) mapeados como AudioPublication.
+ *
+ * Não faz fetch aqui — usa apenas o que já está carregado no feed ou o
+ * fallback de audioUrl.
+ */
+function feedItemsToAudioQueue(items: FeedNavItem[]): AudioPublication[] {
+  // Para o propósito desta função usamos apenas os itens que são post/reflexao.
+  // Séries não têm audioUrl direto; se quiser expandir posts de séries aqui
+  // isso exigiria fetches adicionais — feito separadamente em app/page.tsx.
+  return items
+    .filter((item) => item._feedType !== "serie")
+    .map((item) => ({
+      id: item.id,
+      tipo: (item.tipo ?? "sermao") as AudioPublication["tipo"],
+      titulo: item.titulo,
+      autorNome: item.autorNome || "Autor",
+      autorFoto: null,
+      slug: item.slug ?? item.id,
+      autorSlug: item.autorSlug,
+      audioUrl: FALLBACK_AUDIO,
+    }));
+}
+
 /* ── Navegação entre posts ───────────────────────────────────────────────── */
 
 type PostNav = {
@@ -233,7 +264,36 @@ type PostNav = {
 
 type PostNavAutor = { nome: string; fotoUrl: string | null };
 
-function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?: string }) {
+/**
+ * PostNavigation
+ *
+ * Renderiza os botões "Anterior" / "Próximo" entre posts.
+ *
+ * Além de navegar via router.push, agora também sincroniza com o player:
+ *  - Se o post de destino está na fila do player, chama playQueue para pular
+ *    direto para ele, interrompendo o que estava tocando.
+ *  - Se não está na fila, apenas navega (o player vai ser sincronizado pelo
+ *    useEffect de PostDetailContent quando a nova página montar).
+ *
+ * Props extras recebidas do pai:
+ *  - queue, contextType, playQueue — para sincronização com o player
+ */
+type PostNavigationProps = {
+  postId: string;
+  autorIdProp?: string;
+  // Player props injetadas pelo pai
+  playerQueue: AudioPublication[];
+  playerContextType: string | null;
+  onPlayQueueItem: (pub: AudioPublication) => void;
+};
+
+function PostNavigation({
+  postId,
+  autorIdProp,
+  playerQueue,
+  playerContextType,
+  onPlayQueueItem,
+}: PostNavigationProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -474,6 +534,29 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
     return p.tipo === "sermao" ? "Próximo sermão" : "Próximo estudo";
   }
 
+  /**
+   * Lida com o clique nos botões de navegação da página.
+   *
+   * Comportamento:
+   * 1. Navega via router.push para a URL do post de destino.
+   * 2. Se o post de destino estiver na fila do player, inicia o áudio dele —
+   *    interrompendo o que estava tocando — para manter player e leitura em
+   *    sincronia.
+   * 3. Se não estiver na fila (série ou contexto diferente), apenas navega;
+   *    o PostDetailContent da nova página cuidará da sincronização do player.
+   */
+  function handleNav(item: FeedNavItem | PostNav) {
+    const url = navUrl(item);
+    // Tenta encontrar o item na fila do player pelo id
+    const pubNaFila = playerQueue.find((p) => p.id === item.id);
+    if (pubNaFila) {
+      // Avisa o player para pular para essa faixa (sem navegar — a navegação
+      // acontece abaixo via router.push)
+      onPlayQueueItem(pubNaFila);
+    }
+    router.push(url);
+  }
+
   if (loading || (!prev && !next && !serieInfo)) return null;
 
   const cardBase: React.CSSProperties = {
@@ -509,7 +592,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
       >
         {prev ? (
           <button
-            onClick={() => router.push(navUrl(prev))}
+            onClick={() => handleNav(prev)}
             className="post-nav-btn post-nav-btn--prev"
             aria-label={`Anterior: ${prev.titulo}`}
             style={{ ...cardBase, alignItems: "flex-start", textAlign: "left" }}
@@ -547,7 +630,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
         {next ? (
           <button
-            onClick={() => router.push(navUrl(next))}
+            onClick={() => handleNav(next)}
             className="post-nav-btn post-nav-btn--next"
             aria-label={`Próximo: ${next.titulo}`}
             style={{ ...cardBase, alignItems: "flex-end", textAlign: "right" }}
@@ -806,6 +889,8 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const router = useRouter();
   const { user } = useAuth();
   const conteudoRef = useRef<HTMLDivElement>(null);
+  const searchParams = useSearchParams();
+  const fromParam = searchParams.get("from") ?? "";
 
   const [liked, setLiked] = useState<boolean>(() => {
     const uid = auth.currentUser?.uid;
@@ -954,7 +1039,19 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const actionBtnStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: "5px" };
 
   // ── Áudio ────────────────────────────────────────────────────────────────
-  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading, current } = useAudioPlayer();
+  const {
+    playOrToggle,
+    playQueue,
+    isCurrentlyPlaying,
+    isCurrentPublication,
+    isLoading: audioLoading,
+    current,
+    queue,
+    currentIndex,
+    contextType,
+    registerOnEndedCallback,
+    registerNavigationCallback,
+  } = useAudioPlayer();
   const audioAtivo = isCurrentPublication(postId);
   const audioTocando = isCurrentlyPlaying(postId);
   const audioCarregando = audioAtivo && audioLoading;
@@ -972,6 +1069,199 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  // ── Publicação deste post como AudioPublication ───────────────────────────
+  const pubDestePost: AudioPublication = {
+    id: postId,
+    tipo: post.tipo,
+    titulo: post.titulo,
+    autorNome: nomeExibicao,
+    autorFoto: fotoAutor,
+    slug: post.slug,
+    audioUrl: post.audioUrl || FALLBACK_AUDIO,
+  };
+
+  // ── Construção lazy da fila de áudio para o botão "Ouvir" ────────────────
+  //
+  // Quando o usuário clica em "Ouvir" em um post individual, precisamos de uma
+  // fila para que o autoplay e a navegação sincronizada funcionem. A fila é
+  // construída com base no parâmetro ?from:
+  //
+  //   ?from=home   → fila do feed global (posts + reflexões, sem séries)
+  //   ?from=perfil → posts do autor deste post
+  //   ?from=serie  → a fila já deve estar ativa pelo contexto de série
+  //   sem from     → fila mínima com apenas este post
+  //
+  // A busca é feita apenas quando o usuário clica em "Ouvir" e não há fila
+  // ativa no player que já contenha este post.
+
+  const [buildingQueue, setBuildingQueue] = useState(false);
+
+  async function buildAndPlay() {
+    if (!auth.currentUser) {
+      const destino = window.location.pathname + window.location.search;
+      router.push(`/entrar?next=${encodeURIComponent(destino)}`);
+      return;
+    }
+
+    // Se já há uma fila ativa com este post, apenas toggle
+    if (queue.length > 0 && queue.some((p) => p.id === postId)) {
+      playOrToggle(pubDestePost);
+      return;
+    }
+
+    // Se já há uma fila ativa com contexto de série, apenas toggle
+    if (contextType === "serie") {
+      playOrToggle(pubDestePost);
+      return;
+    }
+
+    // Tenta construir fila pelo contexto
+    setBuildingQueue(true);
+    try {
+      if (fromParam === "home") {
+        // Fila do feed global: busca todos os posts/reflexões ordenados
+        const feedItems = await fetchFeedGlobal();
+        const novaFila = feedItemsToAudioQueue(feedItems);
+        if (novaFila.length > 0) {
+          const ctx = "home" as const;
+          playQueue(pubDestePost, novaFila, ctx);
+          setBuildingQueue(false);
+          return;
+        }
+      }
+
+      if (fromParam === "perfil" && post.autorId) {
+        // Fila do perfil: todos os posts do autor
+        const snap = await getDocs(
+          query(collection(db, "posts"), where("autorId", "==", post.autorId), orderBy("data", "desc"))
+        );
+        const novaFila: AudioPublication[] = snap.docs.map((d) => ({
+          id: d.id,
+          tipo: (d.data().tipo ?? "sermao") as AudioPublication["tipo"],
+          titulo: d.data().titulo || "Sem título",
+          autorNome: d.data().autorNome || nomeExibicao,
+          autorFoto: d.data().autorFoto ?? fotoAutor,
+          slug: d.data().slug ?? d.id,
+          autorSlug: d.data().autorSlug,
+          audioUrl: d.data().audioUrl || FALLBACK_AUDIO,
+        }));
+        if (novaFila.length > 0) {
+          playQueue(pubDestePost, novaFila, "perfil");
+          setBuildingQueue(false);
+          return;
+        }
+      }
+
+      // Fallback: fila mínima com apenas este post
+      playQueue(pubDestePost, [pubDestePost], null);
+    } catch (err) {
+      console.error("Erro ao construir fila de áudio:", err);
+      // Em caso de erro, toca sem fila
+      playOrToggle(pubDestePost);
+    }
+    setBuildingQueue(false);
+  }
+
+  // ── Sincronização áudio ↔ navegação ──────────────────────────────────────
+  //
+  // Este useEffect faz duas coisas:
+  //
+  // 1. registerOnEndedCallback: ao terminar a faixa, navega para o próximo
+  //    post da fila e inicia o áudio dele automaticamente.
+  //
+  // 2. registerNavigationCallback: quando o usuário clica em prev/next no
+  //    player (MiniPlayer, ExpandedPlayer, Sidebar), navegamos para a URL
+  //    do post correspondente. O player já atualizou o índice; aqui apenas
+  //    chamamos router.push.
+  //
+  // Ambos só atuam nos contextos "home" e "perfil" (série tem lógica própria).
+
+  useEffect(() => {
+    if (contextType !== "home" && contextType !== "perfil") {
+      registerOnEndedCallback(null);
+      registerNavigationCallback(null);
+      return;
+    }
+
+    // Encontra este post na fila do player
+    const idxNaFila = queue.findIndex((p) => p.id === postId);
+
+    if (idxNaFila === -1) {
+      registerOnEndedCallback(null);
+      registerNavigationCallback(null);
+      return;
+    }
+
+    // Se o player está tocando uma faixa diferente da deste post,
+    // sincroniza pulando para a faixa correta
+    if (current && current.id !== postId) {
+      const pubDestePosto = queue[idxNaFila];
+      if (pubDestePosto) {
+        playOrToggle(pubDestePosto);
+      }
+    }
+
+    // Callback de autoplay ao terminar a faixa
+    const onEndedCb = () => {
+      const nextIdx = idxNaFila + 1;
+      const nextPub = queue[nextIdx];
+      if (!nextPub) return;
+      // Para reflexões, a URL é diferente
+      if (nextPub.tipo === "reflexao") {
+        const aSlug = nextPub.autorSlug ?? "";
+        router.push(`/${aSlug}/reflexao/${nextPub.slug}?from=${contextType}`);
+        return;
+      }
+      const cat = nextPub.tipo === "sermao" ? "sermoes" : "estudos";
+      router.push(`/posts/${cat}/${nextPub.slug}?from=${contextType}`);
+    };
+
+    // Callback de navegação acionado pelos botões prev/next do player
+    const navCb = (_direction: "next" | "previous", pub: AudioPublication) => {
+      if (pub.tipo === "reflexao") {
+        const aSlug = pub.autorSlug ?? "";
+        router.push(`/${aSlug}/reflexao/${pub.slug}?from=${contextType}`);
+        return;
+      }
+      const cat = pub.tipo === "sermao" ? "sermoes" : "estudos";
+      router.push(`/posts/${cat}/${pub.slug}?from=${contextType}`);
+    };
+
+    registerOnEndedCallback(onEndedCb);
+    registerNavigationCallback(navCb);
+
+    return () => {
+      registerOnEndedCallback(null);
+      registerNavigationCallback(null);
+    };
+  }, [
+    postId,
+    queue,
+    currentIndex,
+    contextType,
+    current,
+    registerOnEndedCallback,
+    registerNavigationCallback,
+    playOrToggle,
+    router,
+  ]);
+
+  // ── Função passada ao PostNavigation para tocar a faixa correta ──────────
+  //
+  // Quando o usuário clica nos botões da página (não do player), chamamos
+  // esta função para que o player avance/retroceda para a faixa correspondente
+  // ao post de destino, mantendo a sincronia.
+
+  const handlePlayQueueItem = useCallback(
+    (pub: AudioPublication) => {
+      if (queue.length > 0 && queue.some((p) => p.id === pub.id)) {
+        playQueue(pub, queue, contextType);
+      }
+      // Se não está na fila, não fazemos nada — a nova página cuidará disso
+    },
+    [queue, contextType, playQueue]
+  );
 
   return (
     <>
@@ -1117,31 +1407,22 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           </div>
         </div>
 
-        <PostNavigation postId={postId} autorIdProp={post.autorId} />
+        <PostNavigation
+          postId={postId}
+          autorIdProp={post.autorId}
+          playerQueue={queue}
+          playerContextType={contextType}
+          onPlayQueueItem={handlePlayQueueItem}
+        />
 
         <CommentSection postId={postId} />
       </article>
 
-      {/* Botão flutuante — aparece quando a área de ações sai da tela.
-          Só aparece se o player NÃO estiver ativo (!current) */}
-      {ouvirFlutuante && !current && (
+      {/* Botão flutuante — aparece quando a área de ações sai da tela */}
+      {ouvirFlutuante && (
         <button
-          onClick={() => {
-            if (!auth.currentUser) {
-              const destino = window.location.pathname + window.location.search;
-              router.push(`/entrar?next=${encodeURIComponent(destino)}`);
-              return;
-            }
-            playOrToggle({
-              id: postId,
-              tipo: post.tipo,
-              titulo: post.titulo,
-              autorNome: nomeExibicao,
-              autorFoto: fotoAutor,
-              slug: post.slug,
-              audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-            });
-          }}
+          onClick={buildAndPlay}
+          disabled={buildingQueue}
           aria-label={audioTocando ? "Pausar áudio" : "Ouvir este conteúdo"}
           style={{
             position: "fixed",
@@ -1158,14 +1439,15 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             color: audioTocando ? "#fff" : "var(--emerald)",
             fontSize: "0.8rem",
             fontWeight: 700,
-            cursor: "pointer",
+            cursor: buildingQueue ? "default" : "pointer",
             boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
             backdropFilter: "blur(8px)",
             transition: "all 0.2s ease",
             fontFamily: "inherit",
+            opacity: buildingQueue ? 0.7 : 1,
           }}
         >
-          {audioCarregando ? (
+          {buildingQueue || audioCarregando ? (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
           ) : audioTocando ? (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
@@ -1173,7 +1455,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
           )}
           <span style={{ display: "var(--ouvir-label-display, inline)" }}>
-            {audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}
+            {buildingQueue ? "Carregando…" : audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}
           </span>
         </button>
       )}

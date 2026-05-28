@@ -145,6 +145,8 @@ function normalizar(str: string) {
   return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+const FALLBACK_AUDIO = "https://archive.org/download/testmp3testfile/mpthreetest.mp3";
+
 // ─── SVG Icons ────────────────────────────────────────────────────────────────
 
 function IconDownload({ size = 13 }: { size?: number }) {
@@ -254,7 +256,6 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
     const snaps = await Promise.all(
       postIds.map((id: string) => getDoc(doc(db, "posts", id)))
     );
-    // CORREÇÃO: removido .filter((p) => !!p.audioUrl) — posts não têm audioUrl no Firestore
     const lista = snaps
       .filter((s) => s.exists())
       .map((s) => ({ id: s.id, ...s.data() }));
@@ -291,8 +292,7 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
         autorFoto: p.autorFoto ?? null,
         slug: p.slug,
         autorSlug: p.autorSlug,
-        // CORREÇÃO: fallback para posts sem audioUrl
-        audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+        audioUrl: p.audioUrl || FALLBACK_AUDIO,
       }));
 
       playQueue(fila[0], fila, "serie");
@@ -785,7 +785,7 @@ function ReflexaoFeedCard({
       autorFoto: reflexao.autorFoto ?? null,
       slug: reflexao.slug,
       autorSlug: reflexao.autorSlug,
-      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+      audioUrl: FALLBACK_AUDIO,
     };
     if (filaAudio.length > 0) {
       playQueue(pub, filaAudio, "home");
@@ -912,6 +912,25 @@ function HomePageContent() {
 
   const currentUid = auth.currentUser?.uid ?? null;
 
+  // ── Fila de áudio com séries expandidas (lazy/background) ─────────────────
+  //
+  // A fila começa com posts e reflexões apenas (construção imediata).
+  // Em background, as séries são expandidas nos seus posts individuais e a fila
+  // é atualizada. Isso garante que:
+  //
+  //   1. O player pode ser iniciado imediatamente sem esperar pelas séries.
+  //   2. Quando a fila é atualizada com os posts de séries, o player já em
+  //      execução percebe a nova fila (pois o estado é reativo).
+  //   3. A posição do item atualmente tocando é preservada na nova fila
+  //      (via playQueue com o mesmo pub).
+  //
+  // Usamos uma ref para não travar a UI durante os fetches assíncronos de
+  // posts de séries.
+
+  const [filaAudio, setFilaAudio] = useState<any[]>([]);
+  const seriesExpandidasRef = useRef<Map<string, any[]>>(new Map());
+  const filaExpandidaBuiltRef = useRef(false);
+
   useEffect(() => {
     async function fetchAll() {
       try {
@@ -935,6 +954,26 @@ function HomePageContent() {
         );
         setAllPosts(posts);
         setFeedItems(mixed);
+
+        // Fila imediata: apenas posts e reflexões (sem séries)
+        const filaImediata = mixed
+          .filter((item) => item._feedType !== "serie")
+          .map((item) => ({
+            id: item.id,
+            tipo: item.tipo,
+            titulo: item.titulo,
+            autorNome: item.autorNome || "Autor",
+            autorFoto: item.autorFoto ?? null,
+            slug: item.slug,
+            autorSlug: item.autorSlug,
+            audioUrl: item.audioUrl || FALLBACK_AUDIO,
+          }));
+        setFilaAudio(filaImediata);
+
+        // Em background, expande os posts de cada série e reconstrói a fila
+        // na ordem cronológica do feed original, inserindo os posts da série
+        // na posição em que ela aparece.
+        expandirSeriesBackground(mixed, series);
       } catch (error) {
         console.error("Erro ao buscar feed:", error);
       }
@@ -942,6 +981,95 @@ function HomePageContent() {
     }
     fetchAll();
   }, []);
+
+  /**
+   * Expande as séries em seus posts individuais e reconstrói a filaAudio
+   * mantendo a ordem cronológica do feed.
+   *
+   * Feito em background (sem bloquear a UI) usando Promise.all para buscar
+   * os posts de todas as séries em paralelo.
+   *
+   * A fila resultante substitui a filaImediata assim que os dados chegam.
+   * O player já em execução continuará funcionando pois o estado é reativo
+   * e a fila é passada via props para os cards.
+   */
+  async function expandirSeriesBackground(mixed: any[], series: any[]) {
+    if (filaExpandidaBuiltRef.current) return;
+    filaExpandidaBuiltRef.current = true;
+
+    try {
+      // Busca os posts de cada série em paralelo
+      await Promise.all(
+        series.map(async (serie) => {
+          if (!serie.postIds || serie.postIds.length === 0) return;
+          try {
+            const snaps = await Promise.all(
+              (serie.postIds as string[]).map((id) => getDoc(doc(db, "posts", id)))
+            );
+            const postsDaSerie = snaps
+              .filter((s) => s.exists())
+              .map((s) => ({
+                id: s.id,
+                _feedType: "post" as const,
+                ...s.data(),
+              }));
+            seriesExpandidasRef.current.set(serie.id, postsDaSerie);
+          } catch (err) {
+            console.error(`Erro ao expandir série ${serie.id}:`, err);
+          }
+        })
+      );
+
+      // Reconstrói a fila na ordem do feed, expandindo séries nos seus posts
+      const novaFila: any[] = [];
+      for (const item of mixed) {
+        if (item._feedType === "serie") {
+          const postsExpandidos = seriesExpandidasRef.current.get(item.id);
+          if (postsExpandidos && postsExpandidos.length > 0) {
+            for (const p of postsExpandidos) {
+              novaFila.push({
+                id: p.id,
+                tipo: p.tipo,
+                titulo: p.titulo,
+                autorNome: p.autorNome || "Autor",
+                autorFoto: p.autorFoto ?? null,
+                slug: p.slug,
+                autorSlug: p.autorSlug,
+                audioUrl: p.audioUrl || FALLBACK_AUDIO,
+              });
+            }
+          }
+          // Se a série não tem posts expandidos (erro de fetch ou série vazia),
+          // simplesmente pulamos — não adicionamos nada na posição da série.
+        } else {
+          novaFila.push({
+            id: item.id,
+            tipo: item.tipo,
+            titulo: item.titulo,
+            autorNome: item.autorNome || "Autor",
+            autorFoto: item.autorFoto ?? null,
+            slug: item.slug,
+            autorSlug: item.autorSlug,
+            audioUrl: item.audioUrl || FALLBACK_AUDIO,
+          });
+        }
+      }
+
+      // Remove duplicatas (um post pode aparecer tanto no feed direto quanto
+      // dentro de uma série)
+      const vistos = new Set<string>();
+      const filaDeduplicada = novaFila.filter((item) => {
+        if (vistos.has(item.id)) return false;
+        vistos.add(item.id);
+        return true;
+      });
+
+      setFilaAudio(filaDeduplicada);
+    } catch (err) {
+      console.error("Erro ao expandir séries para fila de áudio:", err);
+      // Mantém a fila imediata (sem séries) em caso de erro
+    }
+  }
 
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [buscaAtiva]);
 
@@ -1003,19 +1131,6 @@ function HomePageContent() {
 
   const visibleItems = itensFiltrados.slice(0, visibleCount);
   const hasMore = visibleCount < itensFiltrados.length;
-
-  const filaAudio = feedItems
-    .filter((item) => item._feedType !== "serie")
-    .map((item) => ({
-      id: item.id,
-      tipo: item.tipo,
-      titulo: item.titulo,
-      autorNome: item.autorNome || "Autor",
-      autorFoto: item.autorFoto ?? null,
-      slug: item.slug,
-      autorSlug: item.autorSlug,
-      audioUrl: item.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    }));
 
   return (
     <>

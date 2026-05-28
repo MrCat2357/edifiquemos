@@ -24,6 +24,7 @@ export function useAudioPlayer() {
     playNext,
     playPrevious,
     registerOnEndedCallback,
+    registerNavigationCallback,
   } = useAudioContext();
 
   // ── Utilitários de estado ──────────────────────────────────────────────────
@@ -92,8 +93,11 @@ export function useAudioPlayer() {
     playNext,
     playPrevious,
 
-    // Fase 6 — navegação entre páginas
+    // Fase 6 — navegação entre páginas (autoplay ao terminar faixa)
     registerOnEndedCallback,
+
+    // Fase 7 — navegação via botões prev/next do player
+    registerNavigationCallback,
 
     // Utilitários
     isCurrentPublication,

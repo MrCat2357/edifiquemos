@@ -104,6 +104,22 @@ function IconClose({ size = 14 }: { size?: number }) {
   );
 }
 
+function IconSkipPrev({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" />
+    </svg>
+  );
+}
+
+function IconSkipNext({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M6 18l8.5-6L6 6v12zM16 6h2v12h-2z" />
+    </svg>
+  );
+}
+
 // ─── MiniPlayer ───────────────────────────────────────────────────────────────
 
 type MiniPlayerProps = {
@@ -119,6 +135,10 @@ export default function MiniPlayer({ onExpand }: MiniPlayerProps) {
     duration,
     toggle,
     close,
+    hasNext,
+    hasPrevious,
+    playNext,
+    playPrevious,
   } = useAudioPlayer();
 
   const handleToggle = useCallback(
@@ -135,6 +155,22 @@ export default function MiniPlayer({ onExpand }: MiniPlayerProps) {
       close();
     },
     [close]
+  );
+
+  const handlePrev = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      playPrevious();
+    },
+    [playPrevious]
+  );
+
+  const handleNext = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      playNext();
+    },
+    [playNext]
   );
 
   if (!current) return null;
@@ -171,8 +207,8 @@ export default function MiniPlayer({ onExpand }: MiniPlayerProps) {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "0.75rem",
-          padding: "0.5rem 1rem",
+          gap: "0.5rem",
+          padding: "0.5rem 0.75rem",
           cursor: "pointer",
           userSelect: "none",
         }}
@@ -211,6 +247,28 @@ export default function MiniPlayer({ onExpand }: MiniPlayerProps) {
             {current.autorNome}
           </p>
         </div>
+
+        {/* Previous */}
+        <button
+          onClick={handlePrev}
+          disabled={!hasPrevious}
+          aria-label="Anterior"
+          style={{
+            background: "none",
+            border: "none",
+            color: hasPrevious
+              ? "var(--text-2, rgba(255,255,255,0.7))"
+              : "rgba(255,255,255,0.2)",
+            cursor: hasPrevious ? "pointer" : "default",
+            display: "flex",
+            alignItems: "center",
+            padding: "4px",
+            flexShrink: 0,
+            transition: "color 0.15s",
+          }}
+        >
+          <IconSkipPrev size={18} />
+        </button>
 
         {/* Play/Pause */}
         <button
@@ -257,6 +315,28 @@ export default function MiniPlayer({ onExpand }: MiniPlayerProps) {
           ) : (
             <IconPlay size={16} />
           )}
+        </button>
+
+        {/* Next */}
+        <button
+          onClick={handleNext}
+          disabled={!hasNext}
+          aria-label="Próximo"
+          style={{
+            background: "none",
+            border: "none",
+            color: hasNext
+              ? "var(--text-2, rgba(255,255,255,0.7))"
+              : "rgba(255,255,255,0.2)",
+            cursor: hasNext ? "pointer" : "default",
+            display: "flex",
+            alignItems: "center",
+            padding: "4px",
+            flexShrink: 0,
+            transition: "color 0.15s",
+          }}
+        >
+          <IconSkipNext size={18} />
         </button>
 
         {/* Close */}

@@ -53,6 +53,12 @@ type AudioActions = {
   playPrevious: () => void;
   // Fase 6 — navegação entre páginas
   registerOnEndedCallback: (cb: (() => void) | null) => void;
+  // Fase 7 — callback de navegação para playNext/playPrevious (sincronização player ↔ página)
+  // Quando registrado, playNext e playPrevious chamam este callback com o índice de destino
+  // em vez de apenas avançar o áudio, permitindo que a página navegue automaticamente.
+  registerNavigationCallback: (
+    cb: ((direction: "next" | "previous", pub: AudioPublication) => void) | null
+  ) => void;
 };
 
 export type AudioContextValue = AudioState & AudioActions;
@@ -96,9 +102,25 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   // na fila interna, permitindo que a página navegue para o próximo post.
   const onEndedCallbackRef = useRef<(() => void) | null>(null);
 
+  // Fase 7 — callback de navegação registrado pela página de post.
+  // Quando preenchido, playNext e playPrevious chamam este callback com a
+  // publicação de destino em vez de apenas avançar o áudio internamente.
+  // Isso permite que a página navegue para a URL do próximo/anterior post
+  // mantendo leitura e player sempre sincronizados.
+  const navigationCallbackRef = useRef<
+    ((direction: "next" | "previous", pub: AudioPublication) => void) | null
+  >(null);
+
   const registerOnEndedCallback = useCallback((cb: (() => void) | null) => {
     onEndedCallbackRef.current = cb;
   }, []);
+
+  const registerNavigationCallback = useCallback(
+    (cb: ((direction: "next" | "previous", pub: AudioPublication) => void) | null) => {
+      navigationCallbackRef.current = cb;
+    },
+    []
+  );
 
   // Cria o elemento <audio> uma única vez
   useEffect(() => {
@@ -246,8 +268,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     setQueue([]);
     setCurrentIndex(-1);
     setContextType(null);
-    // Fase 6: limpar callback
+    // Fase 6: limpar callbacks
     onEndedCallbackRef.current = null;
+    navigationCallbackRef.current = null;
   }, []);
 
   // ── Fase 3: playQueue ─────────────────────────────────────────────────────
@@ -268,6 +291,11 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   }, [_playAudio]);
 
   // ── Fase 3: playNext ──────────────────────────────────────────────────────
+  //
+  // Se há um navigationCallback registrado (página de post ativa), chamamos
+  // ele em vez de apenas avançar o áudio. O callback é responsável por
+  // navegar para a URL do próximo post E iniciar o áudio. Isso garante que
+  // a leitura e o player fiquem sempre sincronizados.
 
   const playNext = useCallback(() => {
     const idx = currentIndexRef.current;
@@ -276,6 +304,15 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
 
     const nextIdx = idx + 1;
     const nextPub = q[nextIdx];
+
+    if (navigationCallbackRef.current) {
+      // Atualiza o índice já, para que hasPrevious/hasNext reflitam o estado
+      // correto enquanto a navegação ocorre.
+      setCurrentIndex(nextIdx);
+      navigationCallbackRef.current("next", nextPub);
+      return;
+    }
+
     setCurrentIndex(nextIdx);
     _playAudio(nextPub);
   }, [_playAudio]);
@@ -287,6 +324,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     const idx   = currentIndexRef.current;
     const q     = queueRef.current;
 
+    // Se passou mais de 3s na faixa atual, apenas reinicia (sem navegar)
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0;
       setCurrentTime(0);
@@ -297,6 +335,13 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
 
     const prevIdx = idx - 1;
     const prevPub = q[prevIdx];
+
+    if (navigationCallbackRef.current) {
+      setCurrentIndex(prevIdx);
+      navigationCallbackRef.current("previous", prevPub);
+      return;
+    }
+
     setCurrentIndex(prevIdx);
     _playAudio(prevPub);
   }, [_playAudio]);
@@ -325,6 +370,8 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     playPrevious,
     // Fase 6
     registerOnEndedCallback,
+    // Fase 7
+    registerNavigationCallback,
   };
 
   return (
