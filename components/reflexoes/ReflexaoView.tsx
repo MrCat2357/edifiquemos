@@ -23,8 +23,9 @@ import CompartilharWhatsapp from "@/components/reflexoes/CompartilharWhatsapp";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
-import { useAudioSync } from "@/hooks/useAudioSync";       // ← ADICIONADO
+import { useAudioSync } from "@/hooks/useAudioSync";
 import type { AudioPublication } from "@/providers/AudioProvider";
+import { FALLBACK_AUDIO } from "@/lib/audioQueue"; // ← ALTERADO (importa FALLBACK_AUDIO centralizado)
 
 const CommentSection = dynamic(
   () => import("@/components/comments/CommentSection"),
@@ -182,12 +183,12 @@ function ReflexaoNavigation({
   reflexaoId,
   autorId,
   autorSlugAtual,
-  onPlayQueueItem,                         // ← ADICIONADO
+  onPlayQueueItem,
 }: {
   reflexaoId: string;
   autorId: string;
   autorSlugAtual: string;
-  onPlayQueueItem: (pub: AudioPublication) => void;  // ← ADICIONADO
+  onPlayQueueItem: (pub: AudioPublication) => void;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -292,7 +293,7 @@ function ReflexaoNavigation({
   function navUrl(item: FeedNavItem | ReflexaoNav): string {
     if (fromHome) return feedItemUrl(item as FeedNavItem);
     const r = item as ReflexaoNav;
-    return `/${r.autorSlug}/reflexao/${r.slug}`;
+    return `/${r.autorSlug}/reflexao/${r.slug}?from=perfil`; // ← ALTERADO: ?from=perfil para manter contexto
   }
 
   function navLabel(item: FeedNavItem | ReflexaoNav, direction: "prev" | "next"): string {
@@ -300,21 +301,17 @@ function ReflexaoNavigation({
     return direction === "prev" ? "Reflexão anterior" : "Próxima reflexão";
   }
 
-  // ← ADICIONADO: sincroniza player ao navegar
   function handleNav(item: FeedNavItem | ReflexaoNav) {
-    const pub: AudioPublication = {
+    onPlayQueueItem({
       id: item.id,
-      tipo: ((item as FeedNavItem)._feedType === "reflexao" || (item as any).tipo === "reflexao")
-        ? "reflexao"
-        : ((item as any).tipo ?? "sermao") as AudioPublication["tipo"],
+      tipo: "reflexao",
       titulo: item.titulo,
       autorNome: (item as ReflexaoNav).autorNome ?? (item as FeedNavItem).autorNome ?? "Autor",
       autorFoto: (item as ReflexaoNav).autorFoto ?? null,
       slug: (item as ReflexaoNav).slug ?? (item as FeedNavItem).slug ?? item.id,
       autorSlug: (item as ReflexaoNav).autorSlug ?? (item as FeedNavItem).autorSlug,
-      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    };
-    onPlayQueueItem(pub);
+      audioUrl: FALLBACK_AUDIO, // ← o player já tem a fila com o audioUrl real; isso só serve de fallback
+    });
     router.push(navUrl(item));
   }
 
@@ -350,7 +347,7 @@ function ReflexaoNavigation({
       >
         {prev ? (
           <button
-            onClick={() => handleNav(prev)}           // ← usa handleNav
+            onClick={() => handleNav(prev)}
             aria-label={`Anterior: ${prev.titulo}`}
             style={{ ...cardBase, alignItems: "flex-start", textAlign: "left" }}
             onMouseEnter={(e) => {
@@ -397,7 +394,7 @@ function ReflexaoNavigation({
 
         {next ? (
           <button
-            onClick={() => handleNav(next)}           // ← usa handleNav
+            onClick={() => handleNav(next)}
             aria-label={`Próximo: ${next.titulo}`}
             style={{ ...cardBase, alignItems: "flex-end", textAlign: "right" }}
             onMouseEnter={(e) => {
@@ -471,7 +468,7 @@ type Props = {
 export default function ReflexaoView({ reflexao, autorSlug }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const fromParam = searchParams.get("from") ?? "";   // ← ADICIONADO
+  const fromParam = searchParams.get("from") ?? "";
 
   const [isOwner, setIsOwner] = useState(false);
   const [deletando, setDeletando] = useState(false);
@@ -484,10 +481,15 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
   const [commentCount, setCommentCount] = useState<number>(reflexao.commentCount ?? 0);
   const [showLoginBanner, setShowLoginBanner] = useState(false);
 
+  // ← ALTERADO: estado para controlar carregamento da fila
+  const [buildingQueue, setBuildingQueue] = useState(false);
+
   const jaAmei = uid ? likedBy.includes(uid) : false;
 
-  // ── useAudioSync (corrige Bug 2 — sem loop de sincronização reversa) ───────
-  const { handlePlayQueueItem } = useAudioSync(reflexao.id ?? "", fromParam);  // ← ADICIONADO
+  // ── useAudioSync ──────────────────────────────────────────────────────────
+  // Registra callbacks de navegação automática (onEnded + prev/next do player)
+  // Suporta from=home e from=perfil — ambos ativam os callbacks.
+  const { handlePlayQueueItem } = useAudioSync(reflexao.id ?? "", fromParam);
 
   useEffect(() => {
     const currentUid = auth.currentUser?.uid;
@@ -554,7 +556,18 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
     document.getElementById("reflexao-comments")?.scrollIntoView({ behavior: "smooth" });
   }
 
-  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading, current } = useAudioPlayer();
+  // ← ALTERADO: desestrutura playQueue e queue além do que já havia
+  const {
+    playOrToggle,
+    playQueue,
+    queue,
+    contextType,
+    isCurrentlyPlaying,
+    isCurrentPublication,
+    isLoading: audioLoading,
+    current,
+  } = useAudioPlayer();
+
   const audioAtivo    = isCurrentPublication(reflexao.id ?? "");
   const audioTocando  = isCurrentlyPlaying(reflexao.id ?? "");
   const audioCarregando = audioAtivo && audioLoading;
@@ -573,7 +586,23 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
     return () => observer.disconnect();
   }, []);
 
-  function handleOuvir(e: React.MouseEvent) {
+  // ← ALTERADO: pubDestaReflexao extraído para reutilização
+  const pubDestaReflexao: AudioPublication = {
+    id: reflexao.id ?? "",
+    tipo: "reflexao",
+    titulo: reflexao.titulo,
+    autorNome: reflexao.autorNome,
+    autorFoto: null,
+    slug: reflexao.slug,
+    autorSlug: autorSlug,
+    audioUrl: (reflexao as any).audioUrl || FALLBACK_AUDIO,
+  };
+
+  // ← ALTERADO: handleOuvir agora monta a fila do autor antes de chamar o player,
+  //   exatamente como PostDetailContent faz para from=perfil.
+  //   Isso garante que contextType seja "perfil" e useAudioSync registre os callbacks
+  //   de prev/next e autoavanço — independente de como o usuário chegou na página.
+  async function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
     if (!auth.currentUser) {
       const destino = window.location.pathname + window.location.search;
@@ -581,16 +610,50 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       return;
     }
     if (!reflexao.id) return;
-    playOrToggle({
-      id: reflexao.id,
-      tipo: "reflexao",
-      titulo: reflexao.titulo,
-      autorNome: reflexao.autorNome,
-      autorFoto: null,
-      slug: reflexao.slug,
-      autorSlug: autorSlug,
-      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    });
+
+    // Se já há fila ativa com esta reflexão, apenas toggle — sem re-montar
+    if (queue.length > 0 && queue.some((p) => p.id === reflexao.id)) {
+      playOrToggle(pubDestaReflexao);
+      return;
+    }
+
+    // Monta fila de todas as reflexões do mesmo autor, ordenadas por data desc
+    // (mesmo critério usado pelo perfil e por ReflexaoNavigation)
+    setBuildingQueue(true);
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, "posts"),
+          where("autorId", "==", reflexao.autorId),
+          where("tipo", "==", "reflexao"),
+          orderBy("criadoEm", "desc")
+        )
+      );
+
+      const novaFila: AudioPublication[] = snap.docs.map((d) => ({
+        id: d.id,
+        tipo: "reflexao" as const,
+        titulo: d.data().titulo || "Sem título",
+        autorNome: d.data().autorNome || reflexao.autorNome,
+        autorFoto: null,
+        slug: d.data().slug ?? d.id,
+        autorSlug: d.data().autorSlug ?? autorSlug,
+        audioUrl: (d.data().audioUrl as string) || FALLBACK_AUDIO,
+      }));
+
+      if (novaFila.length > 0) {
+        // contextType "perfil" → useAudioSync registra callbacks de navegação
+        playQueue(pubDestaReflexao, novaFila, "perfil");
+      } else {
+        // Fallback: fila mínima com só esta reflexão
+        playQueue(pubDestaReflexao, [pubDestaReflexao], "perfil");
+      }
+    } catch (err) {
+      console.error("Erro ao montar fila de reflexões:", err);
+      // Fallback seguro: pelo menos coloca na fila com contextType correto
+      playQueue(pubDestaReflexao, [pubDestaReflexao], "perfil");
+    }
+    setBuildingQueue(false);
   }
 
   const paragrafos = reflexao.conteudo
@@ -612,6 +675,15 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
     reflexao.imagemFotografoNome &&
     reflexao.imagemFotografoUrl &&
     reflexao.imagemUnsplashUrl;
+
+  // ← ALTERADO: label do botão reflete estado de carregamento da fila
+  const ouvirLabel = buildingQueue || audioCarregando
+    ? "Carregando…"
+    : audioTocando
+    ? "Pausar"
+    : audioAtivo
+    ? "Continuar"
+    : "Ouvir";
 
   return (
     <div style={{
@@ -796,8 +868,10 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
           )}
         </button>
 
+        {/* ← ALTERADO: botão Ouvir agora desabilita durante buildingQueue */}
         <button
           onClick={handleOuvir}
+          disabled={buildingQueue}
           aria-label={audioTocando ? "Pausar áudio" : "Ouvir reflexão"}
           style={{
             display: "inline-flex", alignItems: "center", gap: "0.4rem",
@@ -807,13 +881,13 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
             background: audioAtivo ? "var(--emerald-dim)" : "transparent",
             color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
             fontSize: "0.82rem", fontWeight: 600,
-            cursor: audioCarregando ? "default" : "pointer",
-            opacity: audioCarregando ? 0.7 : 1,
+            cursor: (buildingQueue || audioCarregando) ? "default" : "pointer",
+            opacity: (buildingQueue || audioCarregando) ? 0.7 : 1,
             transition: "all 0.2s cubic-bezier(0.4,0,0.2,1)",
             fontFamily: "inherit",
           }}
         >
-          {audioCarregando ? (
+          {buildingQueue || audioCarregando ? (
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
             </svg>
@@ -822,7 +896,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
           ) : (
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z" /></svg>
           )}
-          <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
+          <span>{ouvirLabel}</span>
           {audioTocando && (
             <span style={{ fontSize: "0.68rem", fontStyle: "italic", opacity: 0.8 }}>
               · tocando
@@ -838,6 +912,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       {ouvirFlutuante && !current && (
         <button
           onClick={handleOuvir}
+          disabled={buildingQueue}
           aria-label={audioTocando ? "Pausar áudio" : "Ouvir reflexão"}
           style={{
             position: "fixed",
@@ -854,14 +929,15 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
             color: audioTocando ? "#fff" : "var(--emerald)",
             fontSize: "0.8rem",
             fontWeight: 700,
-            cursor: "pointer",
+            cursor: buildingQueue ? "default" : "pointer",
             boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
             backdropFilter: "blur(8px)",
             transition: "all 0.2s ease",
             fontFamily: "inherit",
+            opacity: buildingQueue ? 0.7 : 1,
           }}
         >
-          {audioCarregando ? (
+          {buildingQueue || audioCarregando ? (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
             </svg>
@@ -870,7 +946,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
           ) : (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z" /></svg>
           )}
-          <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}</span>
+          <span>{buildingQueue ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}</span>
         </button>
       )}
 
@@ -932,7 +1008,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
           reflexaoId={reflexao.id}
           autorId={reflexao.autorId}
           autorSlugAtual={autorSlug}
-          onPlayQueueItem={handlePlayQueueItem}   // ← ADICIONADO
+          onPlayQueueItem={handlePlayQueueItem}
         />
       )}
 

@@ -14,7 +14,7 @@ import LinksReferencia from "@/components/LinksReferencia";
 import BannerLogin from "@/components/BannerLogin";
 import CommentSection from "@/components/comments/CommentSection";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
-import { useAudioSync } from "@/hooks/useAudioSync";                          // ← ALTERADO (importação)
+import { useAudioSync } from "@/hooks/useAudioSync";
 import {
   FALLBACK_AUDIO,
   fetchFeedGlobal,
@@ -22,7 +22,7 @@ import {
   feedItemUrl,
   feedItemLabel,
   type FeedNavItem,
-} from "@/lib/audioQueue";                                                    // ← ALTERADO (importações centralizadas)
+} from "@/lib/audioQueue";
 import type { AudioPublication } from "@/providers/AudioProvider";
 
 /* ── helpers ───────────────────────────────────────────────────────────────── */
@@ -167,11 +167,6 @@ function IconArrowRight({ size = 12 }: { size?: number }) {
   );
 }
 
-/* ── helpers para feed global (navegação de página) ─────────────────────── */
-// ALTERADO: feedItemsToAudioQueue REMOVIDA — substituída por buildAudioQueueFromFeed
-//           de @/lib/audioQueue (expande séries inline em vez de filtrar).
-// ALTERADO: fetchFeedGlobal, feedItemUrl, feedItemLabel REMOVIDAS — importadas de @/lib/audioQueue.
-
 /* ── Navegação entre posts ───────────────────────────────────────────────── */
 
 type PostNav = {
@@ -189,8 +184,7 @@ type PostNavigationProps = {
   postId: string;
   autorIdProp?: string;
   fromParam: string;
-  serieSlugParam: string;                    // ← ALTERADO (novo prop para contexto série)
-  // Player props injetadas pelo pai
+  serieSlugParam: string;
   playerQueue: AudioPublication[];
   playerContextType: string | null;
   onPlayQueueItem: (pub: AudioPublication) => void;
@@ -200,7 +194,7 @@ function PostNavigation({
   postId,
   autorIdProp,
   fromParam,
-  serieSlugParam,                            // ← ALTERADO
+  serieSlugParam,
   playerQueue,
   playerContextType,
   onPlayQueueItem,
@@ -786,7 +780,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const conteudoRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
   const fromParam = searchParams.get("from") ?? "";
-  const serieSlugParam = searchParams.get("serieSlug") ?? "";  // ← ALTERADO (novo)
+  const serieSlugParam = searchParams.get("serieSlug") ?? "";
 
   const [liked, setLiked] = useState<boolean>(() => {
     const uid = auth.currentUser?.uid;
@@ -944,8 +938,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     queue,
     currentIndex,
     contextType,
-    // ← ALTERADO: registerOnEndedCallback e registerNavigationCallback
-    // foram REMOVIDOS daqui — agora gerenciados pelo hook useAudioSync abaixo.
   } = useAudioPlayer();
 
   const audioAtivo = isCurrentPublication(postId);
@@ -966,7 +958,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     return () => observer.disconnect();
   }, []);
 
-  // ── Publicação deste post como AudioPublication ───────────────────────────
   const pubDestePost: AudioPublication = {
     id: postId,
     tipo: post.tipo,
@@ -977,7 +968,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     audioUrl: post.audioUrl || FALLBACK_AUDIO,
   };
 
-  // ── Construção lazy da fila de áudio para o botão "Ouvir" ────────────────
   const [buildingQueue, setBuildingQueue] = useState(false);
 
   async function buildAndPlay() {
@@ -987,24 +977,57 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       return;
     }
 
-    // Se já há uma fila ativa com este post, apenas toggle
-    if (queue.length > 0 && queue.some((p) => p.id === postId)) {
-      playOrToggle(pubDestePost);
-      return;
-    }
-
-    // Se já há uma fila ativa com contexto de série, apenas toggle
-    if (contextType === "serie") {
+    // Só faz toggle se a fila E o contexto já estão corretos para esta página
+    const filaTemEstePost = queue.length > 0 && queue.some((p) => p.id === postId);
+    const contextoCorreto =
+      (fromParam === "home"   && contextType === "home")   ||
+      (fromParam === "perfil" && contextType === "perfil") ||
+      (fromParam === "serie"  && contextType === "serie")  ||
+      (!fromParam && contextType === null);
+    if (filaTemEstePost && contextoCorreto) {
       playOrToggle(pubDestePost);
       return;
     }
 
     setBuildingQueue(true);
     try {
+      // ── Case: dentro de uma série ─────────────────────────────────────────
+      // ← ALTERADO: antes este caso não existia — caía no fallback de fila mínima
+      //   com contextType null, deixando useAudioSync sem callbacks de navegação.
+      //   Agora busca os episódios da série pelo serieSlugParam e monta a fila
+      //   com contextType "serie", ativando useAudioSync corretamente.
+      if (fromParam === "serie" && serieSlugParam) {
+        const serieSnap = await getDocs(
+          query(collection(db, "series"), where("slug", "==", serieSlugParam))
+        );
+        if (!serieSnap.empty) {
+          const serieData = serieSnap.docs[0].data();
+          const postIds: string[] = serieData.postIds ?? [];
+          const postSnaps = await Promise.all(postIds.map((id) => getDoc(doc(db, "posts", id))));
+          const novaFila: AudioPublication[] = postSnaps
+            .filter((s) => s.exists())
+            .map((s) => ({
+              id: s.id,
+              tipo: (s.data()!.tipo ?? "sermao") as AudioPublication["tipo"],
+              titulo: s.data()!.titulo || "Sem título",
+              autorNome: s.data()!.autorNome || nomeExibicao,
+              autorFoto: s.data()!.autorFoto ?? fotoAutor,
+              slug: s.data()!.slug ?? s.id,
+              autorSlug: s.data()!.autorSlug,
+              audioUrl: s.data()!.audioUrl || FALLBACK_AUDIO,
+            }));
+          if (novaFila.length > 0) {
+            playQueue(pubDestePost, novaFila, "serie");
+            setBuildingQueue(false);
+            return;
+          }
+        }
+        // Se a série não foi encontrada, cai no fallback abaixo
+      }
+
+      // ── Case: feed global (home) ──────────────────────────────────────────
       if (fromParam === "home") {
         const feedItems = await fetchFeedGlobal();
-        // ← ALTERADO: usa buildAudioQueueFromFeed (expande séries inline)
-        // em vez de feedItemsToAudioQueue (que apenas filtrava séries)
         const novaFila = await buildAudioQueueFromFeed(feedItems);
         if (novaFila.length > 0) {
           playQueue(pubDestePost, novaFila, "home");
@@ -1013,6 +1036,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         }
       }
 
+      // ── Case: perfil do autor ─────────────────────────────────────────────
       if (fromParam === "perfil" && post.autorId) {
         const snap = await getDocs(
           query(collection(db, "posts"), where("autorId", "==", post.autorId), orderBy("data", "desc"))
@@ -1034,7 +1058,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         }
       }
 
-      // Fallback: fila mínima com apenas este post
+      // ── Fallback: fila mínima com apenas este post ─────────────────────────
       playQueue(pubDestePost, [pubDestePost], null);
     } catch (err) {
       console.error("Erro ao construir fila de áudio:", err);
@@ -1044,21 +1068,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   }
 
   // ── Sincronização áudio ↔ navegação ──────────────────────────────────────
-  //
-  // ALTERADO: lógica inline de sincronização REMOVIDA daqui e centralizada
-  // no hook useAudioSync. O hook:
-  //   1. Registra onEndedCallback → navega para o próximo item ao terminar
-  //      (o AudioProvider já inicia o próximo áudio antes de chamar o callback)
-  //   2. Registra navigationCallback → navega quando player avança/recua
-  //      (idem — áudio já iniciado pelo AudioProvider)
-  //   3. Suporta contextos "home", "perfil" e "serie" (novo)
-  //   4. Aceita serieSlugParam para montar URLs corretas no contexto série
-  //
-  // PROBLEMA 2 resolvido: sincronização é unidirecional por design —
-  //   player → página via callbacks (nunca página → player via useEffect)
-  //   Página → player via handleNav em PostNavigation (clique do usuário).
-
-  const { handlePlayQueueItem } = useAudioSync(postId, fromParam, serieSlugParam); // ← ALTERADO
+  const { handlePlayQueueItem } = useAudioSync(postId, fromParam, serieSlugParam);
 
   return (
     <>
@@ -1160,7 +1170,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         <hr className="post-detail-divider" />
 
         <div className="post-detail-actions">
-          {/* Âncora invisível para o IntersectionObserver */}
           <span ref={ouvirBtnRef} style={{ display: "none" }} aria-hidden="true" />
 
           <button onClick={handleLike} disabled={loadingLike}
@@ -1208,7 +1217,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           postId={postId}
           autorIdProp={post.autorId}
           fromParam={fromParam}
-          serieSlugParam={serieSlugParam}     // ← ALTERADO (novo prop)
+          serieSlugParam={serieSlugParam}
           playerQueue={queue}
           playerContextType={contextType}
           onPlayQueueItem={handlePlayQueueItem}
