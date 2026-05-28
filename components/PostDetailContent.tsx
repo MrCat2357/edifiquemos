@@ -14,6 +14,15 @@ import LinksReferencia from "@/components/LinksReferencia";
 import BannerLogin from "@/components/BannerLogin";
 import CommentSection from "@/components/comments/CommentSection";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import { useAudioSync } from "@/hooks/useAudioSync";                          // ← ALTERADO (importação)
+import {
+  FALLBACK_AUDIO,
+  fetchFeedGlobal,
+  buildAudioQueueFromFeed,
+  feedItemUrl,
+  feedItemLabel,
+  type FeedNavItem,
+} from "@/lib/audioQueue";                                                    // ← ALTERADO (importações centralizadas)
 import type { AudioPublication } from "@/providers/AudioProvider";
 
 /* ── helpers ───────────────────────────────────────────────────────────────── */
@@ -158,98 +167,10 @@ function IconArrowRight({ size = 12 }: { size?: number }) {
   );
 }
 
-/* ── helpers de feed global ──────────────────────────────────────────────── */
-
-function getDataValor(item: any): number {
-  if (!item) return 0;
-  const d = item.criadoEm || item.data;
-  if (!d) return 0;
-  if (d?.toDate) return d.toDate().getTime();
-  if (typeof d === "string") return new Date(d).getTime();
-  return 0;
-}
-
-type FeedNavItem = {
-  id: string;
-  _feedType: "post" | "serie" | "reflexao";
-  titulo: string;
-  slug?: string;
-  tipo?: string;
-  autorId?: string;
-  autorNome?: string;
-  autorSlug?: string;
-};
-
-async function fetchFeedGlobal(): Promise<FeedNavItem[]> {
-  const [postsSnap, seriesSnap, reflexoesSnap] = await Promise.all([
-    getDocs(query(collection(db, "posts"), where("tipo", "in", ["sermao", "artigo"]), orderBy("data", "desc"))),
-    getDocs(query(collection(db, "series"), orderBy("criadoEm", "desc"))),
-    getDocs(query(collection(db, "posts"), where("tipo", "==", "reflexao"), orderBy("criadoEm", "desc"))),
-  ]);
-
-  const posts: FeedNavItem[] = [];
-  postsSnap.forEach((d) => posts.push({ id: d.id, _feedType: "post", ...d.data() } as FeedNavItem));
-
-  const series: FeedNavItem[] = [];
-  seriesSnap.forEach((d) => series.push({ id: d.id, _feedType: "serie", ...d.data() } as FeedNavItem));
-
-  const reflexoes: FeedNavItem[] = [];
-  reflexoesSnap.forEach((d) => reflexoes.push({ id: d.id, _feedType: "reflexao", ...d.data() } as FeedNavItem));
-
-  return [...posts, ...series, ...reflexoes].sort(
-    (a, b) => getDataValor(b) - getDataValor(a)
-  );
-}
-
-function feedItemUrl(item: FeedNavItem): string {
-  if (item._feedType === "serie") {
-    return `/series/${item.slug ?? item.id}?from=home`;
-  }
-  if (item._feedType === "reflexao") {
-    const aSlug = item.autorSlug ?? item.autorId ?? "";
-    return `/${aSlug}/reflexao/${item.slug ?? item.id}?from=home`;
-  }
-  const cat = item.tipo === "sermao" ? "sermoes" : "estudos";
-  return `/posts/${cat}/${item.slug ?? item.id}?from=home`;
-}
-
-function feedItemLabel(item: FeedNavItem, direction: "prev" | "next"): string {
-  const prefix = direction === "prev" ? "Anterior" : "Próximo";
-  if (item._feedType === "serie") return `${prefix}: série`;
-  if (item._feedType === "reflexao") return `Reflexão ${direction === "prev" ? "anterior" : "próxima"}`;
-  if (item.tipo === "sermao") return `Sermão ${direction === "prev" ? "anterior" : "próximo"}`;
-  return `Estudo ${direction === "prev" ? "anterior" : "próximo"}`;
-}
-
-/* ── helpers para construir a fila de áudio da home ─────────────────────── */
-
-const FALLBACK_AUDIO = "https://archive.org/download/testmp3testfile/mpthreetest.mp3";
-
-/**
- * A partir de uma lista de FeedNavItems (feed global já ordenado), expande as
- * séries nos seus posts individuais e devolve somente itens com áudio
- * (posts e reflexões) mapeados como AudioPublication.
- *
- * Não faz fetch aqui — usa apenas o que já está carregado no feed ou o
- * fallback de audioUrl.
- */
-function feedItemsToAudioQueue(items: FeedNavItem[]): AudioPublication[] {
-  // Para o propósito desta função usamos apenas os itens que são post/reflexao.
-  // Séries não têm audioUrl direto; se quiser expandir posts de séries aqui
-  // isso exigiria fetches adicionais — feito separadamente em app/page.tsx.
-  return items
-    .filter((item) => item._feedType !== "serie")
-    .map((item) => ({
-      id: item.id,
-      tipo: (item.tipo ?? "sermao") as AudioPublication["tipo"],
-      titulo: item.titulo,
-      autorNome: item.autorNome || "Autor",
-      autorFoto: null,
-      slug: item.slug ?? item.id,
-      autorSlug: item.autorSlug,
-      audioUrl: FALLBACK_AUDIO,
-    }));
-}
+/* ── helpers para feed global (navegação de página) ─────────────────────── */
+// ALTERADO: feedItemsToAudioQueue REMOVIDA — substituída por buildAudioQueueFromFeed
+//           de @/lib/audioQueue (expande séries inline em vez de filtrar).
+// ALTERADO: fetchFeedGlobal, feedItemUrl, feedItemLabel REMOVIDAS — importadas de @/lib/audioQueue.
 
 /* ── Navegação entre posts ───────────────────────────────────────────────── */
 
@@ -264,23 +185,11 @@ type PostNav = {
 
 type PostNavAutor = { nome: string; fotoUrl: string | null };
 
-/**
- * PostNavigation
- *
- * Renderiza os botões "Anterior" / "Próximo" entre posts.
- *
- * Além de navegar via router.push, agora também sincroniza com o player:
- *  - Se o post de destino está na fila do player, chama playQueue para pular
- *    direto para ele, interrompendo o que estava tocando.
- *  - Se não está na fila, apenas navega (o player vai ser sincronizado pelo
- *    useEffect de PostDetailContent quando a nova página montar).
- *
- * Props extras recebidas do pai:
- *  - queue, contextType, playQueue — para sincronização com o player
- */
 type PostNavigationProps = {
   postId: string;
   autorIdProp?: string;
+  fromParam: string;
+  serieSlugParam: string;                    // ← ALTERADO (novo prop para contexto série)
   // Player props injetadas pelo pai
   playerQueue: AudioPublication[];
   playerContextType: string | null;
@@ -290,6 +199,8 @@ type PostNavigationProps = {
 function PostNavigation({
   postId,
   autorIdProp,
+  fromParam,
+  serieSlugParam,                            // ← ALTERADO
   playerQueue,
   playerContextType,
   onPlayQueueItem,
@@ -297,11 +208,9 @@ function PostNavigation({
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const fromParam = searchParams.get("from") ?? "";
   const fromHome   = fromParam === "home";
   const fromPerfil = fromParam === "perfil";
   const fromSerie  = fromParam === "serie";
-  const serieSlugParam = searchParams.get("serieSlug") ?? "";
 
   const [prev, setPrev] = useState<FeedNavItem | PostNav | null>(null);
   const [next, setNext] = useState<FeedNavItem | PostNav | null>(null);
@@ -502,7 +411,7 @@ function PostNavigation({
 
   function navUrl(item: FeedNavItem | PostNav): string {
     if (fromHome) {
-      return feedItemUrl(item as FeedNavItem);
+      return feedItemUrl(item as FeedNavItem, fromParam);
     }
     if (fromSerie && serieSlugParam) {
       const p = item as PostNav;
@@ -534,24 +443,10 @@ function PostNavigation({
     return p.tipo === "sermao" ? "Próximo sermão" : "Próximo estudo";
   }
 
-  /**
-   * Lida com o clique nos botões de navegação da página.
-   *
-   * Comportamento:
-   * 1. Navega via router.push para a URL do post de destino.
-   * 2. Se o post de destino estiver na fila do player, inicia o áudio dele —
-   *    interrompendo o que estava tocando — para manter player e leitura em
-   *    sincronia.
-   * 3. Se não estiver na fila (série ou contexto diferente), apenas navega;
-   *    o PostDetailContent da nova página cuidará da sincronização do player.
-   */
   function handleNav(item: FeedNavItem | PostNav) {
     const url = navUrl(item);
-    // Tenta encontrar o item na fila do player pelo id
     const pubNaFila = playerQueue.find((p) => p.id === item.id);
     if (pubNaFila) {
-      // Avisa o player para pular para essa faixa (sem navegar — a navegação
-      // acontece abaixo via router.push)
       onPlayQueueItem(pubNaFila);
     }
     router.push(url);
@@ -891,6 +786,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const conteudoRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
   const fromParam = searchParams.get("from") ?? "";
+  const serieSlugParam = searchParams.get("serieSlug") ?? "";  // ← ALTERADO (novo)
 
   const [liked, setLiked] = useState<boolean>(() => {
     const uid = auth.currentUser?.uid;
@@ -1045,13 +941,13 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     isCurrentlyPlaying,
     isCurrentPublication,
     isLoading: audioLoading,
-    current,
     queue,
     currentIndex,
     contextType,
-    registerOnEndedCallback,
-    registerNavigationCallback,
+    // ← ALTERADO: registerOnEndedCallback e registerNavigationCallback
+    // foram REMOVIDOS daqui — agora gerenciados pelo hook useAudioSync abaixo.
   } = useAudioPlayer();
+
   const audioAtivo = isCurrentPublication(postId);
   const audioTocando = isCurrentlyPlaying(postId);
   const audioCarregando = audioAtivo && audioLoading;
@@ -1082,19 +978,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   };
 
   // ── Construção lazy da fila de áudio para o botão "Ouvir" ────────────────
-  //
-  // Quando o usuário clica em "Ouvir" em um post individual, precisamos de uma
-  // fila para que o autoplay e a navegação sincronizada funcionem. A fila é
-  // construída com base no parâmetro ?from:
-  //
-  //   ?from=home   → fila do feed global (posts + reflexões, sem séries)
-  //   ?from=perfil → posts do autor deste post
-  //   ?from=serie  → a fila já deve estar ativa pelo contexto de série
-  //   sem from     → fila mínima com apenas este post
-  //
-  // A busca é feita apenas quando o usuário clica em "Ouvir" e não há fila
-  // ativa no player que já contenha este post.
-
   const [buildingQueue, setBuildingQueue] = useState(false);
 
   async function buildAndPlay() {
@@ -1116,23 +999,21 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       return;
     }
 
-    // Tenta construir fila pelo contexto
     setBuildingQueue(true);
     try {
       if (fromParam === "home") {
-        // Fila do feed global: busca todos os posts/reflexões ordenados
         const feedItems = await fetchFeedGlobal();
-        const novaFila = feedItemsToAudioQueue(feedItems);
+        // ← ALTERADO: usa buildAudioQueueFromFeed (expande séries inline)
+        // em vez de feedItemsToAudioQueue (que apenas filtrava séries)
+        const novaFila = await buildAudioQueueFromFeed(feedItems);
         if (novaFila.length > 0) {
-          const ctx = "home" as const;
-          playQueue(pubDestePost, novaFila, ctx);
+          playQueue(pubDestePost, novaFila, "home");
           setBuildingQueue(false);
           return;
         }
       }
 
       if (fromParam === "perfil" && post.autorId) {
-        // Fila do perfil: todos os posts do autor
         const snap = await getDocs(
           query(collection(db, "posts"), where("autorId", "==", post.autorId), orderBy("data", "desc"))
         );
@@ -1157,7 +1038,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       playQueue(pubDestePost, [pubDestePost], null);
     } catch (err) {
       console.error("Erro ao construir fila de áudio:", err);
-      // Em caso de erro, toca sem fila
       playOrToggle(pubDestePost);
     }
     setBuildingQueue(false);
@@ -1165,103 +1045,20 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
   // ── Sincronização áudio ↔ navegação ──────────────────────────────────────
   //
-  // Este useEffect faz duas coisas:
+  // ALTERADO: lógica inline de sincronização REMOVIDA daqui e centralizada
+  // no hook useAudioSync. O hook:
+  //   1. Registra onEndedCallback → navega para o próximo item ao terminar
+  //      (o AudioProvider já inicia o próximo áudio antes de chamar o callback)
+  //   2. Registra navigationCallback → navega quando player avança/recua
+  //      (idem — áudio já iniciado pelo AudioProvider)
+  //   3. Suporta contextos "home", "perfil" e "serie" (novo)
+  //   4. Aceita serieSlugParam para montar URLs corretas no contexto série
   //
-  // 1. registerOnEndedCallback: ao terminar a faixa, navega para o próximo
-  //    post da fila e inicia o áudio dele automaticamente.
-  //
-  // 2. registerNavigationCallback: quando o usuário clica em prev/next no
-  //    player (MiniPlayer, ExpandedPlayer, Sidebar), navegamos para a URL
-  //    do post correspondente. O player já atualizou o índice; aqui apenas
-  //    chamamos router.push.
-  //
-  // Ambos só atuam nos contextos "home" e "perfil" (série tem lógica própria).
+  // PROBLEMA 2 resolvido: sincronização é unidirecional por design —
+  //   player → página via callbacks (nunca página → player via useEffect)
+  //   Página → player via handleNav em PostNavigation (clique do usuário).
 
-  useEffect(() => {
-    if (contextType !== "home" && contextType !== "perfil") {
-      registerOnEndedCallback(null);
-      registerNavigationCallback(null);
-      return;
-    }
-
-    // Encontra este post na fila do player
-    const idxNaFila = queue.findIndex((p) => p.id === postId);
-
-    if (idxNaFila === -1) {
-      registerOnEndedCallback(null);
-      registerNavigationCallback(null);
-      return;
-    }
-
-    // Se o player está tocando uma faixa diferente da deste post,
-    // sincroniza pulando para a faixa correta
-    if (current && current.id !== postId) {
-      const pubDestePosto = queue[idxNaFila];
-      if (pubDestePosto) {
-        playOrToggle(pubDestePosto);
-      }
-    }
-
-    // Callback de autoplay ao terminar a faixa
-    const onEndedCb = () => {
-      const nextIdx = idxNaFila + 1;
-      const nextPub = queue[nextIdx];
-      if (!nextPub) return;
-      // Para reflexões, a URL é diferente
-      if (nextPub.tipo === "reflexao") {
-        const aSlug = nextPub.autorSlug ?? "";
-        router.push(`/${aSlug}/reflexao/${nextPub.slug}?from=${contextType}`);
-        return;
-      }
-      const cat = nextPub.tipo === "sermao" ? "sermoes" : "estudos";
-      router.push(`/posts/${cat}/${nextPub.slug}?from=${contextType}`);
-    };
-
-    // Callback de navegação acionado pelos botões prev/next do player
-    const navCb = (_direction: "next" | "previous", pub: AudioPublication) => {
-      if (pub.tipo === "reflexao") {
-        const aSlug = pub.autorSlug ?? "";
-        router.push(`/${aSlug}/reflexao/${pub.slug}?from=${contextType}`);
-        return;
-      }
-      const cat = pub.tipo === "sermao" ? "sermoes" : "estudos";
-      router.push(`/posts/${cat}/${pub.slug}?from=${contextType}`);
-    };
-
-    registerOnEndedCallback(onEndedCb);
-    registerNavigationCallback(navCb);
-
-    return () => {
-      registerOnEndedCallback(null);
-      registerNavigationCallback(null);
-    };
-  }, [
-    postId,
-    queue,
-    currentIndex,
-    contextType,
-    current,
-    registerOnEndedCallback,
-    registerNavigationCallback,
-    playOrToggle,
-    router,
-  ]);
-
-  // ── Função passada ao PostNavigation para tocar a faixa correta ──────────
-  //
-  // Quando o usuário clica nos botões da página (não do player), chamamos
-  // esta função para que o player avance/retroceda para a faixa correspondente
-  // ao post de destino, mantendo a sincronia.
-
-  const handlePlayQueueItem = useCallback(
-    (pub: AudioPublication) => {
-      if (queue.length > 0 && queue.some((p) => p.id === pub.id)) {
-        playQueue(pub, queue, contextType);
-      }
-      // Se não está na fila, não fazemos nada — a nova página cuidará disso
-    },
-    [queue, contextType, playQueue]
-  );
+  const { handlePlayQueueItem } = useAudioSync(postId, fromParam, serieSlugParam); // ← ALTERADO
 
   return (
     <>
@@ -1410,6 +1207,8 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         <PostNavigation
           postId={postId}
           autorIdProp={post.autorId}
+          fromParam={fromParam}
+          serieSlugParam={serieSlugParam}     // ← ALTERADO (novo prop)
           playerQueue={queue}
           playerContextType={contextType}
           onPlayQueueItem={handlePlayQueueItem}
@@ -1418,7 +1217,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         <CommentSection postId={postId} />
       </article>
 
-      {/* Botão flutuante — aparece quando a área de ações sai da tela */}
+      {/* Botão flutuante */}
       {ouvirFlutuante && (
         <button
           onClick={buildAndPlay}
