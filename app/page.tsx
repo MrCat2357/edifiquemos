@@ -8,6 +8,7 @@ import {
   query,
   orderBy,
   doc,
+  getDoc,
   updateDoc,
   deleteDoc,
   arrayUnion,
@@ -31,8 +32,8 @@ const CommentSection = dynamic(
 
 // ─── BotaoOuvirCard ───────────────────────────────────────────────────────────
 
-function BotaoOuvirCard({ post }: { post: any }) {
-  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+function BotaoOuvirCard({ post, filaAudio = [], onLoginRequired }: { post: any; filaAudio?: any[]; onLoginRequired?: () => void }) {
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   if (post._feedType === "serie") return null;
 
@@ -42,7 +43,11 @@ function BotaoOuvirCard({ post }: { post: any }) {
 
   function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
-    playOrToggle({
+    if (!auth.currentUser) {
+      onLoginRequired?.();
+      return;
+    }
+    const pub = {
       id: post.id,
       tipo: post.tipo,
       titulo: post.titulo,
@@ -51,7 +56,12 @@ function BotaoOuvirCard({ post }: { post: any }) {
       slug: post.slug,
       autorSlug: post.autorSlug,
       audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    });
+    };
+    if (filaAudio.length > 0) {
+      playQueue(pub, filaAudio, "home");
+    } else {
+      playOrToggle(pub);
+    }
   }
 
   return (
@@ -77,7 +87,13 @@ function BotaoOuvirCard({ post }: { post: any }) {
         boxShadow: audioTocando ? "0 0 0 2px var(--emerald-dim)" : "none",
       }}
     >
-      {audioCarregando ? "⏳" : audioTocando ? "⏸" : "🎧"}
+      {audioCarregando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+      ) : audioTocando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+      )}
       <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
       {audioTocando && (
         <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>
@@ -127,6 +143,8 @@ function getDataValor(item: any): number {
 function normalizar(str: string) {
   return str.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
+
+const FALLBACK_AUDIO = "https://archive.org/download/testmp3testfile/mpthreetest.mp3";
 
 // ─── SVG Icons ────────────────────────────────────────────────────────────────
 
@@ -203,6 +221,126 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   );
 }
 
+// ─── BotaoOuvirSerieCard ──────────────────────────────────────────────────────
+
+function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRequired?: () => void }) {
+  const {
+    playQueue,
+    pause,
+    resume,
+    isPlaying,
+    isLoading: audioLoading,
+    contextType,
+    current: currentAudio,
+  } = useAudioPlayer();
+
+  const [carregandoPosts, setCarregandoPosts] = useState(false);
+  const [postsCarregados, setPostsCarregados] = useState<any[] | null>(null);
+
+  const serieAtiva =
+    contextType === "serie" &&
+    currentAudio !== null &&
+    postsCarregados !== null &&
+    postsCarregados.some((p: any) => p.id === currentAudio.id);
+
+  const tocando = serieAtiva && isPlaying;
+  const carregando = (serieAtiva && audioLoading) || carregandoPosts;
+
+  async function buscarPostsDaSerie(): Promise<any[]> {
+    if (postsCarregados !== null) return postsCarregados;
+    const postIds: string[] = serie.postIds ?? [];
+    if (postIds.length === 0) return [];
+    const snaps = await Promise.all(
+      postIds.map((id: string) => getDoc(doc(db, "posts", id)))
+    );
+    const lista = snaps
+      .filter((s) => s.exists())
+      .map((s) => ({ id: s.id, ...s.data() }));
+    setPostsCarregados(lista);
+    return lista;
+  }
+
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!auth.currentUser) {
+      onLoginRequired?.();
+      return;
+    }
+    if (serieAtiva) {
+      tocando ? pause() : resume();
+      return;
+    }
+    setCarregandoPosts(true);
+    try {
+      const posts = await buscarPostsDaSerie();
+      if (posts.length === 0) return;
+      const fila = posts.map((p: any) => ({
+        id: p.id,
+        tipo: p.tipo as "sermao" | "artigo" | "reflexao",
+        titulo: p.titulo,
+        autorNome: p.autorNome || "Autor",
+        autorFoto: p.autorFoto ?? null,
+        slug: p.slug,
+        autorSlug: p.autorSlug,
+        audioUrl: p.audioUrl || FALLBACK_AUDIO,
+      }));
+      playQueue(fila[0], fila, "serie");
+    } catch (err) {
+      console.error("Erro ao carregar posts da série:", err);
+    }
+    setCarregandoPosts(false);
+  }
+
+  if (!serie.postIds || serie.postIds.length === 0) return null;
+
+  return (
+    <button
+      onClick={handleClick}
+      title={tocando ? "Pausar série" : serieAtiva ? "Continuar série" : "Ouvir série completa"}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
+        padding: "4px 8px",
+        borderRadius: "var(--radius-full)",
+        border: "1px solid",
+        borderColor: serieAtiva ? "var(--emerald-dim)" : "transparent",
+        background: serieAtiva ? "var(--emerald-dim)" : "transparent",
+        color: serieAtiva ? "var(--emerald)" : "var(--text-3)",
+        fontSize: "0.72rem",
+        fontWeight: 600,
+        cursor: "pointer",
+        transition: "all 0.15s",
+        fontFamily: "inherit",
+        flexShrink: 0,
+        boxShadow: tocando ? "0 0 0 2px var(--emerald-dim)" : "none",
+      }}
+    >
+      {carregando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+        </svg>
+      ) : tocando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+        </svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M8 5.14v14l11-7-11-7z" />
+        </svg>
+      )}
+      <span>
+        {carregando ? "Carregando…" : tocando ? "Pausar" : serieAtiva ? "Continuar" : "Ouvir série"}
+      </span>
+      {tocando && (
+        <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>
+          · agora
+        </span>
+      )}
+    </button>
+  );
+}
+
 // ─── SerieCard ────────────────────────────────────────────────────────────────
 
 function SerieCardMeuPerfil({
@@ -224,13 +362,12 @@ function SerieCardMeuPerfil({
   const [showComments, setShowComments] = useState(false);
   const [commentCount, setCommentCount] = useState<number>(serie.commentCount ?? 0);
 
-  // ── CORREÇÃO: passa ?from=home para que SerieNavigation use o feed global ──
   const serieUrl = `/series/${serie.slug}?from=home`;
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      setShowLoginBanner(true);
       return;
     }
     if (loadingLike) return;
@@ -255,7 +392,7 @@ function SerieCardMeuPerfil({
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      setShowLoginBanner(true);
       return;
     }
     setShowComments((v) => !v);
@@ -330,7 +467,6 @@ function SerieCardMeuPerfil({
           onClick={(e) => e.stopPropagation()}
         >
           <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-            {/* Curtir */}
             <button
               className={`action-btn ${liked ? "liked" : ""}`}
               onClick={handleLike}
@@ -347,7 +483,6 @@ function SerieCardMeuPerfil({
               )}
             </button>
 
-            {/* Comentários */}
             <button
               onClick={handleToggleComments}
               title="Ver comentários"
@@ -367,6 +502,8 @@ function SerieCardMeuPerfil({
                 </span>
               )}
             </button>
+
+            <BotaoOuvirSerieCard serie={serie} onLoginRequired={() => setShowLoginBanner(true)} />
           </div>
 
           <span
@@ -398,10 +535,11 @@ function SerieCardMeuPerfil({
 
 // ─── PostCard ─────────────────────────────────────────────────────────────────
 
-function PostCard({ post, index, onAuthorClick, onToast }: {
+function PostCard({ post, index, onAuthorClick, onToast, filaAudio = [] }: {
   post: any; index: number;
   onAuthorClick: (e: React.MouseEvent, id: string) => void;
   onToast: (msg: string) => void;
+  filaAudio?: any[];
 }) {
   const router = useRouter();
   const uid = auth.currentUser?.uid;
@@ -416,7 +554,6 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
-  // ── CORREÇÃO: passa ?from=home para que PostNavigation use o feed global ──
   const url = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}?from=home`;
   const urlSemContexto = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
   const fullUrl = typeof window !== "undefined" ? window.location.origin + urlSemContexto : urlSemContexto;
@@ -424,7 +561,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      setShowLoginBanner(true);
       return;
     }
     if (loadingLike) return;
@@ -476,7 +613,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
           onClick={(e) => {
             e.stopPropagation();
             if (!uid) {
-              router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+              setShowLoginBanner(true);
               return;
             }
             setShowComments((v) => !v);
@@ -512,7 +649,7 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
           </span>
         )}
 
-        <BotaoOuvirCard post={post} />
+        <BotaoOuvirCard post={post} filaAudio={filaAudio} onLoginRequired={() => setShowLoginBanner(true)} />
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(url)}>Ler completo →</span>
     </div>
@@ -597,25 +734,20 @@ function PostCard({ post, index, onAuthorClick, onToast }: {
 }
 
 // ─── ReflexaoFeedCard ─────────────────────────────────────────────────────────
+// VERSÃO CORRIGIDA: removidos os botões editar/excluir que ficavam fora do card.
+// Substitua apenas o componente ReflexaoFeedCard no seu app/page.tsx pelo bloco abaixo.
 
 function ReflexaoFeedCard({
-  reflexao,
-  index,
-  currentUid,
-  onDeleted,
-  onToast,
+  reflexao, index, currentUid, onDeleted, onToast, filaAudio = [],
 }: {
-  reflexao: any;
-  index: number;
-  currentUid: string | null;
-  onDeleted: (id: string) => void;
-  onToast: (msg: string) => void;
+  reflexao: any; index: number; currentUid: string | null;
+  onDeleted: (id: string) => void; onToast: (msg: string) => void;
+  filaAudio?: any[];
 }) {
   const router = useRouter();
-  const isAutor = !!currentUid && currentUid === reflexao.autorId;
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
 
-  // ── CORREÇÃO: passa ?from=home para que ReflexaoNavigation use o feed global ──
-  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
   const audioAtivo = isCurrentPublication(reflexao.id);
   const audioTocando = isCurrentlyPlaying(reflexao.id);
   const audioCarregando = audioAtivo && audioLoading;
@@ -626,43 +758,30 @@ function ReflexaoFeedCard({
 
   function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
-    playOrToggle({
+    if (!auth.currentUser) {
+      setShowLoginBanner(true);
+      return;
+    }
+    const pub = {
       id: reflexao.id,
-      tipo: "reflexao",
+      tipo: "reflexao" as const,
       titulo: reflexao.titulo,
       autorNome: reflexao.autorNome,
       autorFoto: reflexao.autorFoto ?? null,
       slug: reflexao.slug,
       autorSlug: reflexao.autorSlug,
-      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    });
-  }
-
-  async function handleDelete(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (!confirm("Tem certeza que deseja excluir esta reflexão? Esta ação não pode ser desfeita.")) return;
-    try {
-      await deleteDoc(doc(db, "posts", reflexao.id));
-      onDeleted(reflexao.id);
-      onToast("Reflexão excluída.");
-    } catch (err) {
-      console.error(err);
-      onToast("Erro ao excluir reflexão.");
+      audioUrl: FALLBACK_AUDIO,
+    };
+    if (filaAudio.length > 0) {
+      playQueue(pub, filaAudio, "home");
+    } else {
+      playOrToggle(pub);
     }
   }
 
   return (
     <div style={{ position: "relative", animationDelay: `${index * 60}ms` }} className="reflexao-feed-item">
-      {/*
-        CardReflexao não aceita um override de URL internamente, então
-        envolvemos o card num wrapper clicável que intercepta o clique
-        antes que o card navegue para a URL padrão (sem ?from=home).
-        O CardReflexao continua renderizando normalmente.
-      */}
-      <div
-        style={{ cursor: "pointer" }}
-        onClick={handleCardClick}
-      >
+      <div style={{ cursor: "pointer" }} onClick={handleCardClick}>
         <CardReflexao
           reflexao={reflexao}
           disableNavigation
@@ -680,43 +799,40 @@ function ReflexaoFeedCard({
                 cursor: "pointer", transition: "all 0.18s ease", fontFamily: "inherit",
               }}
             >
-              <span>{audioCarregando ? "⏳" : audioTocando ? "⏸" : "🎧"}</span>
+              {audioCarregando ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+              ) : audioTocando ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+              )}
               <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
             </button>
           }
         />
       </div>
 
-      {isAutor && (
-        <div className="reflexao-owner-actions" onClick={(e) => e.stopPropagation()}>
-          <a
-            href={`/${reflexao.autorSlug}/reflexao/${reflexao.slug}/editar`}
-            className="reflexao-action-btn reflexao-action-edit"
-            title="Editar reflexão"
-          >
-            ✏️ Editar
-          </a>
-          <button
-            className="reflexao-action-btn reflexao-action-delete"
-            onClick={handleDelete}
-            title="Excluir reflexão"
-          >
-            🗑️ Excluir
-          </button>
+      {showLoginBanner && (
+        <div style={{ padding: "0 0.75rem 0.75rem" }} onClick={(e) => e.stopPropagation()}>
+          <BannerLogin onClose={() => setShowLoginBanner(false)} />
         </div>
       )}
+
+      {/* Botões editar/excluir foram removidos daqui.
+          O autor pode editar/excluir acessando a própria reflexão. */}
     </div>
   );
 }
 
 // ─── FeedItem ─────────────────────────────────────────────────────────────────
 
-function FeedItem({ item, index, onAuthorClick, onToast, currentUid, onReflexaoDeleted }: {
+function FeedItem({ item, index, onAuthorClick, onToast, currentUid, onReflexaoDeleted, filaAudio }: {
   item: any; index: number;
   onAuthorClick: (e: React.MouseEvent, id: string) => void;
   onToast: (msg: string) => void;
   currentUid: string | null;
   onReflexaoDeleted: (id: string) => void;
+  filaAudio: any[];
 }) {
   if (item._feedType === "serie") return <SerieCardMeuPerfil serie={item} index={index} onToast={onToast} />;
   if (item._feedType === "reflexao") {
@@ -727,10 +843,11 @@ function FeedItem({ item, index, onAuthorClick, onToast, currentUid, onReflexaoD
         currentUid={currentUid}
         onDeleted={onReflexaoDeleted}
         onToast={onToast}
+        filaAudio={filaAudio}
       />
     );
   }
-  return <PostCard post={item} index={index} onAuthorClick={onAuthorClick} onToast={onToast} />;
+  return <PostCard post={item} index={index} onAuthorClick={onAuthorClick} onToast={onToast} filaAudio={filaAudio} />;
 }
 
 // ─── HomePageContent ──────────────────────────────────────────────────────────
@@ -753,6 +870,10 @@ function HomePageContent() {
   const feedRef = useRef<HTMLDivElement>(null);
 
   const currentUid = auth.currentUser?.uid ?? null;
+
+  const [filaAudio, setFilaAudio] = useState<any[]>([]);
+  const seriesExpandidasRef = useRef<Map<string, any[]>>(new Map());
+  const filaExpandidaBuiltRef = useRef(false);
 
   useEffect(() => {
     async function fetchAll() {
@@ -777,6 +898,22 @@ function HomePageContent() {
         );
         setAllPosts(posts);
         setFeedItems(mixed);
+
+        const filaImediata = mixed
+          .filter((item) => item._feedType !== "serie")
+          .map((item) => ({
+            id: item.id,
+            tipo: item.tipo,
+            titulo: item.titulo,
+            autorNome: item.autorNome || "Autor",
+            autorFoto: item.autorFoto ?? null,
+            slug: item.slug,
+            autorSlug: item.autorSlug,
+            audioUrl: item.audioUrl || FALLBACK_AUDIO,
+          }));
+        setFilaAudio(filaImediata);
+
+        expandirSeriesBackground(mixed, series);
       } catch (error) {
         console.error("Erro ao buscar feed:", error);
       }
@@ -784,6 +921,77 @@ function HomePageContent() {
     }
     fetchAll();
   }, []);
+
+  async function expandirSeriesBackground(mixed: any[], series: any[]) {
+    if (filaExpandidaBuiltRef.current) return;
+    filaExpandidaBuiltRef.current = true;
+
+    try {
+      await Promise.all(
+        series.map(async (serie) => {
+          if (!serie.postIds || serie.postIds.length === 0) return;
+          try {
+            const snaps = await Promise.all(
+              (serie.postIds as string[]).map((id) => getDoc(doc(db, "posts", id)))
+            );
+            const postsDaSerie = snaps
+              .filter((s) => s.exists())
+              .map((s) => ({
+                id: s.id,
+                _feedType: "post" as const,
+                ...s.data(),
+              }));
+            seriesExpandidasRef.current.set(serie.id, postsDaSerie);
+          } catch (err) {
+            console.error(`Erro ao expandir série ${serie.id}:`, err);
+          }
+        })
+      );
+
+      const novaFila: any[] = [];
+      for (const item of mixed) {
+        if (item._feedType === "serie") {
+          const postsExpandidos = seriesExpandidasRef.current.get(item.id);
+          if (postsExpandidos && postsExpandidos.length > 0) {
+            for (const p of postsExpandidos) {
+              novaFila.push({
+                id: p.id,
+                tipo: p.tipo,
+                titulo: p.titulo,
+                autorNome: p.autorNome || "Autor",
+                autorFoto: p.autorFoto ?? null,
+                slug: p.slug,
+                autorSlug: p.autorSlug,
+                audioUrl: p.audioUrl || FALLBACK_AUDIO,
+              });
+            }
+          }
+        } else {
+          novaFila.push({
+            id: item.id,
+            tipo: item.tipo,
+            titulo: item.titulo,
+            autorNome: item.autorNome || "Autor",
+            autorFoto: item.autorFoto ?? null,
+            slug: item.slug,
+            autorSlug: item.autorSlug,
+            audioUrl: item.audioUrl || FALLBACK_AUDIO,
+          });
+        }
+      }
+
+      const vistos = new Set<string>();
+      const filaDeduplicada = novaFila.filter((item) => {
+        if (vistos.has(item.id)) return false;
+        vistos.add(item.id);
+        return true;
+      });
+
+      setFilaAudio(filaDeduplicada);
+    } catch (err) {
+      console.error("Erro ao expandir séries para fila de áudio:", err);
+    }
+  }
 
   useEffect(() => { setVisibleCount(PAGE_SIZE); }, [buscaAtiva]);
 
@@ -924,6 +1132,7 @@ function HomePageContent() {
                     onToast={showToast}
                     currentUid={currentUid}
                     onReflexaoDeleted={handleReflexaoDeleted}
+                    filaAudio={filaAudio}
                   />
                 ))}
               </div>
@@ -986,7 +1195,6 @@ function HomePageContent() {
         .card-cover-badge { position: absolute; top: 0.625rem; right: 0.75rem; backdrop-filter: blur(6px); background: rgba(10, 15, 10, 0.72) !important; }
         .card-image-content { display: flex; flex-direction: column; }
 
-        /* Reflexão no feed */
         .reflexao-feed-item { position: relative; }
         .reflexao-owner-actions {
           display: flex;

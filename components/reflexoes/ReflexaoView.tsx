@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -23,6 +23,9 @@ import CompartilharWhatsapp from "@/components/reflexoes/CompartilharWhatsapp";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import { useAudioSync } from "@/hooks/useAudioSync";
+import type { AudioPublication } from "@/providers/AudioProvider";
+import { FALLBACK_AUDIO } from "@/lib/audioQueue";
 
 const CommentSection = dynamic(
   () => import("@/components/comments/CommentSection"),
@@ -175,18 +178,17 @@ type ReflexaoNav = {
 type NavAutor = { nome: string; fotoUrl: string | null };
 
 // ── ReflexaoNavigation ────────────────────────────────────────────────────────
-// Suporta três modos:
-//   ?from=home  → feed global misturado
-//   sem param   → reflexões do mesmo autor (comportamento original)
 
 function ReflexaoNavigation({
   reflexaoId,
   autorId,
   autorSlugAtual,
+  onPlayQueueItem,
 }: {
   reflexaoId: string;
   autorId: string;
   autorSlugAtual: string;
+  onPlayQueueItem: (pub: AudioPublication) => void;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -201,7 +203,6 @@ function ReflexaoNavigation({
   useEffect(() => {
     async function fetchNav() {
       try {
-        // ── Modo A: feed global misturado (?from=home) ─────────────────────
         if (fromHome) {
           const all = await fetchFeedGlobal();
           const idx = all.findIndex((item) => item.id === reflexaoId);
@@ -240,7 +241,7 @@ function ReflexaoNavigation({
           return;
         }
 
-        // ── Modo B: reflexões do mesmo autor (comportamento original) ───────
+        // Modo B: reflexões do mesmo autor
         const autorSnap = await getDoc(doc(db, "users", autorId));
         let fotoUrl: string | null = null;
         let nomeCompleto = "";
@@ -274,11 +275,10 @@ function ReflexaoNavigation({
         const idx = todas.findIndex((r) => r.id === reflexaoId);
         if (idx === -1) { setLoading(false); return; }
 
-        const p = idx - 1 >= 0            ? todas[idx - 1] : null;
-        const n = idx + 1 < todas.length  ? todas[idx + 1] : null;
+        const p = idx - 1 >= 0           ? todas[idx - 1] : null;
+        const n = idx + 1 < todas.length ? todas[idx + 1] : null;
         setPrev(p);
         setNext(n);
-        // Para o modo autor, prevAutor/nextAutor são sempre o mesmo autor
         const navAutor: NavAutor = { nome: nomeCompleto, fotoUrl };
         if (p) setPrevAutor(navAutor);
         if (n) setNextAutor(navAutor);
@@ -290,17 +290,29 @@ function ReflexaoNavigation({
     fetchNav();
   }, [reflexaoId, autorId, autorSlugAtual, fromHome]);
 
-  // Monta a URL de navegação
   function navUrl(item: FeedNavItem | ReflexaoNav): string {
     if (fromHome) return feedItemUrl(item as FeedNavItem);
     const r = item as ReflexaoNav;
-    return `/${r.autorSlug}/reflexao/${r.slug}`;
+    return `/${r.autorSlug}/reflexao/${r.slug}?from=perfil`;
   }
 
-  // Label do botão
   function navLabel(item: FeedNavItem | ReflexaoNav, direction: "prev" | "next"): string {
     if (fromHome) return feedItemLabel(item as FeedNavItem, direction);
     return direction === "prev" ? "Reflexão anterior" : "Próxima reflexão";
+  }
+
+  function handleNav(item: FeedNavItem | ReflexaoNav) {
+    onPlayQueueItem({
+      id: item.id,
+      tipo: "reflexao",
+      titulo: item.titulo,
+      autorNome: (item as ReflexaoNav).autorNome ?? (item as FeedNavItem).autorNome ?? "Autor",
+      autorFoto: (item as ReflexaoNav).autorFoto ?? null,
+      slug: (item as ReflexaoNav).slug ?? (item as FeedNavItem).slug ?? item.id,
+      autorSlug: (item as ReflexaoNav).autorSlug ?? (item as FeedNavItem).autorSlug,
+      audioUrl: FALLBACK_AUDIO,
+    });
+    router.push(navUrl(item));
   }
 
   if (loading || (!prev && !next)) return null;
@@ -335,7 +347,7 @@ function ReflexaoNavigation({
       >
         {prev ? (
           <button
-            onClick={() => router.push(navUrl(prev))}
+            onClick={() => handleNav(prev)}
             aria-label={`Anterior: ${prev.titulo}`}
             style={{ ...cardBase, alignItems: "flex-start", textAlign: "left" }}
             onMouseEnter={(e) => {
@@ -382,7 +394,7 @@ function ReflexaoNavigation({
 
         {next ? (
           <button
-            onClick={() => router.push(navUrl(next))}
+            onClick={() => handleNav(next)}
             aria-label={`Próximo: ${next.titulo}`}
             style={{ ...cardBase, alignItems: "flex-end", textAlign: "right" }}
             onMouseEnter={(e) => {
@@ -446,7 +458,7 @@ function ReflexaoNavigation({
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Componente principal ──────────────────────────────────────────────────────
 
 type Props = {
   reflexao: Reflexao;
@@ -455,6 +467,9 @@ type Props = {
 
 export default function ReflexaoView({ reflexao, autorSlug }: Props) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromParam = searchParams.get("from") ?? "";
+
   const [isOwner, setIsOwner] = useState(false);
   const [deletando, setDeletando] = useState(false);
 
@@ -464,9 +479,20 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
   const [likePending, setLikePending] = useState(false);
 
   const [commentCount, setCommentCount] = useState<number>(reflexao.commentCount ?? 0);
-  const [showLoginBanner, setShowLoginBanner] = useState(false);
+
+  // Modal de login — usado por curtir, comentar e ouvir
+  const [showLoginModal, setShowLoginModal] = useState(false);
+
+  const [buildingQueue, setBuildingQueue] = useState(false);
+
+  const currentPath = typeof window !== "undefined"
+    ? window.location.pathname + window.location.search
+    : "/";
 
   const jaAmei = uid ? likedBy.includes(uid) : false;
+
+  // ── useAudioSync ──────────────────────────────────────────────────────────
+  const { handlePlayQueueItem } = useAudioSync(reflexao.id ?? "", fromParam);
 
   useEffect(() => {
     const currentUid = auth.currentUser?.uid;
@@ -490,7 +516,10 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
   async function handleLike() {
     if (likePending) return;
-    if (!uid) { setShowLoginBanner(true); return; }
+    if (!uid) {
+      setShowLoginModal(true);
+      return;
+    }
     if (!reflexao.id) return;
     setLikePending(true);
 
@@ -522,20 +551,25 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
   function handleScrollToComments() {
     if (!uid) {
-      setShowLoginBanner(true);
-      setTimeout(() => {
-        document.getElementById("reflexao-comments-banner")
-          ?.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 50);
+      setShowLoginModal(true);
       return;
     }
-    setShowLoginBanner(false);
     document.getElementById("reflexao-comments")?.scrollIntoView({ behavior: "smooth" });
   }
 
-  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
-  const audioAtivo = isCurrentPublication(reflexao.id ?? "");
-  const audioTocando = isCurrentlyPlaying(reflexao.id ?? "");
+  const {
+    playOrToggle,
+    playQueue,
+    queue,
+    contextType,
+    isCurrentlyPlaying,
+    isCurrentPublication,
+    isLoading: audioLoading,
+    current,
+  } = useAudioPlayer();
+
+  const audioAtivo    = isCurrentPublication(reflexao.id ?? "");
+  const audioTocando  = isCurrentlyPlaying(reflexao.id ?? "");
   const audioCarregando = audioAtivo && audioLoading;
 
   const ouvirBtnRef = useRef<HTMLSpanElement>(null);
@@ -552,19 +586,64 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
     return () => observer.disconnect();
   }, []);
 
-  function handleOuvir(e: React.MouseEvent) {
+  const pubDestaReflexao: AudioPublication = {
+    id: reflexao.id ?? "",
+    tipo: "reflexao",
+    titulo: reflexao.titulo,
+    autorNome: reflexao.autorNome,
+    autorFoto: null,
+    slug: reflexao.slug,
+    autorSlug: autorSlug,
+    audioUrl: (reflexao as any).audioUrl || FALLBACK_AUDIO,
+  };
+
+  async function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
+    if (!auth.currentUser) {
+      setShowLoginModal(true);
+      return;
+    }
     if (!reflexao.id) return;
-    playOrToggle({
-      id: reflexao.id,
-      tipo: "reflexao",
-      titulo: reflexao.titulo,
-      autorNome: reflexao.autorNome,
-      autorFoto: null,
-      slug: reflexao.slug,
-      autorSlug: autorSlug,
-      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    });
+
+    // Se já há fila ativa com esta reflexão, apenas toggle
+    if (queue.length > 0 && queue.some((p) => p.id === reflexao.id)) {
+      playOrToggle(pubDestaReflexao);
+      return;
+    }
+
+    // Monta fila de todas as reflexões do mesmo autor
+    setBuildingQueue(true);
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, "posts"),
+          where("autorId", "==", reflexao.autorId),
+          where("tipo", "==", "reflexao"),
+          orderBy("criadoEm", "desc")
+        )
+      );
+
+      const novaFila: AudioPublication[] = snap.docs.map((d) => ({
+        id: d.id,
+        tipo: "reflexao" as const,
+        titulo: d.data().titulo || "Sem título",
+        autorNome: d.data().autorNome || reflexao.autorNome,
+        autorFoto: null,
+        slug: d.data().slug ?? d.id,
+        autorSlug: d.data().autorSlug ?? autorSlug,
+        audioUrl: (d.data().audioUrl as string) || FALLBACK_AUDIO,
+      }));
+
+      if (novaFila.length > 0) {
+        playQueue(pubDestaReflexao, novaFila, "perfil");
+      } else {
+        playQueue(pubDestaReflexao, [pubDestaReflexao], "perfil");
+      }
+    } catch (err) {
+      console.error("Erro ao montar fila de reflexões:", err);
+      playQueue(pubDestaReflexao, [pubDestaReflexao], "perfil");
+    }
+    setBuildingQueue(false);
   }
 
   const paragrafos = reflexao.conteudo
@@ -587,6 +666,14 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
     reflexao.imagemFotografoUrl &&
     reflexao.imagemUnsplashUrl;
 
+  const ouvirLabel = buildingQueue || audioCarregando
+    ? "Carregando…"
+    : audioTocando
+    ? "Pausar"
+    : audioAtivo
+    ? "Continuar"
+    : "Ouvir";
+
   return (
     <div style={{
       maxWidth: 680,
@@ -596,8 +683,16 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       flexDirection: "column",
       gap: "2rem",
     }}>
+      {/* Modal de login global */}
+      {showLoginModal && (
+        <BannerLogin
+          modal
+          onClose={() => setShowLoginModal(false)}
+          redirectTo={currentPath}
+        />
+      )}
 
-      {/* ── Barra de ações do autor ─────────────────────────────────── */}
+      {/* ── Barra de ações do autor ── */}
       {isOwner && (
         <div style={{
           display: "flex", gap: "0.625rem", padding: "0.875rem 1.125rem",
@@ -772,6 +867,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
         <button
           onClick={handleOuvir}
+          disabled={buildingQueue}
           aria-label={audioTocando ? "Pausar áudio" : "Ouvir reflexão"}
           style={{
             display: "inline-flex", alignItems: "center", gap: "0.4rem",
@@ -781,14 +877,22 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
             background: audioAtivo ? "var(--emerald-dim)" : "transparent",
             color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
             fontSize: "0.82rem", fontWeight: 600,
-            cursor: audioCarregando ? "default" : "pointer",
-            opacity: audioCarregando ? 0.7 : 1,
+            cursor: (buildingQueue || audioCarregando) ? "default" : "pointer",
+            opacity: (buildingQueue || audioCarregando) ? 0.7 : 1,
             transition: "all 0.2s cubic-bezier(0.4,0,0.2,1)",
             fontFamily: "inherit",
           }}
         >
-          <span>{audioCarregando ? "⏳" : audioTocando ? "⏸" : "🎧"}</span>
-          <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
+          {buildingQueue || audioCarregando ? (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+            </svg>
+          ) : audioTocando ? (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z" /></svg>
+          )}
+          <span>{ouvirLabel}</span>
           {audioTocando && (
             <span style={{ fontSize: "0.68rem", fontStyle: "italic", opacity: 0.8 }}>
               · tocando
@@ -800,10 +904,11 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       {/* Âncora invisível para o IntersectionObserver */}
       <span ref={ouvirBtnRef} style={{ display: "none" }} aria-hidden="true" />
 
-      {/* Botão flutuante — aparece quando a seção de ações sai da tela */}
-      {ouvirFlutuante && (
+      {/* Botão flutuante */}
+      {ouvirFlutuante && !current && (
         <button
           onClick={handleOuvir}
+          disabled={buildingQueue}
           aria-label={audioTocando ? "Pausar áudio" : "Ouvir reflexão"}
           style={{
             position: "fixed",
@@ -820,22 +925,25 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
             color: audioTocando ? "#fff" : "var(--emerald)",
             fontSize: "0.8rem",
             fontWeight: 700,
-            cursor: "pointer",
+            cursor: buildingQueue ? "default" : "pointer",
             boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
             backdropFilter: "blur(8px)",
             transition: "all 0.2s ease",
             fontFamily: "inherit",
+            opacity: buildingQueue ? 0.7 : 1,
           }}
         >
-          {audioCarregando ? "⏳" : audioTocando ? "⏸" : "🎧"}
-          <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}</span>
+          {buildingQueue || audioCarregando ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+            </svg>
+          ) : audioTocando ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z" /></svg>
+          )}
+          <span>{buildingQueue ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}</span>
         </button>
-      )}
-
-      {showLoginBanner && (
-        <div id="reflexao-comments-banner">
-          <BannerLogin onClose={() => setShowLoginBanner(false)} />
-        </div>
       )}
 
       {/* ── Compartilhar no WhatsApp ── */}
@@ -890,6 +998,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
           reflexaoId={reflexao.id}
           autorId={reflexao.autorId}
           autorSlugAtual={autorSlug}
+          onPlayQueueItem={handlePlayQueueItem}
         />
       )}
 

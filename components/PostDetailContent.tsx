@@ -14,8 +14,18 @@ import LinksReferencia from "@/components/LinksReferencia";
 import BannerLogin from "@/components/BannerLogin";
 import CommentSection from "@/components/comments/CommentSection";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import { useAudioSync } from "@/hooks/useAudioSync";
+import {
+  FALLBACK_AUDIO,
+  fetchFeedGlobal,
+  buildAudioQueueFromFeed,
+  feedItemUrl,
+  feedItemLabel,
+  type FeedNavItem,
+} from "@/lib/audioQueue";
+import type { AudioPublication } from "@/providers/AudioProvider";
 
-/* ── helpers ─────────────────────────────────────────── */
+/* ── helpers ───────────────────────────────────────────────────────────────── */
 
 export function formatData(data: any) {
   if (!data) return "";
@@ -29,33 +39,16 @@ export function getInitials(name: string) {
   return name.split(" ").slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
-/**
- * Decodifica HTML duplamente escapado.
- * Quando o Firestore armazena o conteúdo como entidades HTML
- * (ex.: "&lt;div&gt;"), o dangerouslySetInnerHTML exibe as tags como texto.
- * Este helper detecta esse caso e decodifica antes de renderizar.
- */
-function decodeHtmlContent(str: string): string {
-  if (typeof window === "undefined") return str;
-
-  let html = str;
-
-  // Decodifica entidades caso esteja duplamente escapado
-  if (!/(<[a-zA-Z])/.test(html) && /&lt;/.test(html)) {
-    const ta = document.createElement("textarea");
-    ta.innerHTML = html;
-    html = ta.value;
+function prepararConteudo(str: string): string {
+  if (!str) return "";
+  if (/<[a-zA-Z][\s\S]*?>/.test(str)) {
+    return str;
   }
-
-  // Remove white-space: pre-wrap que o editor pode ter salvo nos estilos inline
-  // (causava exibição de HTML cru no mobile)
-  html = html.replace(/white-space\s*:\s*pre-wrap\s*[;]?/gi, "");
-  html = html.replace(/white-space\s*:\s*pre\s*[;]?/gi, "");
-
-  // Limpa atributos style que ficaram vazios após a remoção
-  html = html.replace(/\s*style\s*=\s*["']\s*["']/gi, "");
-
-  return html;
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
 }
 
 export function AuthorAvatar({
@@ -81,6 +74,7 @@ export function AuthorAvatar({
         }}
       />
     );
+
   return (
     <div
       style={{
@@ -103,7 +97,7 @@ export function AuthorAvatar({
   );
 }
 
-/* ── SVG Icons ───────────────────────────────────────── */
+/* ── SVG Icons ─────────────────────────────────────────────────────────────── */
 
 function IconDownload({ size = 14 }: { size?: number }) {
   return (
@@ -173,70 +167,7 @@ function IconArrowRight({ size = 12 }: { size?: number }) {
   );
 }
 
-/* ── helpers de feed global ──────────────────────────── */
-
-function getDataValor(item: any): number {
-  if (!item) return 0;
-  const d = item.criadoEm || item.data;
-  if (!d) return 0;
-  if (d?.toDate) return d.toDate().getTime();
-  if (typeof d === "string") return new Date(d).getTime();
-  return 0;
-}
-
-type FeedNavItem = {
-  id: string;
-  _feedType: "post" | "serie" | "reflexao";
-  titulo: string;
-  slug?: string;
-  tipo?: string;
-  autorId?: string;
-  autorNome?: string;
-  autorSlug?: string;
-};
-
-async function fetchFeedGlobal(): Promise<FeedNavItem[]> {
-  const [postsSnap, seriesSnap, reflexoesSnap] = await Promise.all([
-    getDocs(query(collection(db, "posts"), where("tipo", "in", ["sermao", "artigo"]), orderBy("data", "desc"))),
-    getDocs(query(collection(db, "series"), orderBy("criadoEm", "desc"))),
-    getDocs(query(collection(db, "posts"), where("tipo", "==", "reflexao"), orderBy("criadoEm", "desc"))),
-  ]);
-
-  const posts: FeedNavItem[] = [];
-  postsSnap.forEach((d) => posts.push({ id: d.id, _feedType: "post", ...d.data() } as FeedNavItem));
-
-  const series: FeedNavItem[] = [];
-  seriesSnap.forEach((d) => series.push({ id: d.id, _feedType: "serie", ...d.data() } as FeedNavItem));
-
-  const reflexoes: FeedNavItem[] = [];
-  reflexoesSnap.forEach((d) => reflexoes.push({ id: d.id, _feedType: "reflexao", ...d.data() } as FeedNavItem));
-
-  return [...posts, ...series, ...reflexoes].sort(
-    (a, b) => getDataValor(b) - getDataValor(a)
-  );
-}
-
-function feedItemUrl(item: FeedNavItem): string {
-  if (item._feedType === "serie") {
-    return `/series/${item.slug ?? item.id}?from=home`;
-  }
-  if (item._feedType === "reflexao") {
-    const aSlug = item.autorSlug ?? item.autorId ?? "";
-    return `/${aSlug}/reflexao/${item.slug ?? item.id}?from=home`;
-  }
-  const cat = item.tipo === "sermao" ? "sermoes" : "estudos";
-  return `/posts/${cat}/${item.slug ?? item.id}?from=home`;
-}
-
-function feedItemLabel(item: FeedNavItem, direction: "prev" | "next"): string {
-  const prefix = direction === "prev" ? "Anterior" : "Próximo";
-  if (item._feedType === "serie") return `${prefix}: série`;
-  if (item._feedType === "reflexao") return `Reflexão ${direction === "prev" ? "anterior" : "próxima"}`;
-  if (item.tipo === "sermao") return `Sermão ${direction === "prev" ? "anterior" : "próximo"}`;
-  return `Estudo ${direction === "prev" ? "anterior" : "próximo"}`;
-}
-
-/* ── Navegação entre posts ───────────────────────────── */
+/* ── Navegação entre posts ───────────────────────────────────────────────── */
 
 type PostNav = {
   id: string;
@@ -249,15 +180,31 @@ type PostNav = {
 
 type PostNavAutor = { nome: string; fotoUrl: string | null };
 
-function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?: string }) {
+type PostNavigationProps = {
+  postId: string;
+  autorIdProp?: string;
+  fromParam: string;
+  serieSlugParam: string;
+  playerQueue: AudioPublication[];
+  playerContextType: string | null;
+  onPlayQueueItem: (pub: AudioPublication) => void;
+};
+
+function PostNavigation({
+  postId,
+  autorIdProp,
+  fromParam,
+  serieSlugParam,
+  playerQueue,
+  playerContextType,
+  onPlayQueueItem,
+}: PostNavigationProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const fromParam = searchParams.get("from") ?? "";
   const fromHome   = fromParam === "home";
   const fromPerfil = fromParam === "perfil";
   const fromSerie  = fromParam === "serie";
-  const serieSlugParam = searchParams.get("serieSlug") ?? "";
 
   const [prev, setPrev] = useState<FeedNavItem | PostNav | null>(null);
   const [next, setNext] = useState<FeedNavItem | PostNav | null>(null);
@@ -273,8 +220,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           const all = await fetchFeedGlobal();
           const idx = all.findIndex((item) => item.id === postId);
           if (idx === -1) { setLoading(false); return; }
-          const p = idx - 1 >= 0         ? all[idx - 1] : null;
-          const n = idx + 1 < all.length ? all[idx + 1] : null;
+          const p = idx - 1 >= 0          ? all[idx - 1] : null;
+          const n = idx + 1 < all.length  ? all[idx + 1] : null;
           setPrev(p);
           setNext(n);
 
@@ -328,8 +275,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
             const idx = all.findIndex((p) => p.id === postId);
             if (idx === -1) { setLoading(false); return; }
-            const p = idx - 1 >= 0         ? all[idx - 1] : null;
-            const n = idx + 1 < all.length ? all[idx + 1] : null;
+            const p = idx - 1 >= 0          ? all[idx - 1] : null;
+            const n = idx + 1 < all.length  ? all[idx + 1] : null;
             setPrev(p);
             setNext(n);
 
@@ -374,8 +321,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
           const idx = all.findIndex((p) => p.id === postId);
           if (idx === -1) { setLoading(false); return; }
-          const p = idx - 1 >= 0         ? all[idx - 1] : null;
-          const n = idx + 1 < all.length ? all[idx + 1] : null;
+          const p = idx - 1 >= 0          ? all[idx - 1] : null;
+          const n = idx + 1 < all.length  ? all[idx + 1] : null;
           setPrev(p);
           setNext(n);
 
@@ -404,7 +351,6 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
           return;
         }
 
-        // Legado — feed global de posts
         const snap = await getDocs(
           query(collection(db, "posts"), orderBy("data", "desc"))
         );
@@ -419,8 +365,8 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
         const idx = all.findIndex((p) => p.id === postId);
         if (idx === -1) { setLoading(false); return; }
-        const p = idx - 1 >= 0         ? all[idx - 1] : null;
-        const n = idx + 1 < all.length ? all[idx + 1] : null;
+        const p = idx - 1 >= 0          ? all[idx - 1] : null;
+        const n = idx + 1 < all.length  ? all[idx + 1] : null;
         setPrev(p);
         setNext(n);
 
@@ -454,7 +400,9 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
   }, [postId, autorIdProp, fromHome, fromPerfil, fromSerie, serieSlugParam]);
 
   function navUrl(item: FeedNavItem | PostNav): string {
-    if (fromHome) return feedItemUrl(item as FeedNavItem);
+    if (fromHome) {
+      return feedItemUrl(item as FeedNavItem, fromParam);
+    }
     if (fromSerie && serieSlugParam) {
       const p = item as PostNav;
       const base = p.slug
@@ -477,10 +425,21 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
   function navLabel(item: FeedNavItem | PostNav, direction: "prev" | "next"): string {
     if (fromHome) return feedItemLabel(item as FeedNavItem, direction);
-    if (fromSerie) return direction === "prev" ? "Anterior na série" : "Próximo na série";
+    if (fromSerie) {
+      return direction === "prev" ? "Anterior na série" : "Próximo na série";
+    }
     const p = item as PostNav;
     if (direction === "prev") return p.tipo === "sermao" ? "Sermão anterior" : "Estudo anterior";
     return p.tipo === "sermao" ? "Próximo sermão" : "Próximo estudo";
+  }
+
+  function handleNav(item: FeedNavItem | PostNav) {
+    const url = navUrl(item);
+    const pubNaFila = playerQueue.find((p) => p.id === item.id);
+    if (pubNaFila) {
+      onPlayQueueItem(pubNaFila);
+    }
+    router.push(url);
   }
 
   if (loading || (!prev && !next && !serieInfo)) return null;
@@ -518,7 +477,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
       >
         {prev ? (
           <button
-            onClick={() => router.push(navUrl(prev))}
+            onClick={() => handleNav(prev)}
             className="post-nav-btn post-nav-btn--prev"
             aria-label={`Anterior: ${prev.titulo}`}
             style={{ ...cardBase, alignItems: "flex-start", textAlign: "left" }}
@@ -556,7 +515,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
 
         {next ? (
           <button
-            onClick={() => router.push(navUrl(next))}
+            onClick={() => handleNav(next)}
             className="post-nav-btn post-nav-btn--next"
             aria-label={`Próximo: ${next.titulo}`}
             style={{ ...cardBase, alignItems: "flex-end", textAlign: "right" }}
@@ -596,7 +555,7 @@ function PostNavigation({ postId, autorIdProp }: { postId: string; autorIdProp?:
   );
 }
 
-/* ── Modal: quem curtiu ──────────────────────────────── */
+/* ── Modal: quem curtiu ──────────────────────────────────────────────────── */
 
 function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => void }) {
   const [pessoas, setPessoas] = useState<{ uid: string; nome: string; foto: string | null }[]>([]);
@@ -679,7 +638,7 @@ function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => vo
   );
 }
 
-/* ── ShareDropdown ───────────────────────────────────── */
+/* ── ShareDropdown ───────────────────────────────────────────────────────── */
 
 function ShareDropdown({
   anchorRef, dropdownRef, urlAtual, textoCompartilhar,
@@ -717,12 +676,12 @@ function ShareDropdown({
       <a href={`https://twitter.com/intent/tweet?text=${textoCompartilhar}&url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-twitter" onClick={onClose}>X (Twitter)</a>
       <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${urlEncoded}`} target="_blank" rel="noopener noreferrer" className="share-btn share-linkedin" onClick={onClose}>LinkedIn</a>
       <a href={`https://mail.google.com/mail/?view=cm&su=${textoCompartilhar}&body=${emailBody}`} className="share-btn share-email" onClick={onClose}>Email</a>
-      <button onClick={onCopiar} className="share-btn share-copy">{copiado ? "✓ Copiado!" : "Copiar link"}</button>
+      <button onClick={onCopiar} className="share-btn share-copy">{copiado ? "✔ Copiado!" : "Copiar link"}</button>
     </div>
   );
 }
 
-/* ── SelectionPopup ──────────────────────────────────── */
+/* ── SelectionPopup ──────────────────────────────────────────────────────── */
 
 function SelectionPopup({
   trechoSelecionado, posicao, isMobile, nomeAutor, tituloPost, urlAtual, onFechar, onToast,
@@ -798,12 +757,12 @@ function SelectionPopup({
       >WhatsApp</a>
       <button onClick={handleCopiar}
         style={{ display: "inline-flex", alignItems: "center", background: copiado ? "var(--emerald-dim)" : "var(--bg-card)", color: copiado ? "var(--emerald)" : "var(--text-2)", border: "1px solid var(--border-light)", fontSize: "0.72rem", fontWeight: 600, padding: "4px 10px", borderRadius: "var(--radius-full)", cursor: "pointer", transition: "all 0.15s" }}
-      >{copiado ? "✓ Copiado!" : "Copiar"}</button>
+      >{copiado ? "✔ Copiado!" : "Copiar"}</button>
     </div>
   );
 }
 
-/* ── Componente principal ────────────────────────────── */
+/* ── Componente principal ────────────────────────────────────────────────── */
 
 export type PostDetailProps = {
   post: any;
@@ -815,6 +774,9 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const router = useRouter();
   const { user } = useAuth();
   const conteudoRef = useRef<HTMLDivElement>(null);
+  const searchParams = useSearchParams();
+  const fromParam = searchParams.get("from") ?? "";
+  const serieSlugParam = searchParams.get("serieSlug") ?? "";
 
   const [liked, setLiked] = useState<boolean>(() => {
     const uid = auth.currentUser?.uid;
@@ -830,9 +792,9 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
   const [viewCount, setViewCount] = useState<number>(post.visualizacoes ?? 0);
-
-  // FIX: decodifica HTML caso esteja duplamente escapado (problema no mobile)
-  const conteudoHtml = decodeHtmlContent(post.conteudo ?? "");
+  // modal login — usado por curtir E por ouvir
+  const [modalLoginVisivel, setModalLoginVisivel] = useState(false);
+  const [bannerLoginVisivel, setBannerLoginVisivel] = useState(false);
 
   useEffect(() => {
     async function registrarVisualizacao() {
@@ -914,8 +876,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   async function handleLike() {
     const uid = auth.currentUser?.uid;
     if (!uid) {
-      const destino = window.location.pathname + window.location.search;
-      router.push(`/entrar?next=${encodeURIComponent(destino)}`);
+      setModalLoginVisivel(true);
       return;
     }
     if (loadingLike) return;
@@ -965,24 +926,137 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
   const actionBtnStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: "5px" };
 
-  const { playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  // ── Áudio ────────────────────────────────────────────────────────────────
+  const {
+    playOrToggle,
+    playQueue,
+    isCurrentlyPlaying,
+    isCurrentPublication,
+    isLoading: audioLoading,
+    queue,
+    currentIndex,
+    contextType,
+  } = useAudioPlayer();
+
   const audioAtivo = isCurrentPublication(postId);
   const audioTocando = isCurrentlyPlaying(postId);
   const audioCarregando = audioAtivo && audioLoading;
 
-  const ouvirBtnRef = useRef<HTMLButtonElement>(null);
+  const ouvirBtnRef = useRef<HTMLSpanElement>(null);
   const [ouvirFlutuante, setOuvirFlutuante] = useState(false);
 
   useEffect(() => {
-  const el = ouvirBtnRef.current;
-  if (!el) return;
-  const observer = new IntersectionObserver(
+    const el = ouvirBtnRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
       ([entry]) => setOuvirFlutuante(!entry.isIntersecting),
       { threshold: 0 }
     );
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  const pubDestePost: AudioPublication = {
+    id: postId,
+    tipo: post.tipo,
+    titulo: post.titulo,
+    autorNome: nomeExibicao,
+    autorFoto: fotoAutor,
+    slug: post.slug,
+    audioUrl: post.audioUrl || FALLBACK_AUDIO,
+  };
+
+  const [buildingQueue, setBuildingQueue] = useState(false);
+
+  async function buildAndPlay() {
+    // ── Verificar login antes de qualquer coisa ──────────────────────────
+    if (!auth.currentUser) {
+      setModalLoginVisivel(true);
+      return;
+    }
+
+    const filaTemEstePost = queue.length > 0 && queue.some((p) => p.id === postId);
+    const contextoCorreto =
+      (fromParam === "home"   && contextType === "home")   ||
+      (fromParam === "perfil" && contextType === "perfil") ||
+      (fromParam === "serie"  && contextType === "serie")  ||
+      (!fromParam && contextType === null);
+    if (filaTemEstePost && contextoCorreto) {
+      playOrToggle(pubDestePost);
+      return;
+    }
+
+    setBuildingQueue(true);
+    try {
+      if (fromParam === "serie" && serieSlugParam) {
+        const serieSnap = await getDocs(
+          query(collection(db, "series"), where("slug", "==", serieSlugParam))
+        );
+        if (!serieSnap.empty) {
+          const serieData = serieSnap.docs[0].data();
+          const postIds: string[] = serieData.postIds ?? [];
+          const postSnaps = await Promise.all(postIds.map((id) => getDoc(doc(db, "posts", id))));
+          const novaFila: AudioPublication[] = postSnaps
+            .filter((s) => s.exists())
+            .map((s) => ({
+              id: s.id,
+              tipo: (s.data()!.tipo ?? "sermao") as AudioPublication["tipo"],
+              titulo: s.data()!.titulo || "Sem título",
+              autorNome: s.data()!.autorNome || nomeExibicao,
+              autorFoto: s.data()!.autorFoto ?? fotoAutor,
+              slug: s.data()!.slug ?? s.id,
+              autorSlug: s.data()!.autorSlug,
+              audioUrl: s.data()!.audioUrl || FALLBACK_AUDIO,
+            }));
+          if (novaFila.length > 0) {
+            playQueue(pubDestePost, novaFila, "serie");
+            setBuildingQueue(false);
+            return;
+          }
+        }
+      }
+
+      if (fromParam === "home") {
+        const feedItems = await fetchFeedGlobal();
+        const novaFila = await buildAudioQueueFromFeed(feedItems);
+        if (novaFila.length > 0) {
+          playQueue(pubDestePost, novaFila, "home");
+          setBuildingQueue(false);
+          return;
+        }
+      }
+
+      if (fromParam === "perfil" && post.autorId) {
+        const snap = await getDocs(
+          query(collection(db, "posts"), where("autorId", "==", post.autorId), orderBy("data", "desc"))
+        );
+        const novaFila: AudioPublication[] = snap.docs.map((d) => ({
+          id: d.id,
+          tipo: (d.data().tipo ?? "sermao") as AudioPublication["tipo"],
+          titulo: d.data().titulo || "Sem título",
+          autorNome: d.data().autorNome || nomeExibicao,
+          autorFoto: d.data().autorFoto ?? fotoAutor,
+          slug: d.data().slug ?? d.id,
+          autorSlug: d.data().autorSlug,
+          audioUrl: d.data().audioUrl || FALLBACK_AUDIO,
+        }));
+        if (novaFila.length > 0) {
+          playQueue(pubDestePost, novaFila, "perfil");
+          setBuildingQueue(false);
+          return;
+        }
+      }
+
+      playQueue(pubDestePost, [pubDestePost], null);
+    } catch (err) {
+      console.error("Erro ao construir fila de áudio:", err);
+      playOrToggle(pubDestePost);
+    }
+    setBuildingQueue(false);
+  }
+
+  // ── Sincronização áudio ↔ navegação ──────────────────────────────────────
+  const { handlePlayQueueItem } = useAudioSync(postId, fromParam, serieSlugParam);
 
   return (
     <>
@@ -998,6 +1072,14 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       }}>
         {toastMsg}
       </div>
+
+      {modalLoginVisivel && (
+        <BannerLogin
+          modal
+          onClose={() => setModalLoginVisivel(false)}
+          redirectTo={typeof window !== "undefined" ? window.location.pathname + window.location.search : undefined}
+        />
+      )}
 
       {likesModalAberto && <LikesModal likedBy={likedBy} onClose={() => setLikesModalAberto(false)} />}
 
@@ -1016,6 +1098,15 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           nomeAutor={nomeExibicao} tituloPost={post.titulo} urlAtual={urlAtual}
           onFechar={() => setSelecao(null)} onToast={showToast}
         />
+      )}
+
+      {bannerLoginVisivel && (
+        <div style={{ marginBottom: "1rem" }}>
+          <BannerLogin
+            onClose={() => setBannerLoginVisivel(false)}
+            redirectTo={typeof window !== "undefined" ? window.location.pathname + window.location.search : undefined}
+          />
+        </div>
       )}
 
       <article className="post-detail-card">
@@ -1059,13 +1150,12 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           </div>
         )}
 
-        {/* FIX: usa conteudoHtml (decodificado) em vez de post.conteudo diretamente */}
         <div
           ref={conteudoRef}
           className="post-detail-content"
           onMouseUp={handleMouseUp}
           onTouchEnd={handleTouchEnd}
-          dangerouslySetInnerHTML={{ __html: conteudoHtml }}
+          dangerouslySetInnerHTML={{ __html: prepararConteudo(post.conteudo ?? "") }}
         />
 
         {post.tipo === "sermao" ? (
@@ -1085,7 +1175,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         <hr className="post-detail-divider" />
 
         <div className="post-detail-actions">
-
           <span ref={ouvirBtnRef} style={{ display: "none" }} aria-hidden="true" />
 
           <button onClick={handleLike} disabled={loadingLike}
@@ -1129,23 +1218,24 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           </div>
         </div>
 
-        <PostNavigation postId={postId} autorIdProp={post.autorId} />
+        <PostNavigation
+          postId={postId}
+          autorIdProp={post.autorId}
+          fromParam={fromParam}
+          serieSlugParam={serieSlugParam}
+          playerQueue={queue}
+          playerContextType={contextType}
+          onPlayQueueItem={handlePlayQueueItem}
+        />
 
         <CommentSection postId={postId} />
       </article>
 
-      {/* Botão flutuante — aparece quando o botão normal sai da tela */}
+      {/* Botão flutuante */}
       {ouvirFlutuante && (
         <button
-          onClick={() => playOrToggle({
-            id: postId,
-            tipo: post.tipo,
-            titulo: post.titulo,
-            autorNome: nomeExibicao,
-            autorFoto: fotoAutor,
-            slug: post.slug,
-            audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-          })}
+          onClick={buildAndPlay}
+          disabled={buildingQueue}
           aria-label={audioTocando ? "Pausar áudio" : "Ouvir este conteúdo"}
           style={{
             position: "fixed",
@@ -1162,30 +1252,34 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             color: audioTocando ? "#fff" : "var(--emerald)",
             fontSize: "0.8rem",
             fontWeight: 700,
-            cursor: "pointer",
+            cursor: buildingQueue ? "default" : "pointer",
             boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
             backdropFilter: "blur(8px)",
             transition: "all 0.2s ease",
             fontFamily: "inherit",
+            opacity: buildingQueue ? 0.7 : 1,
           }}
         >
-          {audioCarregando ? "⏳" : audioTocando ? "⏸" : "🎧"}
+          {buildingQueue || audioCarregando ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          ) : audioTocando ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+          )}
           <span style={{ display: "var(--ouvir-label-display, inline)" }}>
-            {audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}
+            {buildingQueue ? "Carregando…" : audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}
           </span>
         </button>
       )}
 
       <style>{`
-        /* ── Layout do card ── */
         @media (max-width: 640px) {
           .post-detail-cover-wrapper img { max-height: 360px !important; }
           .post-detail-card { padding: 1rem !important; }
           .post-detail-title { font-size: 1.35rem !important; }
           .post-detail-actions { flex-wrap: wrap; gap: 0.4rem !important; }
         }
-
-        /* ── Navegação ── */
         .post-nav-grid { display: grid; gap: 0.75rem; }
         .post-nav-grid--both      { grid-template-columns: 1fr 1fr; }
         .post-nav-grid--prev      { grid-template-columns: 1fr auto; }
@@ -1195,78 +1289,40 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           .post-nav-grid--prev,
           .post-nav-grid--next { grid-template-columns: 1fr; }
         }
-
-        /* ── Prose: estilos do conteúdo renderizado ──────────────────────────
-           Garante que o HTML do RichTextEditor seja renderizado corretamente
-           em TODOS os dispositivos, incluindo mobile.
-        ── */
         .post-detail-content {
           font-size: 0.95rem;
           line-height: 1.8;
           color: var(--text-1);
           word-break: break-word;
           overflow-wrap: break-word;
-          /* Impede que o conteúdo extrapole a tela no mobile */
           max-width: 100%;
           overflow-x: hidden;
-          /* Reseta white-space para evitar exibição de HTML como texto */
           white-space: normal;
         }
-
-        /* Garante que NENHUM elemento filho herde white-space:pre-wrap do editor */
         .post-detail-content,
         .post-detail-content * {
           white-space: normal !important;
           max-width: 100%;
           overflow-wrap: break-word;
         }
-
-        /* Blocos de texto */
         .post-detail-content div,
-        .post-detail-content p {
-          margin-bottom: 0.5em;
-          max-width: 100%;
-        }
-
-        /* Formatação inline */
+        .post-detail-content p { margin-bottom: 0.5em; max-width: 100%; }
         .post-detail-content b,
         .post-detail-content strong { font-weight: 700; }
-
         .post-detail-content i,
         .post-detail-content em { font-style: italic; }
-
         .post-detail-content u { text-decoration: underline; }
-
-        /* Spans preservam cor herdada */
-        .post-detail-content span {
-          color: inherit;
-          font-size: inherit;
-          font-family: inherit;
-        }
-
-        /* Imagens inseridas pelo editor */
+        .post-detail-content span { color: inherit; font-size: inherit; font-family: inherit; }
         .post-detail-content img {
-          max-width: 100%;
-          height: auto;
-          display: block;
-          margin: 0.75rem 0;
-          border-radius: 6px;
-          /* Garante que imagens base64 grandes não quebrem o layout */
-          object-fit: contain;
+          max-width: 100%; height: auto; display: block;
+          margin: 0.75rem 0; border-radius: 6px; object-fit: contain;
         }
-
-        /* Alinhamentos */
         .post-detail-content [style*="text-align: center"] { text-align: center; }
         .post-detail-content [style*="text-align: right"]  { text-align: right; }
         .post-detail-content [style*="text-align: justify"] { text-align: justify; }
         .post-detail-content [style*="text-align: left"]  { text-align: left; }
-
-        /* Espaçamento mobile da área de conteúdo */
         @media (max-width: 640px) {
-          .post-detail-content {
-            font-size: 0.92rem;
-            line-height: 1.75;
-          }
+          .post-detail-content { font-size: 0.92rem; line-height: 1.75; }
         }
       `}</style>
     </>

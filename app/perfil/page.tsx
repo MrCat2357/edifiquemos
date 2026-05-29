@@ -27,6 +27,7 @@ import { getReflexoesPorAutor } from "@/lib/reflexoes";
 import type { Reflexao } from "@/lib/reflexoes";
 import BotaoGerarReflexoes from "@/components/reflexoes/BotaoGerarReflexoes";
 import CardReflexao from "@/components/reflexoes/CardReflexao";
+import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
 
@@ -123,9 +124,7 @@ function IconComment({ size = 13, active = false }: { size?: number; active?: bo
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
       <path
         d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H9l-3 3v-3H3.5A1.5 1.5 0 0 1 2 9.5v-6Z"
-        stroke="currentColor"
-        strokeWidth="1.35"
-        strokeLinejoin="round"
+        stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"
         fill={active ? "currentColor" : "none"}
       />
     </svg>
@@ -151,6 +150,241 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   );
 }
 
+// ─── BotaoOuvirSerieCard ──────────────────────────────────────────────────────
+
+function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRequired: () => void }) {
+  const {
+    playQueue,
+    pause,
+    resume,
+    isPlaying,
+    isLoading: audioLoading,
+    contextType,
+    current: currentAudio,
+  } = useAudioPlayer();
+
+  const [carregandoPosts, setCarregandoPosts] = useState(false);
+  const [postsCarregados, setPostsCarregados] = useState<any[] | null>(null);
+
+  const serieAtiva =
+    contextType === "serie" &&
+    currentAudio !== null &&
+    postsCarregados !== null &&
+    postsCarregados.some((p: any) => p.id === currentAudio.id);
+
+  const tocando = serieAtiva && isPlaying;
+  const carregando = (serieAtiva && audioLoading) || carregandoPosts;
+
+  async function buscarPostsDaSerie(): Promise<any[]> {
+    if (postsCarregados !== null) return postsCarregados;
+    const postIds: string[] = serie.postIds ?? [];
+    if (postIds.length === 0) return [];
+    const snaps = await Promise.all(postIds.map((id: string) => getDoc(doc(db, "posts", id))));
+    const lista = snaps.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() }));
+    setPostsCarregados(lista);
+    return lista;
+  }
+
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!auth.currentUser) {
+      onLoginRequired();
+      return;
+    }
+    if (serieAtiva) {
+      tocando ? pause() : resume();
+      return;
+    }
+    setCarregandoPosts(true);
+    try {
+      const posts = await buscarPostsDaSerie();
+      if (posts.length === 0) return;
+      const fila = posts.map((p: any) => ({
+        id: p.id,
+        tipo: p.tipo as "sermao" | "artigo" | "reflexao",
+        titulo: p.titulo,
+        autorNome: p.autorNome || "Autor",
+        autorFoto: p.autorFoto ?? null,
+        slug: p.slug,
+        autorSlug: p.autorSlug,
+        audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+      }));
+      playQueue(fila[0], fila, "serie");
+    } catch (err) {
+      console.error("Erro ao carregar posts da série:", err);
+    }
+    setCarregandoPosts(false);
+  }
+
+  if (!serie.postIds || serie.postIds.length === 0) return null;
+
+  return (
+    <button
+      onClick={handleClick}
+      title={tocando ? "Pausar série" : serieAtiva ? "Continuar série" : "Ouvir série completa"}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: "4px",
+        padding: "4px 8px", borderRadius: "var(--radius-full)", border: "1px solid",
+        borderColor: serieAtiva ? "var(--emerald-dim)" : "transparent",
+        background: serieAtiva ? "var(--emerald-dim)" : "transparent",
+        color: serieAtiva ? "var(--emerald)" : "var(--text-3)",
+        fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
+        transition: "all 0.15s", fontFamily: "inherit", flexShrink: 0,
+        boxShadow: tocando ? "0 0 0 2px var(--emerald-dim)" : "none",
+      }}
+    >
+      {carregando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+        </svg>
+      ) : tocando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z" /></svg>
+      )}
+      <span>{carregando ? "Carregando…" : tocando ? "Pausar" : serieAtiva ? "Continuar" : "Ouvir série"}</span>
+      {tocando && <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>}
+    </button>
+  );
+}
+
+// ─── BotaoOuvirPerfil ─────────────────────────────────────────────────────────
+
+function BotaoOuvirPerfil({
+  post,
+  filaAudio = [],
+  onLoginRequired,
+}: {
+  post: any;
+  filaAudio?: any[];
+  onLoginRequired: () => void;
+}) {
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+
+  const audioAtivo = isCurrentPublication(post.id);
+  const audioTocando = isCurrentlyPlaying(post.id);
+  const audioCarregando = audioAtivo && audioLoading;
+
+  function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!auth.currentUser) {
+      onLoginRequired();
+      return;
+    }
+    const pub = {
+      id: post.id,
+      tipo: post.tipo,
+      titulo: post.titulo,
+      autorNome: post.autorNome || "Autor",
+      autorFoto: post.autorFoto ?? null,
+      slug: post.slug,
+      autorSlug: post.autorSlug,
+      audioUrl: post.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+    };
+    if (filaAudio.length > 0) {
+      playQueue(pub, filaAudio, "perfil");
+    } else {
+      playOrToggle(pub);
+    }
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      title={audioTocando ? "Pausar" : "Ouvir este conteúdo"}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: "4px",
+        padding: "4px 8px", borderRadius: "var(--radius-full)", border: "1px solid",
+        borderColor: audioAtivo ? "var(--emerald-dim)" : "transparent",
+        background: audioAtivo ? "var(--emerald-dim)" : "transparent",
+        color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
+        fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
+        transition: "all 0.15s", fontFamily: "inherit", flexShrink: 0,
+        boxShadow: audioTocando ? "0 0 0 2px var(--emerald-dim)" : "none",
+      }}
+    >
+      {audioCarregando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+      ) : audioTocando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+      )}
+      <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
+      {audioTocando && <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>}
+    </button>
+  );
+}
+
+function CardReflexaoComOuvir({
+  reflexao,
+  filaAudio = [],
+  onLoginRequired,
+}: {
+  reflexao: Reflexao;
+  filaAudio?: any[];
+  onLoginRequired: () => void;
+}) {
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+
+  const audioAtivo = isCurrentPublication(reflexao.id ?? "");
+  const audioTocando = isCurrentlyPlaying(reflexao.id ?? "");
+  const audioCarregando = audioAtivo && audioLoading;
+
+  function handleOuvir(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!auth.currentUser) {
+      onLoginRequired();
+      return;
+    }
+    if (!reflexao.id) return;
+    const pub = {
+      id: reflexao.id,
+      tipo: "reflexao" as const,
+      titulo: reflexao.titulo,
+      autorNome: reflexao.autorNome,
+      autorFoto: null,
+      slug: reflexao.slug,
+      autorSlug: reflexao.autorSlug,
+      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+    };
+    if (filaAudio.length > 0) {
+      playQueue(pub, filaAudio, "perfil");
+    } else {
+      playOrToggle(pub);
+    }
+  }
+
+  return (
+    <CardReflexao
+      reflexao={reflexao}
+      botaoOuvir={
+        <button
+          onClick={handleOuvir}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "0.3rem",
+            padding: "4px 10px", borderRadius: "var(--radius-full)", border: "1px solid",
+            borderColor: audioAtivo ? "var(--emerald-dim)" : "transparent",
+            background: audioAtivo ? "var(--emerald-dim)" : "transparent",
+            color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
+            fontSize: "0.75rem", fontWeight: 600,
+            cursor: "pointer", transition: "all 0.18s ease", fontFamily: "inherit",
+          }}
+        >
+          {audioCarregando ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          ) : audioTocando ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+          )}
+          <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
+        </button>
+      }
+    />
+  );
+}
+
 /* ── SerieCardMeuPerfil ─────────────────────────────── */
 
 function SerieCardMeuPerfil({
@@ -160,6 +394,8 @@ function SerieCardMeuPerfil({
 }) {
   const router = useRouter();
   const postCount = serie.postIds?.length ?? 0;
+  const currentPath = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/perfil";
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
 
   async function handleDeletar(e: React.MouseEvent) {
     e.stopPropagation();
@@ -215,6 +451,11 @@ function SerieCardMeuPerfil({
           </h2>
           {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
         </div>
+        {showLoginBanner && (
+          <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+            <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
+          </div>
+        )}
         <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
           onClick={(e) => e.stopPropagation()}>
           <button
@@ -231,6 +472,10 @@ function SerieCardMeuPerfil({
           >
             🗑 Apagar
           </button>
+          <BotaoOuvirSerieCard
+            serie={serie}
+            onLoginRequired={() => setShowLoginBanner(true)}
+          />
           <span className="read-link" style={{ marginLeft: "auto" }}
             onClick={() => router.push(`/series/${serie.slug}`)}>
             Ver série →
@@ -244,10 +489,11 @@ function SerieCardMeuPerfil({
 /* ── PostCardMeuPerfil ──────────────────────────────── */
 
 function PostCardMeuPerfil({
-  post, index, fotoUrl, nomeExibicao, onToast,
+  post, index, fotoUrl, nomeExibicao, onToast, filaAudio = [],
 }: {
   post: any; index: number; fotoUrl: string | null;
   nomeExibicao: string; onToast: (msg: string) => void;
+  filaAudio?: any[];
 }) {
   const router = useRouter();
   const currentUid = auth.currentUser?.uid;
@@ -265,7 +511,6 @@ function PostCardMeuPerfil({
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
-  // ?from=perfil — indica ao PostDetailContent que deve navegar pelos posts do mesmo autor
   const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}?from=perfil`;
   const fullUrl = typeof window !== "undefined"
     ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`
@@ -381,6 +626,12 @@ function PostCardMeuPerfil({
             <IconEye size={13} />{viewCount}
           </span>
         )}
+
+        <BotaoOuvirPerfil
+          post={post}
+          filaAudio={filaAudio}
+          onLoginRequired={() => setShowLoginBanner(true)}
+        />
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
         Ler completo →
@@ -429,10 +680,7 @@ function PostCardMeuPerfil({
           </div>
           {showLoginBanner && (
             <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-              <BannerLogin
-                onClose={() => setShowLoginBanner(false)}
-                redirectTo={currentPath}
-              />
+              <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
             </div>
           )}
           {footerRow}
@@ -462,10 +710,7 @@ function PostCardMeuPerfil({
       </div>
       {showLoginBanner && (
         <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-          <BannerLogin
-            onClose={() => setShowLoginBanner(false)}
-            redirectTo={currentPath}
-          />
+          <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
         </div>
       )}
       {footerRow}
@@ -651,6 +896,30 @@ function PerfilContent() {
   const nomeExibicao = titulo.trim() ? `${titulo.trim()} ${nome.trim()}` : nome.trim() || "Usuário";
   const rascNomeExibicao = rascTitulo.trim() ? `${rascTitulo.trim()} ${rascNome.trim()}` : rascNome.trim() || "Seu nome";
 
+  const filaPerfilAudio = posts.map((p) => ({
+    id: p.id,
+    tipo: p.tipo,
+    titulo: p.titulo,
+    autorNome: p.autorNome || "Autor",
+    autorFoto: p.autorFoto ?? null,
+    slug: p.slug,
+    autorSlug: p.autorSlug,
+    audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+  }));
+
+  const filaReflexoesAudio = reflexoes
+    .filter((r) => !!r.id)
+    .map((r) => ({
+      id: r.id!,
+      tipo: "reflexao" as const,
+      titulo: r.titulo,
+      autorNome: r.autorNome || "Autor",
+      autorFoto: null,
+      slug: r.slug,
+      autorSlug: r.autorSlug,
+      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+    }));
+
   return (
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
@@ -777,6 +1046,7 @@ function PerfilContent() {
                     fotoUrl={fotoUrl}
                     nomeExibicao={nomeExibicao}
                     onToast={showToast}
+                    filaAudio={filaPerfilAudio}
                   />
                 ))}
               </div>
@@ -829,7 +1099,12 @@ function PerfilContent() {
               ) : (
                 <div className="posts-list">
                   {reflexoes.map((r, i) => (
-                    <CardReflexao key={r.id ?? i} reflexao={r} />
+                    <CardReflexaoComOuvir
+                      key={r.id ?? i}
+                      reflexao={r}
+                      filaAudio={filaReflexoesAudio}
+                      onLoginRequired={() => {}}
+                    />
                   ))}
                 </div>
               )}

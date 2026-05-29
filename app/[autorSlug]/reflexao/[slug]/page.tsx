@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import { getReflexaoPorSlugAdmin } from "@/lib/reflexoesAdmin";
 import ReflexaoView from "@/components/reflexoes/ReflexaoView";
@@ -37,5 +38,13 @@ export default async function PaginaReflexao({ params }: Props) {
   const reflexao = await getReflexaoPorSlugAdmin(slug);
   if (!reflexao) notFound();
 
-  return <ReflexaoView reflexao={reflexao!} autorSlug={autorSlug} />;
+  return (
+    <Suspense fallback={
+      <div className="loading-state" style={{ minHeight: "60vh" }}>
+        <div className="spinner" />
+      </div>
+    }>
+      <ReflexaoView reflexao={reflexao!} autorSlug={autorSlug} />
+    </Suspense>
+  );
 }

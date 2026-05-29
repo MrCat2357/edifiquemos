@@ -20,27 +20,46 @@ export default function RootLayout({
     <html lang="pt-BR">
       <body className="bg-neutral-900 text-neutral-100 min-h-screen">
         {/*
-          AudioProvider é um Client Component mas pode envolver
-          um Server Component normalmente — o Next.js trata isso corretamente.
-          O <audio> real vive dentro do Provider via useEffect (client-only).
+          Garante que --header-h tenha sempre um valor padrão seguro.
+          HeaderWrapper deve sobrescrever essa variável ao montar via JS,
+          mas este fallback evita o "corte" visível antes da hidratação.
         */}
+        <style>{`
+          :root {
+            --header-h: 64px;
+          }
+        `}</style>
+
         <AudioProvider>
           <HeaderWrapper />
+
+          {/*
+            paddingTop usa var(--header-h) com fallback explícito de 64px
+            para garantir que o conteúdo nunca fique por baixo do header,
+            mesmo antes do JS calcular o valor real.
+
+            paddingRight é ajustado pelo GlobalAudioPlayer via CSS
+            quando a sidebar desktop aparece.
+          */}
           <main
             style={{
-              paddingTop: "var(--header-h)",
+              paddingTop: "var(--header-h, 64px)",
               width: "100%",
               minWidth: 0,
               overflowX: "hidden",
+              transition: "padding-right 250ms cubic-bezier(0.32, 0.72, 0, 1)",
             }}
           >
             {children}
           </main>
 
           {/*
-            GlobalAudioPlayer é renderizado aqui, fora do <main>,
-            para que fique fixo independente da rota atual.
-            Ele só aparece quando há uma publicação carregada (current !== null).
+            GlobalAudioPlayer renderiza fora do <main> para permanecer
+            fixo independente da rota.
+
+            Fase 5:
+              • Mobile  (<1024px): MiniPlayer + ExpandedPlayer
+              • Desktop (≥1024px): NowPlayingSidebar
           */}
           <GlobalAudioPlayer />
         </AudioProvider>

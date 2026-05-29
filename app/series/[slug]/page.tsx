@@ -20,6 +20,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { gerarPDF } from "@/lib/gerarPDF";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
+import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 
 const CommentSection = dynamic(
   () => import("@/components/comments/CommentSection"),
@@ -277,9 +278,6 @@ function LikesModal({ likedBy, onClose }: { likedBy: string[]; onClose: () => vo
 }
 
 // ─── SerieNavigation ──────────────────────────────────────────────────────────
-// Suporta dois modos:
-//   ?from=home  → feed global misturado
-//   sem param   → séries do mesmo autor (comportamento original)
 
 type SerieNav = { id: string; titulo: string; slug: string; postCount: number };
 type NavAutor = { nome: string; fotoUrl: string | null };
@@ -308,7 +306,6 @@ function SerieNavigation({
   useEffect(() => {
     async function fetchNav() {
       try {
-        // ── Modo A: feed global misturado (?from=home) ─────────────────────
         if (fromHome) {
           const all = await fetchFeedGlobal();
           const idx = all.findIndex((item) => item.id === serieId);
@@ -347,7 +344,6 @@ function SerieNavigation({
           return;
         }
 
-        // ── Modo B: séries do mesmo autor (comportamento original) ──────────
         const snap = await getDocs(
           query(collection(db, "series"), where("autorId", "==", autorId), orderBy("criadoEm", "desc"))
         );
@@ -366,7 +362,6 @@ function SerieNavigation({
         const n = idx + 1 < todas.length ? todas[idx + 1] : null;
         setPrev(p);
         setNext(n);
-        // Mesmo autor para ambos os lados no modo padrão
         const navAutor: NavAutor = { nome: autorNome, fotoUrl: autorFoto };
         if (p) setPrevAutor(navAutor);
         if (n) setNextAutor(navAutor);
@@ -378,13 +373,11 @@ function SerieNavigation({
     fetchNav();
   }, [serieId, autorId, autorNome, autorFoto, fromHome]);
 
-  // Monta URL de navegação
   function navUrl(item: FeedNavItem | SerieNav): string {
     if (fromHome) return feedItemUrl(item as FeedNavItem);
     return `/series/${(item as SerieNav).slug}`;
   }
 
-  // Label do botão
   function navLabel(item: FeedNavItem | SerieNav, direction: "prev" | "next"): string {
     if (fromHome) return feedItemLabel(item as FeedNavItem, direction);
     return direction === "prev" ? "Série anterior" : "Próxima série";
@@ -501,15 +494,178 @@ function SerieNavigation({
   );
 }
 
+// ─── BotaoOuvirSerie (botão flutuante) ────────────────────────────────────────
+
+type AudioPub = {
+  id: string;
+  tipo: "sermao" | "artigo" | "reflexao";
+  titulo: string;
+  autorNome: string;
+  autorFoto?: string | null;
+  slug: string;
+  autorSlug?: string;
+  audioUrl: string;
+};
+
+function BotaoOuvirSerie({
+  posts,
+  serieSlug,
+  onLoginRequired,
+}: {
+  posts: AudioPub[];
+  serieSlug: string;
+  onLoginRequired: () => void;
+}) {
+  const {
+    playQueue,
+    pause,
+    resume,
+    isPlaying,
+    isLoading,
+    contextType,
+    current,
+  } = useAudioPlayer();
+
+  const serieAtiva =
+    contextType === "serie" &&
+    current !== null &&
+    posts.some((p) => p.id === current.id);
+
+  const tocando = serieAtiva && isPlaying;
+  const carregando = serieAtiva && isLoading;
+
+  const visivel = !serieAtiva;
+
+  function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+
+    if (!auth.currentUser) {
+      onLoginRequired();
+      return;
+    }
+
+    if (serieAtiva) {
+      tocando ? pause() : resume();
+      return;
+    }
+
+    if (posts.length === 0) return;
+    playQueue(posts[0], posts, "serie");
+  }
+
+  if (posts.length === 0) return null;
+
+  return (
+    <button
+      onClick={handleClick}
+      title={tocando ? "Pausar série" : serieAtiva ? "Continuar série" : "Ouvir série completa"}
+      aria-label={tocando ? "Pausar série" : "Ouvir série completa"}
+      style={{
+        position: "fixed",
+        top: "calc(var(--header-h) + 1rem)",
+        right: "1.25rem",
+        zIndex: 800,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "8px",
+        padding: "12px 20px",
+        borderRadius: "var(--radius-full)",
+        border: "none",
+        background: serieAtiva
+          ? "var(--emerald)"
+          : "linear-gradient(135deg, var(--emerald-dark), var(--emerald))",
+        color: "#fff",
+        fontSize: "0.85rem",
+        fontWeight: 700,
+        cursor: "pointer",
+        boxShadow: serieAtiva
+          ? "0 0 0 3px var(--emerald-dim), 0 8px 24px rgba(0,0,0,0.4)"
+          : "0 8px 24px rgba(0,0,0,0.4)",
+        transition: "all 0.2s ease",
+        fontFamily: "inherit",
+        letterSpacing: "-0.01em",
+        opacity: visivel ? 1 : 0,
+        pointerEvents: visivel ? "auto" : "none",
+        transform: visivel ? "translateY(0)" : "translateY(-8px)",
+      }}
+    >
+      {carregando ? (
+        <svg width="16" height="16" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+          style={{ animation: "spin 0.8s linear infinite" }}>
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+        </svg>
+      ) : tocando ? (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+        </svg>
+      ) : (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M8 5.14v14l11-7-11-7z" />
+        </svg>
+      )}
+      <span>
+        {carregando
+          ? "Carregando…"
+          : tocando
+          ? "Pausar série"
+          : serieAtiva
+          ? "Continuar série"
+          : "Ouvir série"}
+      </span>
+      {serieAtiva && !carregando && (
+        <span style={{ display: "flex", gap: "2px", alignItems: "flex-end", height: "12px" }}>
+          {[0, 1, 2].map((i) => (
+            <span key={i} style={{
+              width: "3px",
+              height: tocando ? `${6 + i * 3}px` : "4px",
+              background: "rgba(255,255,255,0.8)",
+              borderRadius: "2px",
+              animation: tocando ? `eq-bar 0.8s ease-in-out ${i * 0.15}s infinite alternate` : "none",
+              transition: "height 0.3s ease",
+            }} />
+          ))}
+        </span>
+      )}
+    </button>
+  );
+}
+
 // ─── PostCardSerie ─────────────────────────────────────────────────────────────
 
 function PostCardSerie({
-  post, index, serieSlug, onToast,
+  post, index, serieSlug, onToast, filaAudio = [], onLoginRequired,
 }: {
   post: any; index: number; serieSlug: string; onToast: (msg: string) => void;
+  filaAudio?: any[]; onLoginRequired: () => void;
 }) {
   const router = useRouter();
   const uid = auth.currentUser?.uid;
+
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const audioAtivo = isCurrentPublication(post.id);
+  const audioTocando = isCurrentlyPlaying(post.id);
+  const audioCarregando = audioAtivo && audioLoading;
+
+  function handleOuvir(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!uid) { onLoginRequired(); return; }
+    const pub = {
+      id: post.id,
+      tipo: post.tipo,
+      titulo: post.titulo,
+      autorNome: post.autorNome || "Autor",
+      autorFoto: post.autorFoto ?? null,
+      slug: post.slug,
+      autorSlug: post.autorSlug,
+      audioUrl: post.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+    };
+    if (filaAudio.length > 0) {
+      playQueue(pub, filaAudio, "serie");
+    } else {
+      playOrToggle(pub);
+    }
+  }
 
   const [liked, setLiked] = useState<boolean>(() => (uid ? (post.likedBy ?? []).includes(uid) : false));
   const [likeCount, setLikeCount] = useState<number>(post.likes ?? 0);
@@ -517,7 +673,6 @@ function PostCardSerie({
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
-  const [showLoginBanner, setShowLoginBanner] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [commentCount, setCommentCount] = useState<number>(post.commentCount ?? 0);
   const [likesModalAberto, setLikesModalAberto] = useState(false);
@@ -542,7 +697,7 @@ function PostCardSerie({
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!uid) { setShowLoginBanner(true); return; }
+    if (!uid) { onLoginRequired(); return; }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
@@ -579,7 +734,7 @@ function PostCardSerie({
 
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!uid) { setShowLoginBanner(true); return; }
+    if (!uid) { onLoginRequired(); return; }
     setShowComments((v) => !v);
   }
 
@@ -625,6 +780,35 @@ function PostCardSerie({
             <IconEye size={13} />{viewCount}
           </span>
         )}
+
+        <button
+          onClick={handleOuvir}
+          title={audioTocando ? "Pausar" : "Ouvir este conteúdo"}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "4px",
+            padding: "4px 8px", borderRadius: "var(--radius-full)",
+            border: "1px solid",
+            borderColor: audioAtivo ? "var(--emerald-dim)" : "transparent",
+            background: audioAtivo ? "var(--emerald-dim)" : "transparent",
+            color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
+            fontSize: "0.72rem", fontWeight: 600,
+            cursor: "pointer", transition: "all 0.15s",
+            fontFamily: "inherit", flexShrink: 0,
+            boxShadow: audioTocando ? "0 0 0 2px var(--emerald-dim)" : "none",
+          }}
+        >
+          {audioCarregando ? (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          ) : audioTocando ? (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+          )}
+          <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
+          {audioTocando && (
+            <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>
+          )}
+        </button>
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPathSerie)}>
         Ler completo →
@@ -668,12 +852,6 @@ function PostCardSerie({
               <h2 className="card-title" style={{ fontSize: "1rem" }}>{post.titulo}</h2>
               {post.resumo && <p className="card-frase">{post.resumo}</p>}
             </div>
-            {showLoginBanner && (
-              <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-                <BannerLogin onClose={() => setShowLoginBanner(false)}
-                  redirectTo={typeof window !== "undefined" ? window.location.pathname + window.location.search : undefined} />
-              </div>
-            )}
             {footerRow}
           </div>
           {commentsPanel}
@@ -702,12 +880,6 @@ function PostCardSerie({
           <h2 className="card-title">{post.titulo}</h2>
           {post.resumo && <p className="card-frase">{post.resumo}</p>}
         </div>
-        {showLoginBanner && (
-          <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-            <BannerLogin onClose={() => setShowLoginBanner(false)}
-              redirectTo={typeof window !== "undefined" ? window.location.pathname + window.location.search : undefined} />
-          </div>
-        )}
         {footerRow}
         {commentsPanel}
       </article>
@@ -736,12 +908,55 @@ export default function SeriePage() {
   const [serieLikedBy, setSerieLikedBy] = useState<string[]>([]);
   const [serieLikeLoading, setSerieLikeLoading] = useState(false);
   const [serieLikesModalAberto, setSerieLikesModalAberto] = useState(false);
-  const [showSerieLoginBanner, setShowSerieLoginBanner] = useState(false);
 
   const [serieCommentCount, setSerieCommentCount] = useState(0);
   const [showSerieComments, setShowSerieComments] = useState(false);
 
+  // Modal de login global para toda a página da série
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const currentPath = typeof window !== "undefined"
+    ? window.location.pathname + window.location.search
+    : "/";
+
   const serieSlug = Array.isArray(slug) ? slug[0] : (slug ?? "");
+
+  const { registerOnEndedCallback, current: currentAudio, queue, currentIndex, contextType } = useAudioPlayer();
+
+  useEffect(() => {
+    if (posts.length === 0) return;
+
+    const fila = posts;
+    if (fila.length === 0) return;
+
+    const cb = () => {
+      const nextIdx = currentIndex + 1;
+      const nextPub = queue[nextIdx];
+      if (!nextPub) return;
+
+      const cat = nextPub.tipo === "sermao" ? "sermoes" : "estudos";
+      const url = `/posts/${cat}/${nextPub.slug}?from=serie&serieSlug=${serieSlug}`;
+      router.push(url);
+    };
+
+    if (contextType === "serie" && currentAudio && fila.some((p) => p.id === currentAudio.id)) {
+      registerOnEndedCallback(cb);
+    } else {
+      registerOnEndedCallback(null);
+    }
+
+    return () => {
+      registerOnEndedCallback(null);
+    };
+  }, [
+    posts,
+    currentAudio,
+    currentIndex,
+    queue,
+    contextType,
+    serieSlug,
+    router,
+    registerOnEndedCallback,
+  ]);
 
   function showToast(msg: string) {
     setToastMsg(msg); setToastVisible(true);
@@ -781,7 +996,7 @@ export default function SeriePage() {
   }, [slug, uid]);
 
   async function handleSerieLike() {
-    if (!uid) { setShowSerieLoginBanner(true); return; }
+    if (!uid) { setShowLoginModal(true); return; }
     if (serieLikeLoading || !serieId) return;
     setSerieLikeLoading(true);
     try {
@@ -814,9 +1029,17 @@ export default function SeriePage() {
   const isAutor = currentUid === serie.autorId;
   const autorNomeExibicao: string = serie.autorNome || "Autor";
   const autorFotoUrl: string | null = serie.autorFoto ?? null;
-  const currentPath = typeof window !== "undefined"
-    ? window.location.pathname + window.location.search
-    : `/series/${serieSlug}`;
+
+  const filaSerieAudio = posts.map((p) => ({
+    id: p.id,
+    tipo: p.tipo as "sermao" | "artigo" | "reflexao",
+    titulo: p.titulo,
+    autorNome: p.autorNome || "Autor",
+    autorFoto: p.autorFoto ?? null,
+    slug: p.slug,
+    autorSlug: p.autorSlug,
+    audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+  }));
 
   return (
     <>
@@ -836,6 +1059,22 @@ export default function SeriePage() {
       {serieLikesModalAberto && (
         <LikesModal likedBy={serieLikedBy} onClose={() => setSerieLikesModalAberto(false)} />
       )}
+
+      {/* Modal de login global */}
+      {showLoginModal && (
+        <BannerLogin
+          modal
+          onClose={() => setShowLoginModal(false)}
+          redirectTo={currentPath}
+        />
+      )}
+
+      {/* ── Botão flutuante da série ── */}
+      <BotaoOuvirSerie
+        posts={filaSerieAudio}
+        serieSlug={serieSlug}
+        onLoginRequired={() => setShowLoginModal(true)}
+      />
 
       <div style={{ maxWidth: "680px", margin: "0 auto", padding: "calc(var(--header-h) + 2rem) 1.25rem 4rem" }}>
         {/* Capa */}
@@ -908,7 +1147,10 @@ export default function SeriePage() {
             </button>
 
             <button
-              onClick={() => { if (!uid) { setShowSerieLoginBanner(true); return; } setShowSerieComments((v) => !v); }}
+              onClick={() => {
+                if (!uid) { setShowLoginModal(true); return; }
+                setShowSerieComments((v) => !v);
+              }}
               className="post-btn-share"
               style={{ display: "inline-flex", alignItems: "center", gap: "5px", color: showSerieComments ? "var(--emerald)" : undefined }}
               title="Comentar nesta série"
@@ -922,12 +1164,6 @@ export default function SeriePage() {
               )}
             </button>
           </div>
-
-          {showSerieLoginBanner && (
-            <div style={{ marginBottom: "0.75rem" }}>
-              <BannerLogin onClose={() => setShowSerieLoginBanner(false)} redirectTo={currentPath} />
-            </div>
-          )}
 
           {showSerieComments && serieId && (
             <div style={{
@@ -957,7 +1193,12 @@ export default function SeriePage() {
         ) : (
           <div className="posts-list">
             {posts.map((post, i) => (
-              <PostCardSerie key={post.id} post={post} index={i} serieSlug={serieSlug} onToast={showToast} />
+              <PostCardSerie
+                key={post.id} post={post} index={i}
+                serieSlug={serieSlug} onToast={showToast}
+                filaAudio={filaSerieAudio}
+                onLoginRequired={() => setShowLoginModal(true)}
+              />
             ))}
           </div>
         )}
@@ -974,16 +1215,33 @@ export default function SeriePage() {
       </div>
 
       <style>{`
+        /* ── Cards ── */
         .post-card-image { cursor: pointer; }
         .card-cover-wrapper {
           position: relative; width: 100%; max-height: 420px; min-height: 160px;
           overflow: hidden; border-radius: var(--radius-lg) var(--radius-lg) 0 0;
           background: #0d1310; display: flex; align-items: center; justify-content: center;
         }
-        .card-cover-img { width: 100%; height: 100%; object-fit: contain; display: block; max-height: 420px; transition: transform 0.35s ease; }
+        .card-cover-img {
+          width: 100%; height: 100%; object-fit: contain; display: block;
+          max-height: 420px; transition: transform 0.35s ease;
+        }
         .post-card-image:hover .card-cover-img { transform: scale(1.025); }
-        .card-cover-badge { position: absolute; top: 0.625rem; right: 0.75rem; backdrop-filter: blur(6px); background: rgba(10, 15, 10, 0.72) !important; }
+        .card-cover-badge {
+          position: absolute; top: 0.625rem; right: 0.75rem;
+          backdrop-filter: blur(6px); background: rgba(10, 15, 10, 0.72) !important;
+        }
         .card-image-content { display: flex; flex-direction: column; }
+
+        /* ── Animações ── */
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes eq-bar {
+          from { transform: scaleY(0.4); }
+          to   { transform: scaleY(1); }
+        }
+
         @media (max-width: 640px) {
           .card-cover-wrapper { max-height: 320px; min-height: 120px; }
           .card-cover-img { max-height: 320px; }

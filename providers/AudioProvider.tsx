@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   createContext,
@@ -9,7 +9,7 @@ import {
   useState,
 } from "react";
 
-// ─── Tipo unificado de publicação com áudio ───────────────────────────────────
+// ─── Tipos ───────────────────────────────────────────────────────────────────
 
 export type AudioPublication = {
   id: string;
@@ -18,11 +18,13 @@ export type AudioPublication = {
   autorNome: string;
   autorFoto?: string | null;
   slug: string;
-  autorSlug?: string; // obrigatório para reflexões
+  autorSlug?: string;
   audioUrl: string;
 };
 
-// ─── Estado e ações do player ─────────────────────────────────────────────────
+export type AudioContextType = "home" | "perfil" | "reflexoes" | "serie" | null;
+
+// ─── Estado e ações ──────────────────────────────────────────────────────────
 
 type AudioState = {
   current: AudioPublication | null;
@@ -31,6 +33,9 @@ type AudioState = {
   currentTime: number;
   volume: number;
   isLoading: boolean;
+  queue: AudioPublication[];
+  currentIndex: number;
+  contextType: AudioContextType;
 };
 
 type AudioActions = {
@@ -41,11 +46,24 @@ type AudioActions = {
   seek: (time: number) => void;
   setVolume: (vol: number) => void;
   close: () => void;
+  playQueue: (
+    pub: AudioPublication,
+    queue: AudioPublication[],
+    context: AudioContextType
+  ) => void;
+  playNext: () => void;
+  playPrevious: () => void;
+  registerOnEndedCallback: (cb: (() => void) | null) => void;
+  registerNavigationCallback: (
+    cb:
+      | ((direction: "next" | "previous", pub: AudioPublication) => void)
+      | null
+  ) => void;
 };
 
 export type AudioContextValue = AudioState & AudioActions;
 
-// ─── Context ──────────────────────────────────────────────────────────────────
+// ─── Context ─────────────────────────────────────────────────────────────────
 
 const AudioContext = createContext<AudioContextValue | null>(null);
 
@@ -55,10 +73,11 @@ export function useAudioContext(): AudioContextValue {
   return ctx;
 }
 
-// ─── Provider ─────────────────────────────────────────────────────────────────
+// ─── Provider ────────────────────────────────────────────────────────────────
 
 export function AudioProvider({ children }: { children: React.ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const playPromiseRef = useRef<Promise<void> | null>(null);
 
   const [current, setCurrent] = useState<AudioPublication | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -66,6 +85,39 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [volume, setVolumeState] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
+
+  const [queue, setQueue] = useState<AudioPublication[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(-1);
+  const [contextType, setContextType] = useState<AudioContextType>(null);
+
+  // Refs para closures estáveis nos event listeners
+  const queueRef = useRef<AudioPublication[]>([]);
+  const currentIndexRef = useRef(-1);
+  queueRef.current = queue;
+  currentIndexRef.current = currentIndex;
+
+  const onEndedCallbackRef = useRef<(() => void) | null>(null);
+  const navigationCallbackRef = useRef<
+    ((direction: "next" | "previous", pub: AudioPublication) => void) | null
+  >(null);
+
+  const registerOnEndedCallback = useCallback(
+    (cb: (() => void) | null) => {
+      onEndedCallbackRef.current = cb;
+    },
+    []
+  );
+
+  const registerNavigationCallback = useCallback(
+    (
+      cb:
+        | ((direction: "next" | "previous", pub: AudioPublication) => void)
+        | null
+    ) => {
+      navigationCallbackRef.current = cb;
+    },
+    []
+  );
 
   // Cria o elemento <audio> uma única vez
   useEffect(() => {
@@ -75,17 +127,63 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
 
     audio.addEventListener("loadstart", () => setIsLoading(true));
     audio.addEventListener("canplay", () => setIsLoading(false));
-    audio.addEventListener("durationchange", () => setDuration(audio.duration || 0));
-    audio.addEventListener("timeupdate", () => setCurrentTime(audio.currentTime));
-    audio.addEventListener("ended", () => {
-      setIsPlaying(false);
-      // FASE 3 — autoplay: aqui será chamado onEnded(current) para avançar a fila
-    });
+    audio.addEventListener("durationchange", () =>
+      setDuration(audio.duration || 0)
+    );
+    audio.addEventListener("timeupdate", () =>
+      setCurrentTime(audio.currentTime)
+    );
     audio.addEventListener("play", () => setIsPlaying(true));
     audio.addEventListener("pause", () => setIsPlaying(false));
     audio.addEventListener("error", () => {
       setIsLoading(false);
       setIsPlaying(false);
+    });
+
+    // ── PROBLEMA 2 — Correção do evento "ended" ────────────────────────────
+    //
+    // Comportamento anterior (BUG):
+    //   Se `onEndedCallbackRef` estava registrado, o provider fazia `return`
+    //   ANTES de iniciar o próximo áudio — delegando a responsabilidade para
+    //   a página. Resultado: a página navegava, mas o áudio ficava parado.
+    //
+    // Novo comportamento:
+    //   1. Sempre avança o índice e inicia o próximo áudio imediatamente.
+    //   2. Depois chama `onEndedCallbackRef` (se existir) apenas para
+    //      navegação de página — sem afetar o áudio já iniciado.
+    //
+    // Isso garante que áudio e navegação são independentes e nunca ficam
+    // dessincronizados.
+    audio.addEventListener("ended", () => {
+      setIsPlaying(false);
+
+      const idx = currentIndexRef.current;
+      const q = queueRef.current;
+      const hasNext = idx >= 0 && idx < q.length - 1;
+
+      if (!hasNext) return;
+
+      const nextIdx = idx + 1;
+      const nextPub = q[nextIdx];
+
+      // ← ALTERADO: sempre avança e toca — sem verificar o callback antes
+      setCurrentIndex(nextIdx);
+      const a = audioRef.current;
+      if (a) {
+        a.src = nextPub.audioUrl;
+        a.currentTime = 0;
+        setCurrentTime(0);
+        setDuration(0);
+        setCurrent(nextPub);
+        setIsLoading(true);
+        playPromiseRef.current = a.play();
+        playPromiseRef.current?.catch(() => {});
+      }
+
+      // ← ALTERADO: callback chamado DEPOIS de iniciar o áudio (só navega a página)
+      if (onEndedCallbackRef.current) {
+        onEndedCallbackRef.current();
+      }
     });
 
     audioRef.current = audio;
@@ -97,41 +195,65 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // ── Ações ────────────────────────────────────────────────────────────────
+  // ── Ação interna: tocar uma publicação no <audio> ─────────────────────────
 
-  const play = useCallback((pub: AudioPublication) => {
-    const audio = audioRef.current;
-    if (!audio) return;
+  const _playAudio = useCallback(
+    (pub: AudioPublication) => {
+      const audio = audioRef.current;
+      if (!audio) return;
 
-    // Mesma publicação: retoma de onde parou
-    if (current?.id === pub.id) {
-      audio.play().catch(console.error);
-      return;
-    }
+      if (current?.id === pub.id) {
+        playPromiseRef.current = audio.play();
+        playPromiseRef.current?.catch(() => {});
+        return;
+      }
 
-    // Nova publicação: troca o src e dá play
-    audio.src = pub.audioUrl;
-    audio.currentTime = 0;
-    setCurrentTime(0);
-    setDuration(0);
-    setCurrent(pub);
-    setIsLoading(true);
-    audio.play().catch(console.error);
-  }, [current]);
+      audio.src = pub.audioUrl;
+      audio.currentTime = 0;
+      setCurrentTime(0);
+      setDuration(0);
+      setCurrent(pub);
+      setIsLoading(true);
+      playPromiseRef.current = audio.play();
+      playPromiseRef.current?.catch(() => {});
+    },
+    [current]
+  );
+
+  // ── Ações públicas base ───────────────────────────────────────────────────
+
+  const play = useCallback(
+    (pub: AudioPublication) => {
+      _playAudio(pub);
+    },
+    [_playAudio]
+  );
 
   const pause = useCallback(() => {
-    audioRef.current?.pause();
+    const p = playPromiseRef.current;
+    if (p) {
+      p.then(() => audioRef.current?.pause()).catch(() => {});
+    } else {
+      audioRef.current?.pause();
+    }
   }, []);
 
   const resume = useCallback(() => {
-    audioRef.current?.play().catch(console.error);
+    playPromiseRef.current = audioRef.current?.play() ?? null;
+    playPromiseRef.current?.catch(() => {});
   }, []);
 
   const toggle = useCallback(() => {
     if (isPlaying) {
-      audioRef.current?.pause();
+      const p = playPromiseRef.current;
+      if (p) {
+        p.then(() => audioRef.current?.pause()).catch(() => {});
+      } else {
+        audioRef.current?.pause();
+      }
     } else {
-      audioRef.current?.play().catch(console.error);
+      playPromiseRef.current = audioRef.current?.play() ?? null;
+      playPromiseRef.current?.catch(() => {});
     }
   }, [isPlaying]);
 
@@ -151,15 +273,106 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   const close = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    audio.pause();
-    audio.src = "";
+    const p = playPromiseRef.current;
+    if (p) {
+      p.then(() => {
+        audio.pause();
+        audio.src = "";
+      }).catch(() => {});
+    } else {
+      audio.pause();
+      audio.src = "";
+    }
     setCurrent(null);
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+    setQueue([]);
+    setCurrentIndex(-1);
+    setContextType(null);
+    onEndedCallbackRef.current = null;
+    navigationCallbackRef.current = null;
   }, []);
 
-  // ── Value ────────────────────────────────────────────────────────────────
+  // ── playQueue ─────────────────────────────────────────────────────────────
+
+  const playQueue = useCallback(
+    (
+      pub: AudioPublication,
+      newQueue: AudioPublication[],
+      context: AudioContextType
+    ) => {
+      const filaLimpa = newQueue.filter((p) => !!p.audioUrl);
+      const idx = filaLimpa.findIndex((p) => p.id === pub.id);
+
+      setQueue(filaLimpa);
+      setCurrentIndex(idx >= 0 ? idx : 0);
+      setContextType(context);
+
+      _playAudio(pub);
+    },
+    [_playAudio]
+  );
+
+  // ── playNext ──────────────────────────────────────────────────────────────
+  //
+  // PROBLEMA 2 — Correção:
+  //   Antes: se `navigationCallbackRef` estava registrado, o provider
+  //   delegava tudo ao callback e não tocava o áudio.
+  //   Resultado: a página navegava, mas o áudio ficava parado.
+  //
+  //   Agora: sempre avança o índice e toca o próximo áudio. Depois chama
+  //   `navigationCallbackRef` (se existir) apenas para navegar a página.
+  //   Dessa forma áudio e navegação são sempre independentes e síncronos.
+
+  const playNext = useCallback(() => {
+    const idx = currentIndexRef.current;
+    const q = queueRef.current;
+    if (idx < 0 || idx >= q.length - 1) return;
+
+    const nextIdx = idx + 1;
+    const nextPub = q[nextIdx];
+
+    // ← ALTERADO: sempre avança e toca, independente de navigationCallback
+    setCurrentIndex(nextIdx);
+    _playAudio(nextPub);
+
+    // ← ALTERADO: callback chamado DEPOIS de iniciar o áudio (só navega a página)
+    if (navigationCallbackRef.current) {
+      navigationCallbackRef.current("next", nextPub);
+    }
+  }, [_playAudio]);
+
+  // ── playPrevious ──────────────────────────────────────────────────────────
+
+  const playPrevious = useCallback(() => {
+    const audio = audioRef.current;
+    const idx = currentIndexRef.current;
+    const q = queueRef.current;
+
+    // Se passou mais de 3s na faixa atual, apenas reinicia (sem navegar)
+    if (audio && audio.currentTime > 3) {
+      audio.currentTime = 0;
+      setCurrentTime(0);
+      return;
+    }
+
+    if (idx <= 0) return;
+
+    const prevIdx = idx - 1;
+    const prevPub = q[prevIdx];
+
+    // ← ALTERADO: sempre recua e toca, independente de navigationCallback
+    setCurrentIndex(prevIdx);
+    _playAudio(prevPub);
+
+    // ← ALTERADO: callback chamado DEPOIS de iniciar o áudio (só navega a página)
+    if (navigationCallbackRef.current) {
+      navigationCallbackRef.current("previous", prevPub);
+    }
+  }, [_playAudio]);
+
+  // ── Value ─────────────────────────────────────────────────────────────────
 
   const value: AudioContextValue = {
     current,
@@ -168,6 +381,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     currentTime,
     volume,
     isLoading,
+    queue,
+    currentIndex,
+    contextType,
     play,
     pause,
     resume,
@@ -175,11 +391,14 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     seek,
     setVolume,
     close,
+    playQueue,
+    playNext,
+    playPrevious,
+    registerOnEndedCallback,
+    registerNavigationCallback,
   };
 
   return (
-    <AudioContext.Provider value={value}>
-      {children}
-    </AudioContext.Provider>
+    <AudioContext.Provider value={value}>{children}</AudioContext.Provider>
   );
 }
