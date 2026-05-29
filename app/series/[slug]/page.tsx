@@ -494,14 +494,7 @@ function SerieNavigation({
   );
 }
 
-// ─── BotaoOuvirSerie (botão flutuante da série) ────────────────────────────────
-//
-// CORREÇÕES aplicadas:
-// 1. Posição: usa top fixo (calc(var(--header-h) + 1rem)) igual ao botão "Ouvir"
-//    dos posts individuais, em vez de bottom dinâmico.
-// 2. Sumir/reaparecer: some quando a série está ativa no player (barra lateral
-//    visível) e reaparece quando o player é fechado/inativo.
-// 3. Fallback audioUrl: posts sem audioUrl usam a URL de teste.
+// ─── BotaoOuvirSerie (botão flutuante) ────────────────────────────────────────
 
 type AudioPub = {
   id: string;
@@ -517,11 +510,12 @@ type AudioPub = {
 function BotaoOuvirSerie({
   posts,
   serieSlug,
+  onLoginRequired,
 }: {
   posts: AudioPub[];
   serieSlug: string;
+  onLoginRequired: () => void;
 }) {
-  const router = useRouter();
   const {
     playQueue,
     pause,
@@ -540,15 +534,13 @@ function BotaoOuvirSerie({
   const tocando = serieAtiva && isPlaying;
   const carregando = serieAtiva && isLoading;
 
-  // CORREÇÃO 2: some quando a série está ativa (barra lateral aberta),
-  // reaparece quando o player é fechado ou está em outro contexto.
   const visivel = !serieAtiva;
 
   function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
 
     if (!auth.currentUser) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      onLoginRequired();
       return;
     }
 
@@ -557,11 +549,8 @@ function BotaoOuvirSerie({
       return;
     }
 
-    // CORREÇÃO 3: todos os posts já chegam com audioUrl preenchido via fallback
-    const fila = posts;
-    if (fila.length === 0) return;
-
-    playQueue(fila[0], fila, "serie");
+    if (posts.length === 0) return;
+    playQueue(posts[0], posts, "serie");
   }
 
   if (posts.length === 0) return null;
@@ -573,7 +562,6 @@ function BotaoOuvirSerie({
       aria-label={tocando ? "Pausar série" : "Ouvir série completa"}
       style={{
         position: "fixed",
-        // CORREÇÃO 1: mesma posição vertical do botão "Ouvir" dos posts individuais
         top: "calc(var(--header-h) + 1rem)",
         right: "1.25rem",
         zIndex: 800,
@@ -596,19 +584,15 @@ function BotaoOuvirSerie({
         transition: "all 0.2s ease",
         fontFamily: "inherit",
         letterSpacing: "-0.01em",
-        // CORREÇÃO 2: oculta via opacity+pointer-events quando série ativa
         opacity: visivel ? 1 : 0,
         pointerEvents: visivel ? "auto" : "none",
         transform: visivel ? "translateY(0)" : "translateY(-8px)",
       }}
-      className="serie-play-fab"
     >
       {carregando ? (
-        <svg
-          width="16" height="16" viewBox="0 0 24 24"
+        <svg width="16" height="16" viewBox="0 0 24 24"
           fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-          style={{ animation: "spin 0.8s linear infinite" }}
-        >
+          style={{ animation: "spin 0.8s linear infinite" }}>
           <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
         </svg>
       ) : tocando ? (
@@ -630,9 +614,7 @@ function BotaoOuvirSerie({
           : "Ouvir série"}
       </span>
       {serieAtiva && !carregando && (
-        <span style={{
-          display: "flex", gap: "2px", alignItems: "flex-end", height: "12px",
-        }}>
+        <span style={{ display: "flex", gap: "2px", alignItems: "flex-end", height: "12px" }}>
           {[0, 1, 2].map((i) => (
             <span key={i} style={{
               width: "3px",
@@ -652,10 +634,10 @@ function BotaoOuvirSerie({
 // ─── PostCardSerie ─────────────────────────────────────────────────────────────
 
 function PostCardSerie({
-  post, index, serieSlug, onToast, filaAudio = [],
+  post, index, serieSlug, onToast, filaAudio = [], onLoginRequired,
 }: {
   post: any; index: number; serieSlug: string; onToast: (msg: string) => void;
-  filaAudio?: any[];
+  filaAudio?: any[]; onLoginRequired: () => void;
 }) {
   const router = useRouter();
   const uid = auth.currentUser?.uid;
@@ -667,7 +649,7 @@ function PostCardSerie({
 
   function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!uid) { setShowLoginBanner(true); return; }
+    if (!uid) { onLoginRequired(); return; }
     const pub = {
       id: post.id,
       tipo: post.tipo,
@@ -691,7 +673,6 @@ function PostCardSerie({
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
-  const [showLoginBanner, setShowLoginBanner] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [commentCount, setCommentCount] = useState<number>(post.commentCount ?? 0);
   const [likesModalAberto, setLikesModalAberto] = useState(false);
@@ -716,7 +697,7 @@ function PostCardSerie({
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!uid) { setShowLoginBanner(true); return; }
+    if (!uid) { onLoginRequired(); return; }
     if (loadingLike) return;
     setLoadingLike(true);
     try {
@@ -753,7 +734,7 @@ function PostCardSerie({
 
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!uid) { setShowLoginBanner(true); return; }
+    if (!uid) { onLoginRequired(); return; }
     setShowComments((v) => !v);
   }
 
@@ -871,12 +852,6 @@ function PostCardSerie({
               <h2 className="card-title" style={{ fontSize: "1rem" }}>{post.titulo}</h2>
               {post.resumo && <p className="card-frase">{post.resumo}</p>}
             </div>
-            {showLoginBanner && (
-              <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-                <BannerLogin onClose={() => setShowLoginBanner(false)}
-                  redirectTo={typeof window !== "undefined" ? window.location.pathname + window.location.search : undefined} />
-              </div>
-            )}
             {footerRow}
           </div>
           {commentsPanel}
@@ -905,12 +880,6 @@ function PostCardSerie({
           <h2 className="card-title">{post.titulo}</h2>
           {post.resumo && <p className="card-frase">{post.resumo}</p>}
         </div>
-        {showLoginBanner && (
-          <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-            <BannerLogin onClose={() => setShowLoginBanner(false)}
-              redirectTo={typeof window !== "undefined" ? window.location.pathname + window.location.search : undefined} />
-          </div>
-        )}
         {footerRow}
         {commentsPanel}
       </article>
@@ -939,10 +908,15 @@ export default function SeriePage() {
   const [serieLikedBy, setSerieLikedBy] = useState<string[]>([]);
   const [serieLikeLoading, setSerieLikeLoading] = useState(false);
   const [serieLikesModalAberto, setSerieLikesModalAberto] = useState(false);
-  const [showSerieLoginBanner, setShowSerieLoginBanner] = useState(false);
 
   const [serieCommentCount, setSerieCommentCount] = useState(0);
   const [showSerieComments, setShowSerieComments] = useState(false);
+
+  // Modal de login global para toda a página da série
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const currentPath = typeof window !== "undefined"
+    ? window.location.pathname + window.location.search
+    : "/";
 
   const serieSlug = Array.isArray(slug) ? slug[0] : (slug ?? "");
 
@@ -1022,7 +996,7 @@ export default function SeriePage() {
   }, [slug, uid]);
 
   async function handleSerieLike() {
-    if (!uid) { setShowSerieLoginBanner(true); return; }
+    if (!uid) { setShowLoginModal(true); return; }
     if (serieLikeLoading || !serieId) return;
     setSerieLikeLoading(true);
     try {
@@ -1055,11 +1029,7 @@ export default function SeriePage() {
   const isAutor = currentUid === serie.autorId;
   const autorNomeExibicao: string = serie.autorNome || "Autor";
   const autorFotoUrl: string | null = serie.autorFoto ?? null;
-  const currentPath = typeof window !== "undefined"
-    ? window.location.pathname + window.location.search
-    : `/series/${serieSlug}`;
 
-  // CORREÇÃO 3: fila com fallback de audioUrl para todos os posts
   const filaSerieAudio = posts.map((p) => ({
     id: p.id,
     tipo: p.tipo as "sermao" | "artigo" | "reflexao",
@@ -1090,8 +1060,21 @@ export default function SeriePage() {
         <LikesModal likedBy={serieLikedBy} onClose={() => setSerieLikesModalAberto(false)} />
       )}
 
+      {/* Modal de login global */}
+      {showLoginModal && (
+        <BannerLogin
+          modal
+          onClose={() => setShowLoginModal(false)}
+          redirectTo={currentPath}
+        />
+      )}
+
       {/* ── Botão flutuante da série ── */}
-      <BotaoOuvirSerie posts={filaSerieAudio} serieSlug={serieSlug} />
+      <BotaoOuvirSerie
+        posts={filaSerieAudio}
+        serieSlug={serieSlug}
+        onLoginRequired={() => setShowLoginModal(true)}
+      />
 
       <div style={{ maxWidth: "680px", margin: "0 auto", padding: "calc(var(--header-h) + 2rem) 1.25rem 4rem" }}>
         {/* Capa */}
@@ -1164,7 +1147,10 @@ export default function SeriePage() {
             </button>
 
             <button
-              onClick={() => { if (!uid) { setShowSerieLoginBanner(true); return; } setShowSerieComments((v) => !v); }}
+              onClick={() => {
+                if (!uid) { setShowLoginModal(true); return; }
+                setShowSerieComments((v) => !v);
+              }}
               className="post-btn-share"
               style={{ display: "inline-flex", alignItems: "center", gap: "5px", color: showSerieComments ? "var(--emerald)" : undefined }}
               title="Comentar nesta série"
@@ -1178,12 +1164,6 @@ export default function SeriePage() {
               )}
             </button>
           </div>
-
-          {showSerieLoginBanner && (
-            <div style={{ marginBottom: "0.75rem" }}>
-              <BannerLogin onClose={() => setShowSerieLoginBanner(false)} redirectTo={currentPath} />
-            </div>
-          )}
 
           {showSerieComments && serieId && (
             <div style={{
@@ -1217,6 +1197,7 @@ export default function SeriePage() {
                 key={post.id} post={post} index={i}
                 serieSlug={serieSlug} onToast={showToast}
                 filaAudio={filaSerieAudio}
+                onLoginRequired={() => setShowLoginModal(true)}
               />
             ))}
           </div>

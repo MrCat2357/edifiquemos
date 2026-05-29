@@ -124,9 +124,7 @@ function IconComment({ size = 13, active = false }: { size?: number; active?: bo
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
       <path
         d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H9l-3 3v-3H3.5A1.5 1.5 0 0 1 2 9.5v-6Z"
-        stroke="currentColor"
-        strokeWidth="1.35"
-        strokeLinejoin="round"
+        stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"
         fill={active ? "currentColor" : "none"}
       />
     </svg>
@@ -154,8 +152,7 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
 
 // ─── BotaoOuvirSerieCard ──────────────────────────────────────────────────────
 
-function BotaoOuvirSerieCard({ serie }: { serie: any }) {
-  const router = useRouter();
+function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRequired: () => void }) {
   const {
     playQueue,
     pause,
@@ -182,38 +179,26 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
     if (postsCarregados !== null) return postsCarregados;
     const postIds: string[] = serie.postIds ?? [];
     if (postIds.length === 0) return [];
-
-    const snaps = await Promise.all(
-      postIds.map((id: string) => getDoc(doc(db, "posts", id)))
-    );
-    const lista = snaps
-      .filter((s) => s.exists())
-      .map((s) => ({ id: s.id, ...s.data() }));
-
+    const snaps = await Promise.all(postIds.map((id: string) => getDoc(doc(db, "posts", id))));
+    const lista = snaps.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() }));
     setPostsCarregados(lista);
     return lista;
   }
 
   async function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
-
     if (!auth.currentUser) {
-      router.push(
-        `/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`
-      );
+      onLoginRequired();
       return;
     }
-
     if (serieAtiva) {
       tocando ? pause() : resume();
       return;
     }
-
     setCarregandoPosts(true);
     try {
       const posts = await buscarPostsDaSerie();
       if (posts.length === 0) return;
-
       const fila = posts.map((p: any) => ({
         id: p.id,
         tipo: p.tipo as "sermao" | "artigo" | "reflexao",
@@ -224,7 +209,6 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
         autorSlug: p.autorSlug,
         audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
       }));
-
       playQueue(fila[0], fila, "serie");
     } catch (err) {
       console.error("Erro ao carregar posts da série:", err);
@@ -239,21 +223,13 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
       onClick={handleClick}
       title={tocando ? "Pausar série" : serieAtiva ? "Continuar série" : "Ouvir série completa"}
       style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "4px",
-        padding: "4px 8px",
-        borderRadius: "var(--radius-full)",
-        border: "1px solid",
+        display: "inline-flex", alignItems: "center", gap: "4px",
+        padding: "4px 8px", borderRadius: "var(--radius-full)", border: "1px solid",
         borderColor: serieAtiva ? "var(--emerald-dim)" : "transparent",
         background: serieAtiva ? "var(--emerald-dim)" : "transparent",
         color: serieAtiva ? "var(--emerald)" : "var(--text-3)",
-        fontSize: "0.72rem",
-        fontWeight: 600,
-        cursor: "pointer",
-        transition: "all 0.15s",
-        fontFamily: "inherit",
-        flexShrink: 0,
+        fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
+        transition: "all 0.15s", fontFamily: "inherit", flexShrink: 0,
         boxShadow: tocando ? "0 0 0 2px var(--emerald-dim)" : "none",
       }}
     >
@@ -262,36 +238,27 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
           <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
         </svg>
       ) : tocando ? (
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-        </svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
       ) : (
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M8 5.14v14l11-7-11-7z" />
-        </svg>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z" /></svg>
       )}
-      <span>
-        {carregando
-          ? "Carregando…"
-          : tocando
-          ? "Pausar"
-          : serieAtiva
-          ? "Continuar"
-          : "Ouvir série"}
-      </span>
-      {tocando && (
-        <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>
-          · agora
-        </span>
-      )}
+      <span>{carregando ? "Carregando…" : tocando ? "Pausar" : serieAtiva ? "Continuar" : "Ouvir série"}</span>
+      {tocando && <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>}
     </button>
   );
 }
 
 // ─── BotaoOuvirPerfil ─────────────────────────────────────────────────────────
 
-function BotaoOuvirPerfil({ post, filaAudio = [] }: { post: any; filaAudio?: any[] }) {
-  const router = useRouter();
+function BotaoOuvirPerfil({
+  post,
+  filaAudio = [],
+  onLoginRequired,
+}: {
+  post: any;
+  filaAudio?: any[];
+  onLoginRequired: () => void;
+}) {
   const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   const audioAtivo = isCurrentPublication(post.id);
@@ -301,7 +268,7 @@ function BotaoOuvirPerfil({ post, filaAudio = [] }: { post: any; filaAudio?: any
   function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
     if (!auth.currentUser) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      onLoginRequired();
       return;
     }
     const pub = {
@@ -312,7 +279,7 @@ function BotaoOuvirPerfil({ post, filaAudio = [] }: { post: any; filaAudio?: any
       autorFoto: post.autorFoto ?? null,
       slug: post.slug,
       autorSlug: post.autorSlug,
-      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+      audioUrl: post.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
     };
     if (filaAudio.length > 0) {
       playQueue(pub, filaAudio, "perfil");
@@ -327,14 +294,12 @@ function BotaoOuvirPerfil({ post, filaAudio = [] }: { post: any; filaAudio?: any
       title={audioTocando ? "Pausar" : "Ouvir este conteúdo"}
       style={{
         display: "inline-flex", alignItems: "center", gap: "4px",
-        padding: "4px 8px", borderRadius: "var(--radius-full)",
-        border: "1px solid",
+        padding: "4px 8px", borderRadius: "var(--radius-full)", border: "1px solid",
         borderColor: audioAtivo ? "var(--emerald-dim)" : "transparent",
         background: audioAtivo ? "var(--emerald-dim)" : "transparent",
         color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
-        fontSize: "0.72rem", fontWeight: 600,
-        cursor: "pointer", transition: "all 0.15s",
-        fontFamily: "inherit", flexShrink: 0,
+        fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
+        transition: "all 0.15s", fontFamily: "inherit", flexShrink: 0,
         boxShadow: audioTocando ? "0 0 0 2px var(--emerald-dim)" : "none",
       }}
     >
@@ -346,15 +311,20 @@ function BotaoOuvirPerfil({ post, filaAudio = [] }: { post: any; filaAudio?: any
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
       )}
       <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
-      {audioTocando && (
-        <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>
-      )}
+      {audioTocando && <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>}
     </button>
   );
 }
 
-function CardReflexaoComOuvir({ reflexao, filaAudio = [] }: { reflexao: Reflexao; filaAudio?: any[] }) {
-  const router = useRouter();
+function CardReflexaoComOuvir({
+  reflexao,
+  filaAudio = [],
+  onLoginRequired,
+}: {
+  reflexao: Reflexao;
+  filaAudio?: any[];
+  onLoginRequired: () => void;
+}) {
   const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   const audioAtivo = isCurrentPublication(reflexao.id ?? "");
@@ -364,7 +334,7 @@ function CardReflexaoComOuvir({ reflexao, filaAudio = [] }: { reflexao: Reflexao
   function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
     if (!auth.currentUser) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      onLoginRequired();
       return;
     }
     if (!reflexao.id) return;
@@ -393,8 +363,7 @@ function CardReflexaoComOuvir({ reflexao, filaAudio = [] }: { reflexao: Reflexao
           onClick={handleOuvir}
           style={{
             display: "inline-flex", alignItems: "center", gap: "0.3rem",
-            padding: "4px 10px", borderRadius: "var(--radius-full)",
-            border: "1px solid",
+            padding: "4px 10px", borderRadius: "var(--radius-full)", border: "1px solid",
             borderColor: audioAtivo ? "var(--emerald-dim)" : "transparent",
             background: audioAtivo ? "var(--emerald-dim)" : "transparent",
             color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
@@ -425,6 +394,8 @@ function SerieCardMeuPerfil({
 }) {
   const router = useRouter();
   const postCount = serie.postIds?.length ?? 0;
+  const currentPath = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/perfil";
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
 
   async function handleDeletar(e: React.MouseEvent) {
     e.stopPropagation();
@@ -480,6 +451,11 @@ function SerieCardMeuPerfil({
           </h2>
           {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
         </div>
+        {showLoginBanner && (
+          <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+            <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
+          </div>
+        )}
         <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
           onClick={(e) => e.stopPropagation()}>
           <button
@@ -496,7 +472,10 @@ function SerieCardMeuPerfil({
           >
             🗑 Apagar
           </button>
-          <BotaoOuvirSerieCard serie={serie} />
+          <BotaoOuvirSerieCard
+            serie={serie}
+            onLoginRequired={() => setShowLoginBanner(true)}
+          />
           <span className="read-link" style={{ marginLeft: "auto" }}
             onClick={() => router.push(`/series/${serie.slug}`)}>
             Ver série →
@@ -648,7 +627,11 @@ function PostCardMeuPerfil({
           </span>
         )}
 
-        <BotaoOuvirPerfil post={post} filaAudio={filaAudio} />
+        <BotaoOuvirPerfil
+          post={post}
+          filaAudio={filaAudio}
+          onLoginRequired={() => setShowLoginBanner(true)}
+        />
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
         Ler completo →
@@ -697,10 +680,7 @@ function PostCardMeuPerfil({
           </div>
           {showLoginBanner && (
             <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-              <BannerLogin
-                onClose={() => setShowLoginBanner(false)}
-                redirectTo={currentPath}
-              />
+              <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
             </div>
           )}
           {footerRow}
@@ -730,10 +710,7 @@ function PostCardMeuPerfil({
       </div>
       {showLoginBanner && (
         <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-          <BannerLogin
-            onClose={() => setShowLoginBanner(false)}
-            redirectTo={currentPath}
-          />
+          <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
         </div>
       )}
       {footerRow}
@@ -1122,7 +1099,12 @@ function PerfilContent() {
               ) : (
                 <div className="posts-list">
                   {reflexoes.map((r, i) => (
-                    <CardReflexaoComOuvir key={r.id ?? i} reflexao={r} filaAudio={filaReflexoesAudio} />
+                    <CardReflexaoComOuvir
+                      key={r.id ?? i}
+                      reflexao={r}
+                      filaAudio={filaReflexoesAudio}
+                      onLoginRequired={() => {}}
+                    />
                   ))}
                 </div>
               )}

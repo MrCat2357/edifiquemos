@@ -128,7 +128,7 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   );
 }
 
-/* ── resolverUid ────────────────────────────────────── */
+// ─── resolverUid ────────────────────────────────────── */
 
 async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: User } | null> {
   const qSlug = query(collection(db, "users"), where("slug", "==", idOuSlug));
@@ -145,8 +145,13 @@ async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: U
 
 // ─── BotaoOuvirSerieCard ──────────────────────────────────────────────────────
 
-function BotaoOuvirSerieCard({ serie }: { serie: any }) {
-  const router = useRouter();
+function BotaoOuvirSerieCard({
+  serie,
+  onLoginRequired,
+}: {
+  serie: any;
+  onLoginRequired: () => void;
+}) {
   const {
     playQueue,
     pause,
@@ -173,14 +178,10 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
     if (postsCarregados !== null) return postsCarregados;
     const postIds: string[] = serie.postIds ?? [];
     if (postIds.length === 0) return [];
-
     const snaps = await Promise.all(
       postIds.map((id: string) => getDoc(doc(db, "posts", id)))
     );
-    const lista = snaps
-      .filter((s) => s.exists())
-      .map((s) => ({ id: s.id, ...s.data() }));
-
+    const lista = snaps.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() }));
     setPostsCarregados(lista);
     return lista;
   }
@@ -189,9 +190,7 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
     e.stopPropagation();
 
     if (!auth.currentUser) {
-      router.push(
-        `/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`
-      );
+      onLoginRequired();
       return;
     }
 
@@ -204,7 +203,6 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
     try {
       const posts = await buscarPostsDaSerie();
       if (posts.length === 0) return;
-
       const fila = posts.map((p: any) => ({
         id: p.id,
         tipo: p.tipo as "sermao" | "artigo" | "reflexao",
@@ -215,7 +213,6 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
         autorSlug: p.autorSlug,
         audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
       }));
-
       playQueue(fila[0], fila, "serie");
     } catch (err) {
       console.error("Erro ao carregar posts da série:", err);
@@ -262,18 +259,10 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
         </svg>
       )}
       <span>
-        {carregando
-          ? "Carregando…"
-          : tocando
-          ? "Pausar"
-          : serieAtiva
-          ? "Continuar"
-          : "Ouvir série"}
+        {carregando ? "Carregando…" : tocando ? "Pausar" : serieAtiva ? "Continuar" : "Ouvir série"}
       </span>
       {tocando && (
-        <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>
-          · agora
-        </span>
+        <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>
       )}
     </button>
   );
@@ -281,8 +270,15 @@ function BotaoOuvirSerieCard({ serie }: { serie: any }) {
 
 // ─── BotaoOuvirPerfil ─────────────────────────────────────────────────────────
 
-function BotaoOuvirPerfil({ post, filaAudio = [] }: { post: any; filaAudio?: any[] }) {
-  const router = useRouter();
+function BotaoOuvirPerfil({
+  post,
+  filaAudio = [],
+  onLoginRequired,
+}: {
+  post: any;
+  filaAudio?: any[];
+  onLoginRequired: () => void;
+}) {
   const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   const audioAtivo = isCurrentPublication(post.id);
@@ -292,7 +288,7 @@ function BotaoOuvirPerfil({ post, filaAudio = [] }: { post: any; filaAudio?: any
   function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
     if (!auth.currentUser) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      onLoginRequired();
       return;
     }
     const pub = {
@@ -303,7 +299,7 @@ function BotaoOuvirPerfil({ post, filaAudio = [] }: { post: any; filaAudio?: any
       autorFoto: post.autorFoto ?? null,
       slug: post.slug,
       autorSlug: post.autorSlug,
-      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+      audioUrl: post.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
     };
     if (filaAudio.length > 0) {
       playQueue(pub, filaAudio, "perfil");
@@ -344,8 +340,15 @@ function BotaoOuvirPerfil({ post, filaAudio = [] }: { post: any; filaAudio?: any
   );
 }
 
-function CardReflexaoComOuvir({ reflexao, filaAudio = [] }: { reflexao: Reflexao; filaAudio?: any[] }) {
-  const router = useRouter();
+function CardReflexaoComOuvir({
+  reflexao,
+  filaAudio = [],
+  onLoginRequired,
+}: {
+  reflexao: Reflexao;
+  filaAudio?: any[];
+  onLoginRequired: () => void;
+}) {
   const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
 
   const audioAtivo = isCurrentPublication(reflexao.id ?? "");
@@ -355,7 +358,7 @@ function CardReflexaoComOuvir({ reflexao, filaAudio = [] }: { reflexao: Reflexao
   function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
     if (!auth.currentUser) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      onLoginRequired();
       return;
     }
     if (!reflexao.id) return;
@@ -425,13 +428,18 @@ function SerieCardPublico({
   const [likeCount, setLikeCount] = useState<number>(serie.likes ?? 0);
   const [loadingLike, setLoadingLike] = useState(false);
   const [showLoginBanner, setShowLoginBanner] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [commentCount, setCommentCount] = useState<number>(serie.commentCount ?? 0);
+
+  const currentPath = typeof window !== "undefined"
+    ? window.location.pathname + window.location.search
+    : "/";
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      setShowLoginBanner(true);
+      setShowLoginModal(true);
       return;
     }
     if (loadingLike) return;
@@ -456,7 +464,7 @@ function SerieCardPublico({
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      setShowLoginBanner(true);
+      setShowLoginModal(true);
       return;
     }
     setShowComments((v) => !v);
@@ -476,143 +484,155 @@ function SerieCardPublico({
   }
 
   return (
-    <article
-      className="post-card serie-card"
-      style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
-      onClick={() => router.push(`/series/${serie.slug}`)}
-    >
-      {serie.imagemUrl && (
-        <div className="card-cover-wrapper">
-          <img src={serie.imagemUrl} alt={serie.titulo} className="card-cover-img" />
-          <span className="cat-badge card-cover-badge" style={{
-            background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)",
-            color: "var(--emerald)", borderColor: "var(--emerald-dim)",
-          }}>
-            📚 Série
-          </span>
-        </div>
+    <>
+      {showLoginModal && (
+        <BannerLogin
+          modal
+          onClose={() => setShowLoginModal(false)}
+          redirectTo={currentPath}
+        />
       )}
-
-      <div style={{ padding: serie.imagemUrl ? "0.875rem 1.125rem 0.875rem" : undefined }}>
-        {!serie.imagemUrl && (
-          <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ flex: 1 }}>
-              <span className="card-meta">{postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
-            </div>
-            <span className="cat-badge" style={{
-              color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)",
+      <article
+        className="post-card serie-card"
+        style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
+        onClick={() => router.push(`/series/${serie.slug}`)}
+      >
+        {serie.imagemUrl && (
+          <div className="card-cover-wrapper">
+            <img src={serie.imagemUrl} alt={serie.titulo} className="card-cover-img" />
+            <span className="cat-badge card-cover-badge" style={{
+              background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)",
+              color: "var(--emerald)", borderColor: "var(--emerald-dim)",
             }}>
               📚 Série
             </span>
           </div>
         )}
 
-        <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
-          {serie.imagemUrl && (
-            <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
-              {postCount} publicação{postCount !== 1 ? "ões" : ""}
-            </p>
+        <div style={{ padding: serie.imagemUrl ? "0.875rem 1.125rem 0.875rem" : undefined }}>
+          {!serie.imagemUrl && (
+            <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ flex: 1 }}>
+                <span className="card-meta">{postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
+              </div>
+              <span className="cat-badge" style={{
+                color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)",
+              }}>
+                📚 Série
+              </span>
+            </div>
           )}
-          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>
-            {serie.titulo}
-          </h2>
-          {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
+
+          <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
+            {serie.imagemUrl && (
+              <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
+                {postCount} publicação{postCount !== 1 ? "ões" : ""}
+              </p>
+            )}
+            <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>
+              {serie.titulo}
+            </h2>
+            {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
+          </div>
+
+          {showLoginBanner && (
+            <div style={{ padding: "0 0 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+              <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
+            </div>
+          )}
+
+          <div
+            className="card-footer-row"
+            style={{ display: "flex", alignItems: "center", gap: "0" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+              {isOwner && (
+                <div style={{ display: "flex", gap: "0.5rem", marginRight: "4px" }}>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
+                    className="post-btn-edit"
+                    style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+                  >
+                    ✏ Editar
+                  </button>
+                  <button
+                    onClick={handleDeletar}
+                    className="post-btn-delete"
+                    style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+                  >
+                    🗑 Apagar
+                  </button>
+                </div>
+              )}
+
+              <button
+                className={`action-btn ${liked ? "liked" : ""}`}
+                onClick={handleLike}
+                disabled={loadingLike}
+                title={uid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
+                style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
+              >
+                <IconHeart size={13} filled={liked} />
+                Amei
+                {likeCount > 0 && (
+                  <span style={{ fontSize: "0.72rem", color: liked ? "inherit" : "var(--emerald)", fontWeight: 700 }}>
+                    {likeCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={handleToggleComments}
+                title="Ver comentários"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: "4px",
+                  padding: 0, background: "none", border: "none",
+                  color: showComments ? "var(--emerald)" : "var(--text-3)",
+                  cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
+                  transition: "color 0.15s",
+                }}
+              >
+                <IconComment size={13} active={showComments} />
+                Comentários
+                {commentCount > 0 && (
+                  <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>
+                    {commentCount}
+                  </span>
+                )}
+              </button>
+
+              <BotaoOuvirSerieCard
+                serie={serie}
+                onLoginRequired={() => setShowLoginModal(true)}
+              />
+            </div>
+
+            <span
+              className="read-link"
+              style={{ marginLeft: "auto" }}
+              onClick={() => router.push(`/series/${serie.slug}`)}
+            >
+              Ver série →
+            </span>
+          </div>
         </div>
 
-        {showLoginBanner && (
-          <div style={{ padding: "0 0 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-            <BannerLogin onClose={() => setShowLoginBanner(false)} />
+        {showComments && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              borderTop: "1px solid var(--border-light)",
+              padding: "1.25rem 1.125rem 1.5rem",
+              background: "var(--bg-elevated)",
+              borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
+            }}
+          >
+            <CommentSection postId={serie.id} onCountChange={setCommentCount} />
           </div>
         )}
-
-        <div
-          className="card-footer-row"
-          style={{ display: "flex", alignItems: "center", gap: "0" }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-            {isOwner && (
-              <div style={{ display: "flex", gap: "0.5rem", marginRight: "4px" }}>
-                <button
-                  onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
-                  className="post-btn-edit"
-                  style={{ fontSize: "0.78rem", padding: "5px 12px" }}
-                >
-                  ✏ Editar
-                </button>
-                <button
-                  onClick={handleDeletar}
-                  className="post-btn-delete"
-                  style={{ fontSize: "0.78rem", padding: "5px 12px" }}
-                >
-                  🗑 Apagar
-                </button>
-              </div>
-            )}
-
-            <button
-              className={`action-btn ${liked ? "liked" : ""}`}
-              onClick={handleLike}
-              disabled={loadingLike}
-              title={uid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
-              style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
-            >
-              <IconHeart size={13} filled={liked} />
-              Amei
-              {likeCount > 0 && (
-                <span style={{ fontSize: "0.72rem", color: liked ? "inherit" : "var(--emerald)", fontWeight: 700 }}>
-                  {likeCount}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={handleToggleComments}
-              title="Ver comentários"
-              style={{
-                display: "inline-flex", alignItems: "center", gap: "4px",
-                padding: 0, background: "none", border: "none",
-                color: showComments ? "var(--emerald)" : "var(--text-3)",
-                cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
-                transition: "color 0.15s",
-              }}
-            >
-              <IconComment size={13} active={showComments} />
-              Comentários
-              {commentCount > 0 && (
-                <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>
-                  {commentCount}
-                </span>
-              )}
-            </button>
-
-            <BotaoOuvirSerieCard serie={serie} />
-          </div>
-
-          <span
-            className="read-link"
-            style={{ marginLeft: "auto" }}
-            onClick={() => router.push(`/series/${serie.slug}`)}
-          >
-            Ver série →
-          </span>
-        </div>
-      </div>
-
-      {showComments && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            borderTop: "1px solid var(--border-light)",
-            padding: "1.25rem 1.125rem 1.5rem",
-            background: "var(--bg-elevated)",
-            borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
-          }}
-        >
-          <CommentSection postId={serie.id} onCountChange={setCommentCount} />
-        </div>
-      )}
-    </article>
+      </article>
+    </>
   );
 }
 
@@ -636,6 +656,7 @@ function PostCardPerfil({
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
   const [showLoginBanner, setShowLoginBanner] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [showComments, setShowComments] = useState(false);
 
   const viewCount: number = post.visualizacoes ?? 0;
@@ -645,6 +666,10 @@ function PostCardPerfil({
   const fullUrl = typeof window !== "undefined"
     ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`
     : `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
+
+  const currentPath = typeof window !== "undefined"
+    ? window.location.pathname + window.location.search
+    : "/";
 
   function buildFrase() {
     const data = post.data?.toDate
@@ -662,7 +687,7 @@ function PostCardPerfil({
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!currentUid) {
-      setShowLoginBanner(true);
+      setShowLoginModal(true);
       return;
     }
     if (loadingLike) return;
@@ -757,7 +782,7 @@ function PostCardPerfil({
           onClick={(e) => {
             e.stopPropagation();
             if (!currentUid) {
-              setShowLoginBanner(true);
+              setShowLoginModal(true);
               return;
             }
             setShowComments((v) => !v);
@@ -797,7 +822,11 @@ function PostCardPerfil({
           </span>
         )}
 
-        <BotaoOuvirPerfil post={post} filaAudio={filaAudio} />
+        <BotaoOuvirPerfil
+          post={post}
+          filaAudio={filaAudio}
+          onLoginRequired={() => setShowLoginModal(true)}
+        />
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
         Ler completo →
@@ -821,78 +850,88 @@ function PostCardPerfil({
 
   if (temImagem) {
     return (
-      <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }}
-        onClick={() => router.push(postPath)}>
-        <div className="card-cover-wrapper">
-          <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
-          <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-            {post.tipo === "sermao" ? "Sermão" : "Estudo"}
-          </span>
-        </div>
-        <div className="card-image-content">
-          <div className="card-header-row" style={{ padding: "0.875rem 1.125rem 0.375rem" }}
-            onClick={(e) => e.stopPropagation()}>
-            <Avatar src={user.fotoUrl} name={nomeExibicao} size={28} />
-            <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-              <span className="author-name-link" style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", fontSize: "0.8rem", cursor: "default" }}>
-                {nomeExibicao}
-              </span>
-              <span className="card-meta">{buildFrase()}</span>
-            </div>
+      <>
+        {showLoginModal && (
+          <BannerLogin modal onClose={() => setShowLoginModal(false)} redirectTo={currentPath} />
+        )}
+        <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }}
+          onClick={() => router.push(postPath)}>
+          <div className="card-cover-wrapper">
+            <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
+            <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
+              {post.tipo === "sermao" ? "Sermão" : "Estudo"}
+            </span>
           </div>
-          <div className="card-body-area" style={{ padding: "0 1.125rem 0.75rem" }}>
-            <h2 className="card-title" style={{ fontSize: "1rem" }}>{post.titulo}</h2>
-            {post.resumo && <p className="card-frase">{post.resumo}</p>}
-          </div>
-          {showLoginBanner && (
-            <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-              <BannerLogin onClose={() => setShowLoginBanner(false)} />
+          <div className="card-image-content">
+            <div className="card-header-row" style={{ padding: "0.875rem 1.125rem 0.375rem" }}
+              onClick={(e) => e.stopPropagation()}>
+              <Avatar src={user.fotoUrl} name={nomeExibicao} size={28} />
+              <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                <span className="author-name-link" style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", fontSize: "0.8rem", cursor: "default" }}>
+                  {nomeExibicao}
+                </span>
+                <span className="card-meta">{buildFrase()}</span>
+              </div>
             </div>
-          )}
-          {footerRow}
-        </div>
-        {commentsPanel}
-      </article>
+            <div className="card-body-area" style={{ padding: "0 1.125rem 0.75rem" }}>
+              <h2 className="card-title" style={{ fontSize: "1rem" }}>{post.titulo}</h2>
+              {post.resumo && <p className="card-frase">{post.resumo}</p>}
+            </div>
+            {showLoginBanner && (
+              <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+                <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
+              </div>
+            )}
+            {footerRow}
+          </div>
+          {commentsPanel}
+        </article>
+      </>
     );
   }
 
   return (
-    <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
-      <div className="card-header-row" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
-        <Avatar src={user.fotoUrl} name={nomeExibicao} size={36} />
-        <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-          <span className="author-name-link" onClick={(e) => e.stopPropagation()}
-            style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", cursor: "default" }}>
-            {nomeExibicao}
-          </span>
-          <span className="card-meta">{buildFrase()}</span>
-        </div>
-        <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-          {post.tipo === "sermao" ? "Sermão" : "Estudo"}
-        </span>
-      </div>
-      <div className="card-body-area" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
-        <h2 className="card-title">{post.titulo}</h2>
-        {post.resumo && <p className="card-frase">{post.resumo}</p>}
-      </div>
-      {showLoginBanner && (
-        <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-          <BannerLogin onClose={() => setShowLoginBanner(false)} />
-        </div>
+    <>
+      {showLoginModal && (
+        <BannerLogin modal onClose={() => setShowLoginModal(false)} redirectTo={currentPath} />
       )}
-      {footerRow}
-      {commentsPanel}
-    </article>
+      <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
+        <div className="card-header-row" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
+          <Avatar src={user.fotoUrl} name={nomeExibicao} size={36} />
+          <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+            <span className="author-name-link" onClick={(e) => e.stopPropagation()}
+              style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", cursor: "default" }}>
+              {nomeExibicao}
+            </span>
+            <span className="card-meta">{buildFrase()}</span>
+          </div>
+          <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
+            {post.tipo === "sermao" ? "Sermão" : "Estudo"}
+          </span>
+        </div>
+        <div className="card-body-area" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
+          <h2 className="card-title">{post.titulo}</h2>
+          {post.resumo && <p className="card-frase">{post.resumo}</p>}
+        </div>
+        {showLoginBanner && (
+          <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+            <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
+          </div>
+        )}
+        {footerRow}
+        {commentsPanel}
+      </article>
+    </>
   );
 }
 
 /* ── CardReflexaoComControles ─────────────────────────── */
 
 function CardReflexaoComControles({
-  reflexao, index, isOwner, onToast, filaAudio = [],
+  reflexao, index, isOwner, onToast, filaAudio = [], onLoginRequired,
 }: {
   reflexao: Reflexao; index: number; isOwner: boolean; onToast: (msg: string) => void;
-  filaAudio?: any[];
+  filaAudio?: any[]; onLoginRequired: () => void;
 }) {
   const router = useRouter();
 
@@ -911,7 +950,11 @@ function CardReflexaoComControles({
 
   return (
     <div style={{ position: "relative" }}>
-      <CardReflexaoComOuvir reflexao={reflexao} filaAudio={filaAudio} />
+      <CardReflexaoComOuvir
+        reflexao={reflexao}
+        filaAudio={filaAudio}
+        onLoginRequired={onLoginRequired}
+      />
       {isOwner && (
         <div
           style={{ display: "flex", gap: "0.5rem", padding: "0 1.125rem 0.875rem", marginTop: "-0.25rem" }}
@@ -951,6 +994,12 @@ export default function PerfilPublico() {
   const [aba, setAba] = useState<"posts" | "series" | "reflexoes">("posts");
   const [loading, setLoading] = useState(true);
   const [visitorUid, setVisitorUid] = useState<string | null>(null);
+
+  // Modal de login global para ações não-autenticadas
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const currentPath = typeof window !== "undefined"
+    ? window.location.pathname + window.location.search
+    : "/";
 
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
@@ -1049,6 +1098,14 @@ export default function PerfilPublico() {
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
 
+      {showLoginModal && (
+        <BannerLogin
+          modal
+          onClose={() => setShowLoginModal(false)}
+          redirectTo={currentPath}
+        />
+      )}
+
       <div className="perfil-wrapper">
         <div className="perfil-card">
           <Avatar src={user.fotoUrl} name={nomeExibicao} size={64} />
@@ -1145,9 +1202,13 @@ export default function PerfilPublico() {
               <div className="posts-list">
                 {reflexoes.map((r, i) => (
                   <CardReflexaoComControles
-                    key={r.id ?? i} reflexao={r} index={i}
-                    isOwner={isOwner} onToast={showToast}
+                    key={r.id ?? i}
+                    reflexao={r}
+                    index={i}
+                    isOwner={isOwner}
+                    onToast={showToast}
                     filaAudio={filaReflexoesAudio}
+                    onLoginRequired={() => setShowLoginModal(true)}
                   />
                 ))}
               </div>

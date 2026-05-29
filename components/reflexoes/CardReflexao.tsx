@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase";
@@ -11,11 +10,11 @@ import {
   arrayRemove,
   increment,
 } from "firebase/firestore";
-import dynamic from "next/dynamic";
+import { useState } from "react";
 import type { Reflexao } from "@/lib/reflexoes";
 import BannerLogin from "@/components/BannerLogin";
+import dynamic from "next/dynamic";
 
-// Carrega o CommentSection apenas quando o painel é aberto
 const CommentSection = dynamic(
   () => import("@/components/comments/CommentSection"),
   { ssr: false, loading: () => null }
@@ -62,13 +61,11 @@ export default function CardReflexao({ reflexao, hideActions = false, disableNav
   const router = useRouter();
   const [hovered, setHovered] = useState(false);
 
-  // Reflexões vivem em /posts/{id} — mesma coleção que sermões e artigos
   const uid = auth.currentUser?.uid ?? null;
   const [likes, setLikes] = useState<number>(reflexao.likes ?? 0);
   const [likedBy, setLikedBy] = useState<string[]>(reflexao.likedBy ?? []);
   const [likePending, setLikePending] = useState(false);
 
-  // Painel de comentários
   const [showComments, setShowComments] = useState(false);
   const [showLoginBanner, setShowLoginBanner] = useState(false);
   const [commentCount, setCommentCount] = useState<number>(reflexao.commentCount ?? 0);
@@ -77,7 +74,8 @@ export default function CardReflexao({ reflexao, hideActions = false, disableNav
 
   const href = `/${reflexao.autorSlug}/reflexao/${reflexao.slug}`;
   const borderColor = hovered ? "var(--emerald-dim)" : "var(--border-light)";
-  // Quando o painel de comentários está aberto, o card não deve ter radius embaixo
+
+  // O card só não tem radius embaixo quando há algum painel aberto
   const hasPanel = showComments || showLoginBanner;
 
   async function handleLike(e: React.MouseEvent) {
@@ -85,8 +83,9 @@ export default function CardReflexao({ reflexao, hideActions = false, disableNav
     e.stopPropagation();
     if (likePending) return;
 
+    // Se não logado: mostra banner dentro do card, sem redirecionar
     if (!uid) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      setShowLoginBanner(true);
       return;
     }
 
@@ -112,6 +111,7 @@ export default function CardReflexao({ reflexao, hideActions = false, disableNav
       });
     } catch (err) {
       console.error(err);
+      // Reverte optimistic update em caso de erro
       setLikedBy((prev) => novoJaAmei ? prev.filter((id) => id !== uid) : [...prev, uid]);
       setLikes((prev) => prev + (novoJaAmei ? -1 : 1));
     } finally {
@@ -123,11 +123,13 @@ export default function CardReflexao({ reflexao, hideActions = false, disableNav
     e.preventDefault();
     e.stopPropagation();
 
+    // Se não logado: mostra banner dentro do card, sem redirecionar
     if (!uid) {
-      router.push(`/entrar?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
+      setShowLoginBanner(true);
       return;
     }
 
+    setShowLoginBanner(false);
     setShowComments((v) => !v);
   }
 
@@ -211,7 +213,7 @@ export default function CardReflexao({ reflexao, hideActions = false, disableNav
         </p>
       </Link>
 
-      {/* ── Rodapé: Amei + Comentar ──────────────────────────────────────── */}
+      {/* ── Rodapé: Amei + Comentar + Ouvir ─────────────────────────────── */}
       <div
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -224,7 +226,7 @@ export default function CardReflexao({ reflexao, hideActions = false, disableNav
           borderTop: "1px solid var(--border-light)",
           borderLeft: `1px solid ${borderColor}`,
           borderRight: `1px solid ${borderColor}`,
-          // Se o painel está aberto, não fecha o card aqui (sem radius e sem border-bottom)
+          // Só fecha o card (radius + border-bottom) quando não há painel aberto
           borderBottom: hasPanel ? "none" : `1px solid ${borderColor}`,
           borderRadius: hasPanel ? "0" : `0 0 var(--radius-lg) var(--radius-lg)`,
           background: hovered ? "var(--bg-card)" : "var(--bg-elevated)",
@@ -276,15 +278,16 @@ export default function CardReflexao({ reflexao, hideActions = false, disableNav
         {botaoOuvir}
       </div>
 
-      {/* ── Banner de login (quando não logado e clicou em Comentar) ─────── */}
+      {/* ── Banner de login — aparece dentro do card, acima dos comentários ── */}
       {showLoginBanner && (
         <div
           onClick={(e) => e.stopPropagation()}
           style={{
             borderLeft: `1px solid ${borderColor}`,
             borderRight: `1px solid ${borderColor}`,
-            borderBottom: `1px solid ${borderColor}`,
-            borderRadius: `0 0 var(--radius-lg) var(--radius-lg)`,
+            // Só fecha o card aqui se não há comentários abertos
+            borderBottom: showComments ? "none" : `1px solid ${borderColor}`,
+            borderRadius: showComments ? "0" : `0 0 var(--radius-lg) var(--radius-lg)`,
             padding: "0.75rem 1rem",
             background: "var(--bg-elevated)",
           }}

@@ -734,6 +734,8 @@ function PostCard({ post, index, onAuthorClick, onToast, filaAudio = [] }: {
 }
 
 // ─── ReflexaoFeedCard ─────────────────────────────────────────────────────────
+// VERSÃO CORRIGIDA: removidos os botões editar/excluir que ficavam fora do card.
+// Substitua apenas o componente ReflexaoFeedCard no seu app/page.tsx pelo bloco abaixo.
 
 function ReflexaoFeedCard({
   reflexao, index, currentUid, onDeleted, onToast, filaAudio = [],
@@ -743,7 +745,6 @@ function ReflexaoFeedCard({
   filaAudio?: any[];
 }) {
   const router = useRouter();
-  const isAutor = !!currentUid && currentUid === reflexao.autorId;
   const [showLoginBanner, setShowLoginBanner] = useState(false);
 
   const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
@@ -775,19 +776,6 @@ function ReflexaoFeedCard({
       playQueue(pub, filaAudio, "home");
     } else {
       playOrToggle(pub);
-    }
-  }
-
-  async function handleDelete(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (!confirm("Tem certeza que deseja excluir esta reflexão? Esta ação não pode ser desfeita.")) return;
-    try {
-      await deleteDoc(doc(db, "posts", reflexao.id));
-      onDeleted(reflexao.id);
-      onToast("Reflexão excluída.");
-    } catch (err) {
-      console.error(err);
-      onToast("Erro ao excluir reflexão.");
     }
   }
 
@@ -830,24 +818,8 @@ function ReflexaoFeedCard({
         </div>
       )}
 
-      {isAutor && (
-        <div className="reflexao-owner-actions" onClick={(e) => e.stopPropagation()}>
-          <a
-            href={`/${reflexao.autorSlug}/reflexao/${reflexao.slug}/editar`}
-            className="reflexao-action-btn reflexao-action-edit"
-            title="Editar reflexão"
-          >
-            ✏️ Editar
-          </a>
-          <button
-            className="reflexao-action-btn reflexao-action-delete"
-            onClick={handleDelete}
-            title="Excluir reflexão"
-          >
-            🗑️ Excluir
-          </button>
-        </div>
-      )}
+      {/* Botões editar/excluir foram removidos daqui.
+          O autor pode editar/excluir acessando a própria reflexão. */}
     </div>
   );
 }

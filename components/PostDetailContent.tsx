@@ -216,7 +216,6 @@ function PostNavigation({
   useEffect(() => {
     async function fetchNav() {
       try {
-        // ── 1. Feed global misturado (?from=home) ──────────────────────────────
         if (fromHome) {
           const all = await fetchFeedGlobal();
           const idx = all.findIndex((item) => item.id === postId);
@@ -252,7 +251,6 @@ function PostNavigation({
           return;
         }
 
-        // ── 2. Dentro de uma série (?from=serie) ───────────────────────────────
         if (fromSerie && serieSlugParam) {
           const serieSnap = await getDocs(
             query(collection(db, "series"), where("slug", "==", serieSlugParam))
@@ -308,7 +306,6 @@ function PostNavigation({
           return;
         }
 
-        // ── 3. Perfil do autor (?from=perfil) ──────────────────────────────────
         if (fromPerfil && autorIdProp) {
           const snap = await getDocs(
             query(collection(db, "posts"), where("autorId", "==", autorIdProp), orderBy("data", "desc"))
@@ -354,7 +351,6 @@ function PostNavigation({
           return;
         }
 
-        // ── 4. Sem parâmetro — feed global de posts apenas (legado) ────────────
         const snap = await getDocs(
           query(collection(db, "posts"), orderBy("data", "desc"))
         );
@@ -796,6 +792,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
   const [viewCount, setViewCount] = useState<number>(post.visualizacoes ?? 0);
+  // modal login — usado por curtir E por ouvir
   const [modalLoginVisivel, setModalLoginVisivel] = useState(false);
   const [bannerLoginVisivel, setBannerLoginVisivel] = useState(false);
 
@@ -972,12 +969,12 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [buildingQueue, setBuildingQueue] = useState(false);
 
   async function buildAndPlay() {
-  if (!auth.currentUser) {
-    setModalLoginVisivel(true);
-    return;
-  }
+    // ── Verificar login antes de qualquer coisa ──────────────────────────
+    if (!auth.currentUser) {
+      setModalLoginVisivel(true);
+      return;
+    }
 
-    // Só faz toggle se a fila E o contexto já estão corretos para esta página
     const filaTemEstePost = queue.length > 0 && queue.some((p) => p.id === postId);
     const contextoCorreto =
       (fromParam === "home"   && contextType === "home")   ||
@@ -991,11 +988,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
 
     setBuildingQueue(true);
     try {
-      // ── Case: dentro de uma série ─────────────────────────────────────────
-      // ← ALTERADO: antes este caso não existia — caía no fallback de fila mínima
-      //   com contextType null, deixando useAudioSync sem callbacks de navegação.
-      //   Agora busca os episódios da série pelo serieSlugParam e monta a fila
-      //   com contextType "serie", ativando useAudioSync corretamente.
       if (fromParam === "serie" && serieSlugParam) {
         const serieSnap = await getDocs(
           query(collection(db, "series"), where("slug", "==", serieSlugParam))
@@ -1022,10 +1014,8 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             return;
           }
         }
-        // Se a série não foi encontrada, cai no fallback abaixo
       }
 
-      // ── Case: feed global (home) ──────────────────────────────────────────
       if (fromParam === "home") {
         const feedItems = await fetchFeedGlobal();
         const novaFila = await buildAudioQueueFromFeed(feedItems);
@@ -1036,7 +1026,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         }
       }
 
-      // ── Case: perfil do autor ─────────────────────────────────────────────
       if (fromParam === "perfil" && post.autorId) {
         const snap = await getDocs(
           query(collection(db, "posts"), where("autorId", "==", post.autorId), orderBy("data", "desc"))
@@ -1058,7 +1047,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         }
       }
 
-      // ── Fallback: fila mínima com apenas este post ─────────────────────────
       playQueue(pubDestePost, [pubDestePost], null);
     } catch (err) {
       console.error("Erro ao construir fila de áudio:", err);
