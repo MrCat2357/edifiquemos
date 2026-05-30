@@ -396,6 +396,7 @@ function concatenarMP3s(buffers: Buffer[]): Buffer {
 // ---------------------------------------------------------------------------
 
 export async function POST(req: NextRequest) {
+  console.log("[TTS] STORAGE_BUCKET:", process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET);
   ensureAdminInitialized();
 
   const adminAuth = getAuth();
