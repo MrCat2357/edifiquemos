@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { auth } from "@/lib/firebase";
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -73,6 +74,53 @@ export function useAudioContext(): AudioContextValue {
   return ctx;
 }
 
+// ---------------------------------------------------------------------------
+// Resolução de áudio via API TTS — usada dentro do Provider (sem hooks)
+// ---------------------------------------------------------------------------
+
+const FALLBACK_AUDIO = "https://archive.org/download/testmp3testfile/mpthreetest.mp3";
+
+/**
+ * Chama POST /api/tts/gerar diretamente (fetch com Bearer token).
+ * Retorna a audioUrl gerada, ou null se falhar.
+ * Não lança — falhas são silenciosas para não interromper o autoplay.
+ */
+async function resolverAudioUrlDireta(pub: AudioPublication): Promise<string | null> {
+  // Se já tem URL válida (não é o fallback), retorna direto
+  if (pub.audioUrl && pub.audioUrl !== FALLBACK_AUDIO) {
+    return pub.audioUrl;
+  }
+
+  try {
+    const user = auth.currentUser;
+    if (!user) return null;
+
+    const token = await user.getIdToken();
+
+    const tipo = pub.tipo === "artigo" ? "estudo" : pub.tipo;
+
+    const response = await fetch("/api/tts/gerar", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        postId: pub.id,
+        tipo,
+        titulo: pub.titulo,
+      }),
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    return data?.audioUrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 export function AudioProvider({ children }: { children: React.ReactNode }) {
@@ -100,6 +148,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   const navigationCallbackRef = useRef<
     ((direction: "next" | "previous", pub: AudioPublication) => void) | null
   >(null);
+
+  // Ref para evitar múltiplas resoluções TTS simultâneas no autoplay
+  const resolvingNextRef = useRef(false);
 
   const registerOnEndedCallback = useCallback(
     (cb: (() => void) | null) => {
@@ -140,20 +191,14 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       setIsPlaying(false);
     });
 
-    // ── PROBLEMA 2 — Correção do evento "ended" ────────────────────────────
+    // ── Autoplay ao terminar a faixa — com resolução TTS ──────────────────
     //
-    // Comportamento anterior (BUG):
-    //   Se `onEndedCallbackRef` estava registrado, o provider fazia `return`
-    //   ANTES de iniciar o próximo áudio — delegando a responsabilidade para
-    //   a página. Resultado: a página navegava, mas o áudio ficava parado.
-    //
-    // Novo comportamento:
-    //   1. Sempre avança o índice e inicia o próximo áudio imediatamente.
-    //   2. Depois chama `onEndedCallbackRef` (se existir) apenas para
-    //      navegação de página — sem afetar o áudio já iniciado.
-    //
-    // Isso garante que áudio e navegação são independentes e nunca ficam
-    // dessincronizados.
+    // Problema 3: quando o próximo item da fila usa FALLBACK_AUDIO (sem TTS
+    // gerado), o autoplay tocava o MP3 mockado. Agora:
+    //   1. Tenta resolver a audioUrl do próximo item via /api/tts/gerar.
+    //   2. Se conseguir, usa a URL real; se falhar, pula para o item seguinte
+    //      silenciosamente (sem interromper o fluxo).
+    //   3. Só depois chama onEndedCallbackRef para navegação de página.
     audio.addEventListener("ended", () => {
       setIsPlaying(false);
 
@@ -163,27 +208,55 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
 
       if (!hasNext) return;
 
-      const nextIdx = idx + 1;
-      const nextPub = q[nextIdx];
+      // Evita disparar múltiplas resoluções simultâneas
+      if (resolvingNextRef.current) return;
+      resolvingNextRef.current = true;
 
-      // ← ALTERADO: sempre avança e toca — sem verificar o callback antes
-      setCurrentIndex(nextIdx);
-      const a = audioRef.current;
-      if (a) {
-        a.src = nextPub.audioUrl;
-        a.currentTime = 0;
-        setCurrentTime(0);
-        setDuration(0);
-        setCurrent(nextPub);
-        setIsLoading(true);
-        playPromiseRef.current = a.play();
-        playPromiseRef.current?.catch(() => {});
-      }
+      // Busca o próximo item com URL válida, resolvendo TTS se necessário.
+      // Itera a partir do próximo índice e pula quem falhar.
+      (async () => {
+        let tentativa = idx + 1;
 
-      // ← ALTERADO: callback chamado DEPOIS de iniciar o áudio (só navega a página)
-      if (onEndedCallbackRef.current) {
-        onEndedCallbackRef.current();
-      }
+        while (tentativa < q.length) {
+          const candidato = q[tentativa];
+          const url = await resolverAudioUrlDireta(candidato);
+
+          if (url) {
+            // Atualiza a URL na fila em memória para futuras navegações
+            const novaFila = [...queueRef.current];
+            novaFila[tentativa] = { ...candidato, audioUrl: url };
+            setQueue(novaFila);
+
+            const pubComUrl = { ...candidato, audioUrl: url };
+
+            setCurrentIndex(tentativa);
+            setCurrent(pubComUrl);
+            setCurrentTime(0);
+            setDuration(0);
+            setIsLoading(true);
+
+            const a = audioRef.current;
+            if (a) {
+              a.src = url;
+              a.currentTime = 0;
+              playPromiseRef.current = a.play();
+              playPromiseRef.current?.catch(() => {});
+            }
+
+            // Navega a página depois de iniciar o áudio
+            if (onEndedCallbackRef.current) {
+              onEndedCallbackRef.current();
+            }
+
+            break;
+          }
+
+          // Esta faixa falhou — pula para a próxima
+          tentativa += 1;
+        }
+
+        resolvingNextRef.current = false;
+      })();
     });
 
     audioRef.current = audio;
@@ -292,6 +365,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     setContextType(null);
     onEndedCallbackRef.current = null;
     navigationCallbackRef.current = null;
+    resolvingNextRef.current = false;
   }, []);
 
   // ── playQueue ─────────────────────────────────────────────────────────────
@@ -314,16 +388,10 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     [_playAudio]
   );
 
-  // ── playNext ──────────────────────────────────────────────────────────────
+  // ── playNext — com resolução TTS ──────────────────────────────────────────
   //
-  // PROBLEMA 2 — Correção:
-  //   Antes: se `navigationCallbackRef` estava registrado, o provider
-  //   delegava tudo ao callback e não tocava o áudio.
-  //   Resultado: a página navegava, mas o áudio ficava parado.
-  //
-  //   Agora: sempre avança o índice e toca o próximo áudio. Depois chama
-  //   `navigationCallbackRef` (se existir) apenas para navegar a página.
-  //   Dessa forma áudio e navegação são sempre independentes e síncronos.
+  // Problema 3 (navegação manual): quando o usuário aperta "próximo" no player
+  // e o item ainda não tem TTS gerado, resolve antes de tocar.
 
   const playNext = useCallback(() => {
     const idx = currentIndexRef.current;
@@ -333,14 +401,46 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     const nextIdx = idx + 1;
     const nextPub = q[nextIdx];
 
-    // ← ALTERADO: sempre avança e toca, independente de navigationCallback
-    setCurrentIndex(nextIdx);
-    _playAudio(nextPub);
+    // Se já tem URL válida, toca imediatamente
+    if (nextPub.audioUrl && nextPub.audioUrl !== FALLBACK_AUDIO) {
+      setCurrentIndex(nextIdx);
+      _playAudio(nextPub);
+      if (navigationCallbackRef.current) {
+        navigationCallbackRef.current("next", nextPub);
+      }
+      return;
+    }
 
-    // ← ALTERADO: callback chamado DEPOIS de iniciar o áudio (só navega a página)
+    // Precisa gerar TTS — mostra loading e resolve assincronamente
+    setCurrentIndex(nextIdx);
+    setCurrent(nextPub);
+    setIsLoading(true);
+
     if (navigationCallbackRef.current) {
       navigationCallbackRef.current("next", nextPub);
     }
+
+    resolverAudioUrlDireta(nextPub).then((url) => {
+      if (!url) {
+        // Falhou — tenta o próximo item recursivamente se houver
+        setIsLoading(false);
+        const novoIdx = nextIdx + 1;
+        if (novoIdx < queueRef.current.length) {
+          const proximo = queueRef.current[novoIdx];
+          setCurrentIndex(novoIdx);
+          _playAudio(proximo);
+        }
+        return;
+      }
+
+      // Atualiza URL na fila
+      const novaFila = [...queueRef.current];
+      novaFila[nextIdx] = { ...nextPub, audioUrl: url };
+      setQueue(novaFila);
+
+      const pubComUrl = { ...nextPub, audioUrl: url };
+      _playAudio(pubComUrl);
+    });
   }, [_playAudio]);
 
   // ── playPrevious ──────────────────────────────────────────────────────────
@@ -362,11 +462,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     const prevIdx = idx - 1;
     const prevPub = q[prevIdx];
 
-    // ← ALTERADO: sempre recua e toca, independente de navigationCallback
     setCurrentIndex(prevIdx);
     _playAudio(prevPub);
 
-    // ← ALTERADO: callback chamado DEPOIS de iniciar o áudio (só navega a página)
     if (navigationCallbackRef.current) {
       navigationCallbackRef.current("previous", prevPub);
     }
