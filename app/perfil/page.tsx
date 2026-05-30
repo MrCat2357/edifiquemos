@@ -28,6 +28,7 @@ import type { Reflexao } from "@/lib/reflexoes";
 import BotaoGerarReflexoes from "@/components/reflexoes/BotaoGerarReflexoes";
 import CardReflexao from "@/components/reflexoes/CardReflexao";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import { useTTS } from "@/hooks/useTTS";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
 
@@ -260,61 +261,95 @@ function BotaoOuvirPerfil({
   onLoginRequired: () => void;
 }) {
   const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { resolveAudioUrl, isGenerating: ttsGenerating, error: ttsError } = useTTS();
 
   const audioAtivo = isCurrentPublication(post.id);
   const audioTocando = isCurrentlyPlaying(post.id);
   const audioCarregando = audioAtivo && audioLoading;
+  const ocupado = ttsGenerating || audioCarregando;
 
-  function handleClick(e: React.MouseEvent) {
+  const label =
+    ttsGenerating   ? "Gerando…"         :
+    audioCarregando ? "Carregando…"      :
+    ttsError        ? "Tentar novamente" :
+    audioTocando    ? "Pausar"           :
+    audioAtivo      ? "Continuar"        :
+    "Ouvir";
+
+  const btnColor       = ttsError ? "var(--red, #ef4444)"     : audioAtivo ? "var(--emerald)"     : "var(--text-3)";
+  const btnBorderColor = ttsError ? "var(--red-dim, #fecaca)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+  const btnBg          = ttsError ? "var(--red-dim, #fef2f2)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+
+  async function handleClick(e: React.MouseEvent) {
     e.stopPropagation();
     if (!auth.currentUser) {
       onLoginRequired();
       return;
     }
-    const pub = {
-      id: post.id,
-      tipo: post.tipo,
-      titulo: post.titulo,
-      autorNome: post.autorNome || "Autor",
-      autorFoto: post.autorFoto ?? null,
-      slug: post.slug,
-      autorSlug: post.autorSlug,
-      audioUrl: post.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    };
-    if (filaAudio.length > 0) {
-      playQueue(pub, filaAudio, "perfil");
-    } else {
-      playOrToggle(pub);
+    try {
+      const audioUrl = await resolveAudioUrl({
+        postId: post.id,
+        tipo: post.tipo === "artigo" ? "estudo" : post.tipo,
+        titulo: post.titulo,
+        audioUrlExistente: post.audioUrl && post.audioStatus === "ready" ? post.audioUrl : undefined,
+      });
+      const pub = {
+        id: post.id,
+        tipo: post.tipo,
+        titulo: post.titulo,
+        autorNome: post.autorNome || "Autor",
+        autorFoto: post.autorFoto ?? null,
+        slug: post.slug,
+        autorSlug: post.autorSlug,
+        audioUrl,
+      };
+      if (filaAudio.length > 0) {
+        const filaAtualizada = filaAudio.map((item) =>
+          item.id === post.id ? { ...item, audioUrl } : item
+        );
+        playQueue(pub, filaAtualizada, "perfil");
+      } else {
+        playOrToggle(pub);
+      }
+    } catch {
+      // ttsError já setado pelo hook
     }
   }
 
   return (
     <button
       onClick={handleClick}
-      title={audioTocando ? "Pausar" : "Ouvir este conteúdo"}
+      disabled={ocupado}
+      title={ttsError ? "Clique para tentar novamente" : audioTocando ? "Pausar" : "Ouvir este conteúdo"}
       style={{
         display: "inline-flex", alignItems: "center", gap: "4px",
         padding: "4px 8px", borderRadius: "var(--radius-full)", border: "1px solid",
-        borderColor: audioAtivo ? "var(--emerald-dim)" : "transparent",
-        background: audioAtivo ? "var(--emerald-dim)" : "transparent",
-        color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
-        fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
+        borderColor: btnBorderColor,
+        background: btnBg,
+        color: btnColor,
+        fontSize: "0.72rem", fontWeight: 600,
+        cursor: ocupado ? "default" : "pointer",
+        opacity: ocupado ? 0.7 : 1,
         transition: "all 0.15s", fontFamily: "inherit", flexShrink: 0,
         boxShadow: audioTocando ? "0 0 0 2px var(--emerald-dim)" : "none",
       }}
     >
-      {audioCarregando ? (
+      {ttsGenerating ? (
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+      ) : ttsError ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       ) : audioTocando ? (
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
       ) : (
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
       )}
-      <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
+      <span>{label}</span>
       {audioTocando && <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>}
     </button>
   );
 }
+
+// ─── CardReflexaoComOuvir ─────────────────────────────────────────────────────
 
 function CardReflexaoComOuvir({
   reflexao,
@@ -326,32 +361,61 @@ function CardReflexaoComOuvir({
   onLoginRequired: () => void;
 }) {
   const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { resolveAudioUrl, isGenerating: ttsGenerating, error: ttsError } = useTTS();
 
   const audioAtivo = isCurrentPublication(reflexao.id ?? "");
   const audioTocando = isCurrentlyPlaying(reflexao.id ?? "");
   const audioCarregando = audioAtivo && audioLoading;
+  const ocupado = ttsGenerating || audioCarregando;
 
-  function handleOuvir(e: React.MouseEvent) {
+  const label =
+    ttsGenerating   ? "Gerando…"         :
+    audioCarregando ? "Carregando…"      :
+    ttsError        ? "Tentar novamente" :
+    audioTocando    ? "Pausar"           :
+    audioAtivo      ? "Continuar"        :
+    "Ouvir";
+
+  const btnColor       = ttsError ? "var(--red, #ef4444)"     : audioAtivo ? "var(--emerald)"     : "var(--text-3)";
+  const btnBorderColor = ttsError ? "var(--red-dim, #fecaca)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+  const btnBg          = ttsError ? "var(--red-dim, #fef2f2)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+
+  async function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
     if (!auth.currentUser) {
       onLoginRequired();
       return;
     }
     if (!reflexao.id) return;
-    const pub = {
-      id: reflexao.id,
-      tipo: "reflexao" as const,
-      titulo: reflexao.titulo,
-      autorNome: reflexao.autorNome,
-      autorFoto: null,
-      slug: reflexao.slug,
-      autorSlug: reflexao.autorSlug,
-      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-    };
-    if (filaAudio.length > 0) {
-      playQueue(pub, filaAudio, "perfil");
-    } else {
-      playOrToggle(pub);
+    try {
+      const audioUrl = await resolveAudioUrl({
+        postId: reflexao.id,
+        tipo: "reflexao",
+        titulo: reflexao.titulo,
+        audioUrlExistente: (reflexao as any).audioUrl && (reflexao as any).audioStatus === "ready"
+          ? (reflexao as any).audioUrl
+          : undefined,
+      });
+      const pub = {
+        id: reflexao.id,
+        tipo: "reflexao" as const,
+        titulo: reflexao.titulo,
+        autorNome: reflexao.autorNome,
+        autorFoto: null,
+        slug: reflexao.slug,
+        autorSlug: reflexao.autorSlug,
+        audioUrl,
+      };
+      if (filaAudio.length > 0) {
+        const filaAtualizada = filaAudio.map((item) =>
+          item.id === reflexao.id ? { ...item, audioUrl } : item
+        );
+        playQueue(pub, filaAtualizada, "perfil");
+      } else {
+        playOrToggle(pub);
+      }
+    } catch {
+      // ttsError já setado pelo hook
     }
   }
 
@@ -361,24 +425,29 @@ function CardReflexaoComOuvir({
       botaoOuvir={
         <button
           onClick={handleOuvir}
+          disabled={ocupado}
           style={{
             display: "inline-flex", alignItems: "center", gap: "0.3rem",
             padding: "4px 10px", borderRadius: "var(--radius-full)", border: "1px solid",
-            borderColor: audioAtivo ? "var(--emerald-dim)" : "transparent",
-            background: audioAtivo ? "var(--emerald-dim)" : "transparent",
-            color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
+            borderColor: btnBorderColor,
+            background: btnBg,
+            color: btnColor,
             fontSize: "0.75rem", fontWeight: 600,
-            cursor: "pointer", transition: "all 0.18s ease", fontFamily: "inherit",
+            cursor: ocupado ? "default" : "pointer",
+            opacity: ocupado ? 0.7 : 1,
+            transition: "all 0.18s ease", fontFamily: "inherit",
           }}
         >
-          {audioCarregando ? (
+          {ttsGenerating ? (
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          ) : ttsError ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
           ) : audioTocando ? (
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
           ) : (
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
           )}
-          <span>{audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : audioAtivo ? "Continuar" : "Ouvir"}</span>
+          <span>{label}</span>
         </button>
       }
     />
