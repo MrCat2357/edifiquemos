@@ -4,6 +4,14 @@ import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import OpenAI from "openai";
+import ffmpeg from "fluent-ffmpeg";
+import ffmpegStatic from "ffmpeg-static";
+import { promises as fs } from "fs";
+import * as os from "os";
+import * as path from "path";
+
+// Aponta o fluent-ffmpeg para o binário do ffmpeg-static
+if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic);
 
 // ---------------------------------------------------------------------------
 // Firebase Admin — inicialização lazy (reutiliza instância se já existir)
@@ -45,7 +53,6 @@ function ensureAdminInitialized() {
 
 type AudioStatus = "none" | "generating" | "ready" | "error";
 
-// MUDANÇA 1: conteudo removido do body — agora vem do Firestore
 interface TTSRequestBody {
   postId: string;
   tipo: "sermao" | "estudo" | "reflexao";
@@ -200,7 +207,6 @@ function transliterarHebraico(palavra: string): string {
 // Limpeza de conteúdo
 // ---------------------------------------------------------------------------
 
-// MUDANÇA 3: remove seções de bibliografia e notas que não devem ser lidas
 function removerSecoesDesnecessarias(texto: string): string {
   return texto
     .replace(
@@ -210,10 +216,8 @@ function removerSecoesDesnecessarias(texto: string): string {
     .trim();
 }
 
-// MUDANÇA 2: regex do Caso 1 corrigida — não engole mais texto latino antes do grego
 function processarTermosEstrangeiros(texto: string): string {
   // Caso 1: grego/hebraico imediatamente seguido de transliteração entre parênteses
-  // Ex: "ἠγάπησεν (ēgapēsen)" → "ēgapēsen"
   texto = texto.replace(
     /([\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF][\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF\s]*?)\s*\(([^)]+)\)/g,
     (match, _estrangeiro, transliteracao) => {
@@ -224,12 +228,12 @@ function processarTermosEstrangeiros(texto: string): string {
     }
   );
 
-  // Caso 2: grego restante sem transliteração → transliteração automática
+  // Caso 2: grego restante → transliteração automática
   texto = texto.replace(/[\u0370-\u03FF\u1F00-\u1FFF]+/g, (match) =>
     transliterarGrego(match)
   );
 
-  // Caso 2: hebraico restante sem transliteração → transliteração automática
+  // Caso 2: hebraico restante → transliteração automática
   texto = texto.replace(/[\u0590-\u05FF]+/g, (match) =>
     transliterarHebraico(match)
   );
@@ -239,13 +243,9 @@ function processarTermosEstrangeiros(texto: string): string {
 
 function limparConteudo(raw: string): string {
   return raw
-    // Remove tags HTML
     .replace(/<[^>]+>/g, " ")
-    // MUDANÇA 3: remove bibliografia/notas antes de processar
     .replace(/([\s\S]+)/, removerSecoesDesnecessarias)
-    // MUDANÇA 2: regex corrigida no processarTermosEstrangeiros (chamada aqui)
     .replace(/([\s\S]+)/, processarTermosEstrangeiros)
-    // Remove marcações markdown
     .replace(/(\*\*|__)(.*?)\1/g, "$2")
     .replace(/(\*|_)(.*?)\1/g, "$2")
     .replace(/~~(.*?)~~/g, "$1")
@@ -253,7 +253,6 @@ function limparConteudo(raw: string): string {
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/```[\s\S]*?```/g, "")
     .replace(/`[^`]*`/g, "")
-    // Normaliza espaços e quebras
     .replace(/\n{2,}/g, ". ")
     .replace(/\n/g, " ")
     .replace(/\s{2,}/g, " ")
@@ -333,6 +332,55 @@ async function gerarBuffersAudio(
 }
 
 // ---------------------------------------------------------------------------
+// Concatenação de MP3s via FFmpeg
+// ---------------------------------------------------------------------------
+
+async function concatenarMP3sComFFmpeg(buffers: Buffer[]): Promise<Buffer> {
+  // Caso trivial: chunk único, não precisa de FFmpeg
+  if (buffers.length === 1) return buffers[0];
+
+  const tmpDir = os.tmpdir();
+  const sessionId = `tts_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+  // Salva cada chunk como arquivo temporário
+  const arquivosChunk: string[] = [];
+  for (let i = 0; i < buffers.length; i++) {
+    const filePath = path.join(tmpDir, `${sessionId}_chunk_${i}.mp3`);
+    await fs.writeFile(filePath, buffers[i]);
+    arquivosChunk.push(filePath);
+  }
+
+  // Arquivo de lista para o concat demuxer do FFmpeg
+  const listaPath = path.join(tmpDir, `${sessionId}_list.txt`);
+  const listaConteudo = arquivosChunk.map((f) => `file '${f}'`).join("\n");
+  await fs.writeFile(listaPath, listaConteudo);
+
+  // Arquivo de saída
+  const outputPath = path.join(tmpDir, `${sessionId}_output.mp3`);
+
+  // Executa FFmpeg
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg()
+      .input(listaPath)
+      .inputOptions(["-f", "concat", "-safe", "0"])
+      .audioCodec("libmp3lame")
+      .audioBitrate("128k")
+      .output(outputPath)
+      .on("end", () => resolve())
+      .on("error", (err) => reject(err))
+      .run();
+  });
+
+  const outputBuffer = await fs.readFile(outputPath);
+
+  // Limpa temporários sem bloquear a resposta
+  const todosArquivos = [...arquivosChunk, listaPath, outputPath];
+  Promise.all(todosArquivos.map((f) => fs.unlink(f).catch(() => null)));
+
+  return outputBuffer;
+}
+
+// ---------------------------------------------------------------------------
 // Handler principal
 // ---------------------------------------------------------------------------
 
@@ -364,7 +412,6 @@ export async function POST(req: NextRequest) {
   }
 
   // ── 2. Parse e validação do body ─────────────────────────────────────────
-  // MUDANÇA 1: conteudo removido do body
   let body: TTSRequestBody;
   try {
     body = await req.json();
@@ -393,7 +440,6 @@ export async function POST(req: NextRequest) {
   const postRef = adminDb.collection("posts").doc(postId);
 
   // ── 4. Verificar cache e ler conteudo do Firestore ────────────────────────
-  // MUDANÇA 1: conteudo lido aqui, do Firestore
   const postSnap = await postRef.get();
   const postData = postSnap.data() ?? {};
 
@@ -422,7 +468,7 @@ export async function POST(req: NextRequest) {
   const conteudoLimpo = limparConteudo(conteudo);
   const textoTTS = montarTextoTTS(titulo, conteudoLimpo, referencia);
 
-  // ── 7. Geração do áudio ──────────────────────────────────────────────────
+  // ── 7. Geração e concatenação do áudio ───────────────────────────────────
   let audioFinal: Buffer;
 
   try {
@@ -432,8 +478,7 @@ export async function POST(req: NextRequest) {
 
     const chunks = dividirEmChunks(textoTTS);
     const buffers = await gerarBuffersAudio(openai, chunks);
-
-    audioFinal = Buffer.concat(buffers);
+    audioFinal = await concatenarMP3sComFFmpeg(buffers);
   } catch (err) {
     console.error("[TTS] Erro ao gerar áudio:", err);
     await postRef.set(
