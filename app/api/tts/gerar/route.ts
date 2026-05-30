@@ -22,7 +22,10 @@ function ensureAdminInitialized() {
       : "./serviceAccount.staging.json";
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const serviceAccount = require(fileName);
-    initializeApp({ credential: cert(serviceAccount) });
+    initializeApp({
+      credential: cert(serviceAccount),
+      storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    });
   } catch {
     const privateKey = (process.env.FIREBASE_ADMIN_PRIVATE_KEY ?? "")
       .replace(/^"|"$/g, "")
