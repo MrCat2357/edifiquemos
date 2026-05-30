@@ -45,11 +45,11 @@ function ensureAdminInitialized() {
 
 type AudioStatus = "none" | "generating" | "ready" | "error";
 
+// MUDANÇA 1: conteudo removido do body — agora vem do Firestore
 interface TTSRequestBody {
   postId: string;
   tipo: "sermao" | "estudo" | "reflexao";
   titulo: string;
-  conteudo: string;
   referencia?: string;
 }
 
@@ -57,27 +57,15 @@ interface TTSRequestBody {
 // Transliteração — Grego → Latino (padrão SBL simplificado)
 // ---------------------------------------------------------------------------
 
-/**
- * Detecta se uma string contém caracteres do alfabeto grego.
- */
 function contemGrego(texto: string): boolean {
   return /[\u0370-\u03FF\u1F00-\u1FFF]/.test(texto);
 }
 
-/**
- * Detecta se uma string contém caracteres do alfabeto hebraico.
- */
 function contemHebraico(texto: string): boolean {
   return /[\u0590-\u05FF]/.test(texto);
 }
 
-/**
- * Transliteração letra a letra do grego para o alfabeto latino,
- * seguindo o padrão SBL (Society of Biblical Literature) simplificado.
- * Lida com letras maiúsculas, minúsculas e diacríticos comuns.
- */
 function transliterarGrego(palavra: string): string {
-  // Mapa de caracteres gregos → transliteração latina
   const mapa: Record<string, string> = {
     // Alfa
     "α": "a", "ά": "a", "ὰ": "a", "ᾶ": "a", "ἀ": "a", "ἁ": "a",
@@ -161,13 +149,9 @@ function transliterarGrego(palavra: string): string {
     .join("");
 }
 
-/**
- * Transliteração letra a letra do hebraico para o alfabeto latino,
- * seguindo convenção acadêmica simplificada.
- */
 function transliterarHebraico(palavra: string): string {
   const mapa: Record<string, string> = {
-    "א": "", // alef — geralmente silencioso, omitido
+    "א": "",
     "בּ": "b", "ב": "v",
     "ג": "g",
     "ד": "d",
@@ -182,29 +166,28 @@ function transliterarHebraico(palavra: string): string {
     "מ": "m", "ם": "m",
     "נ": "n", "ן": "n",
     "ס": "s",
-    "ע": "", // ain — geralmente silencioso, omitido
+    "ע": "",
     "פ": "f", "ף": "f", "פּ": "p",
     "צ": "ts", "ץ": "ts",
     "ק": "q",
     "ר": "r",
     "ש": "sh", "שׁ": "sh", "שׂ": "s",
     "ת": "t",
-    // Vogais (nikud)
-    "\u05B0": "e", // shva
-    "\u05B1": "e", // khataf segol
-    "\u05B2": "a", // khataf patakh
-    "\u05B3": "o", // khataf kamats
-    "\u05B4": "i", // khirik
-    "\u05B5": "e", // tsere
-    "\u05B6": "e", // segol
-    "\u05B7": "a", // patakh
-    "\u05B8": "a", // kamats
-    "\u05B9": "o", // kholam
-    "\u05BA": "o", // kholam male
-    "\u05BB": "u", // kubuts
-    "\u05BC": "",  // dagesh — modifica a consoante, ignorado aqui
-    "\u05C1": "",  // shin dot
-    "\u05C2": "",  // sin dot
+    "\u05B0": "e",
+    "\u05B1": "e",
+    "\u05B2": "a",
+    "\u05B3": "o",
+    "\u05B4": "i",
+    "\u05B5": "e",
+    "\u05B6": "e",
+    "\u05B7": "a",
+    "\u05B8": "a",
+    "\u05B9": "o",
+    "\u05BA": "o",
+    "\u05BB": "u",
+    "\u05BC": "",
+    "\u05C1": "",
+    "\u05C2": "",
   };
 
   return palavra
@@ -217,37 +200,36 @@ function transliterarHebraico(palavra: string): string {
 // Limpeza de conteúdo
 // ---------------------------------------------------------------------------
 
-/**
- * Estratégia para palavras em grego ou hebraico no texto:
- *
- * Caso 1 — palavra estrangeira SEGUIDA de transliteração entre parênteses:
- *   ex: "ἠγάπησεν (ēgapēsen)" → mantém só "(ēgapēsen)" sem os parênteses
- *   Resultado: "ēgapēsen"
- *
- * Caso 2 — palavra estrangeira SEM transliteração ao lado:
- *   ex: "ὁ θεὸς" → transliteração automática via mapa de caracteres
- *   Resultado: "ho theos"
- */
+// MUDANÇA 3: remove seções de bibliografia e notas que não devem ser lidas
+function removerSecoesDesnecessarias(texto: string): string {
+  return texto
+    .replace(
+      /\b(bibliografia|referências|referencias|notas de rodapé|notas de rodape|notas:)\b[\s\S]*/gi,
+      ""
+    )
+    .trim();
+}
+
+// MUDANÇA 2: regex do Caso 1 corrigida — não engole mais texto latino antes do grego
 function processarTermosEstrangeiros(texto: string): string {
-  // Caso 1: grego/hebraico seguido de transliteração entre parênteses
+  // Caso 1: grego/hebraico imediatamente seguido de transliteração entre parênteses
   // Ex: "ἠγάπησεν (ēgapēsen)" → "ēgapēsen"
   texto = texto.replace(
-    /[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF\w\s]*?([\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF]+[\w\s]*?)\s*\(([^)]+)\)/g,
+    /([\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF][\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF\s]*?)\s*\(([^)]+)\)/g,
     (match, _estrangeiro, transliteracao) => {
-      // Só substitui se a palavra entre parênteses não contiver grego/hebraico
       if (contemGrego(transliteracao) || contemHebraico(transliteracao)) {
-        return match; // deixa passar para o Caso 2
+        return match;
       }
       return transliteracao;
     }
   );
 
-  // Caso 2: grego sem transliteração → transliteração automática
+  // Caso 2: grego restante sem transliteração → transliteração automática
   texto = texto.replace(/[\u0370-\u03FF\u1F00-\u1FFF]+/g, (match) =>
     transliterarGrego(match)
   );
 
-  // Caso 2: hebraico sem transliteração → transliteração automática
+  // Caso 2: hebraico restante sem transliteração → transliteração automática
   texto = texto.replace(/[\u0590-\u05FF]+/g, (match) =>
     transliterarHebraico(match)
   );
@@ -255,33 +237,25 @@ function processarTermosEstrangeiros(texto: string): string {
   return texto;
 }
 
-/**
- * Remove tags HTML, markdown visual, processa termos estrangeiros
- * e normaliza espaços/quebras de linha.
- * Preserva pontuação e pausa natural entre parágrafos.
- */
 function limparConteudo(raw: string): string {
   return raw
     // Remove tags HTML
     .replace(/<[^>]+>/g, " ")
-    // Processa termos em grego e hebraico antes de qualquer outra limpeza
+    // MUDANÇA 3: remove bibliografia/notas antes de processar
+    .replace(/([\s\S]+)/, removerSecoesDesnecessarias)
+    // MUDANÇA 2: regex corrigida no processarTermosEstrangeiros (chamada aqui)
     .replace(/([\s\S]+)/, processarTermosEstrangeiros)
-    // Remove marcações markdown: **negrito**, *itálico*, __sublinhado__, ~~tachado~~
+    // Remove marcações markdown
     .replace(/(\*\*|__)(.*?)\1/g, "$2")
     .replace(/(\*|_)(.*?)\1/g, "$2")
     .replace(/~~(.*?)~~/g, "$1")
-    // Remove cabeçalhos markdown (# Título)
     .replace(/^#{1,6}\s+/gm, "")
-    // Remove links markdown [texto](url) → texto
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    // Remove blocos de código
     .replace(/```[\s\S]*?```/g, "")
     .replace(/`[^`]*`/g, "")
-    // Normaliza múltiplas quebras de linha (≥2) → ponto + espaço para pausa natural
+    // Normaliza espaços e quebras
     .replace(/\n{2,}/g, ". ")
-    // Normaliza quebras de linha simples → espaço
     .replace(/\n/g, " ")
-    // Colapsa múltiplos espaços
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -307,11 +281,6 @@ function montarTextoTTS(
 
 const TTS_MAX_CHARS = 4096;
 
-/**
- * Divide o texto em chunks respeitando o limite de caracteres,
- * tentando quebrar nos limites de frases para preservar naturalidade.
- * Nunca trunca silenciosamente.
- */
 function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
   if (texto.length <= maxChars) return [texto];
 
@@ -324,13 +293,12 @@ function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
       break;
     }
 
-    // Procura o último ponto final antes do limite
     const fatia = restante.slice(0, maxChars);
     const ultimoPonto = fatia.lastIndexOf(". ");
 
     const corte = ultimoPonto > maxChars * 0.5
-      ? ultimoPonto + 2  // inclui o espaço após o ponto
-      : maxChars;        // fallback: corte duro (sem ponto disponível)
+      ? ultimoPonto + 2
+      : maxChars;
 
     chunks.push(restante.slice(0, corte).trim());
     restante = restante.slice(corte).trim();
@@ -343,13 +311,6 @@ function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
 // Geração de áudio via OpenAI TTS
 // ---------------------------------------------------------------------------
 
-/**
- * Gera um buffer MP3 para cada chunk e retorna o array de buffers.
- * A concatenação simples é aceitável para staging.
- * ⚠️  Para produção com volumes maiores, migrar para FFmpeg
- *     a fim de evitar glitches de header entre chunks.
- *     Esta implementação não cria dependência que impeça essa migração.
- */
 async function gerarBuffersAudio(
   openai: OpenAI,
   chunks: string[]
@@ -403,6 +364,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── 2. Parse e validação do body ─────────────────────────────────────────
+  // MUDANÇA 1: conteudo removido do body
   let body: TTSRequestBody;
   try {
     body = await req.json();
@@ -410,11 +372,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Body inválido." }, { status: 400 });
   }
 
-  const { postId, tipo, titulo, conteudo, referencia } = body;
+  const { postId, tipo, titulo, referencia } = body;
 
-  if (!postId || !tipo || !titulo || !conteudo) {
+  if (!postId || !tipo || !titulo) {
     return NextResponse.json(
-      { error: "Campos obrigatórios ausentes: postId, tipo, titulo, conteudo." },
+      { error: "Campos obrigatórios ausentes: postId, tipo, titulo." },
       { status: 400 }
     );
   }
@@ -430,7 +392,8 @@ export async function POST(req: NextRequest) {
   // ── 3. Referência ao documento Firestore ─────────────────────────────────
   const postRef = adminDb.collection("posts").doc(postId);
 
-  // ── 4. Verificar se audioUrl já existe e está pronto ─────────────────────
+  // ── 4. Verificar cache e ler conteudo do Firestore ────────────────────────
+  // MUDANÇA 1: conteudo lido aqui, do Firestore
   const postSnap = await postRef.get();
   const postData = postSnap.data() ?? {};
 
@@ -441,7 +404,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ audioUrl });
   }
 
-  // ── 5. Marcar como "generating" antes de iniciar (lock distribuído) ───────
+  const conteudo = postData.conteudo as string | undefined;
+  if (!conteudo) {
+    return NextResponse.json(
+      { error: "Campo 'conteudo' não encontrado no post." },
+      { status: 422 }
+    );
+  }
+
+  // ── 5. Marcar como "generating" (lock distribuído) ────────────────────────
   await postRef.set(
     { audioStatus: "generating" as AudioStatus },
     { merge: true }
@@ -462,8 +433,6 @@ export async function POST(req: NextRequest) {
     const chunks = dividirEmChunks(textoTTS);
     const buffers = await gerarBuffersAudio(openai, chunks);
 
-    // Concatenação de buffers: aceitável para staging.
-    // Não cria acoplamento que impeça futura migração para FFmpeg.
     audioFinal = Buffer.concat(buffers);
   } catch (err) {
     console.error("[TTS] Erro ao gerar áudio:", err);
@@ -495,10 +464,9 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Gera URL pública com token
     const [signedUrl] = await file.getSignedUrl({
       action: "read",
-      expires: "03-01-2500", // data longa — revisitar na Fase 10
+      expires: "03-01-2500",
     });
 
     downloadURL = signedUrl;
@@ -529,8 +497,6 @@ export async function POST(req: NextRequest) {
     );
   } catch (err) {
     console.error("[TTS] Erro ao salvar no Firestore:", err);
-    // Áudio foi gerado e salvo no Storage — retornamos a URL mesmo assim,
-    // mas logamos o erro para investigação posterior.
     return NextResponse.json(
       { error: "Áudio gerado, mas falha ao salvar metadados." },
       { status: 207 }
