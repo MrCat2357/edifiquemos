@@ -396,7 +396,6 @@ function concatenarMP3s(buffers: Buffer[]): Buffer {
 // ---------------------------------------------------------------------------
 
 export async function POST(req: NextRequest) {
-  console.log("[TTS] STORAGE_BUCKET:", process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET);
   ensureAdminInitialized();
 
   const adminAuth = getAuth();
@@ -533,7 +532,10 @@ export async function POST(req: NextRequest) {
     await file.save(audioFinal, {
       metadata: {
         contentType: "audio/mpeg",
-        cacheControl: "public, max-age=31536000",
+        // Cache-control curto: permite que CDNs e browsers revalidem após
+        // regeneração de voz. A URL versionada (parâmetro v=) é a proteção
+        // real contra cache obsoleto — este header é defesa adicional.
+        cacheControl: "public, max-age=3600",
       },
     });
 
@@ -542,7 +544,11 @@ export async function POST(req: NextRequest) {
       expires: "03-01-2500",
     });
 
-    downloadURL = signedUrl;
+    // Cache-buster: adiciona timestamp à URL para garantir que o navegador
+    // não sirva versão antiga após regeneração de voz pelo autor.
+    // A URL gravada no Firestore muda a cada geração — visitantes que
+    // apertam Ouvir recebem sempre a URL já gravada (sem gerar novamente).
+    downloadURL = `${signedUrl}&v=${Date.now()}`;
   } catch (err) {
     console.error("[TTS] Erro ao fazer upload para Storage:", err);
     await postRef.set(
