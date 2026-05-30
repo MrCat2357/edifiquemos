@@ -4,14 +4,6 @@ import { getApps, initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import OpenAI from "openai";
-import ffmpeg from "fluent-ffmpeg";
-import ffmpegStatic from "ffmpeg-static";
-import { promises as fs } from "fs";
-import * as os from "os";
-import * as path from "path";
-
-// Aponta o fluent-ffmpeg para o binário do ffmpeg-static
-if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic);
 
 // ---------------------------------------------------------------------------
 // Firebase Admin — inicialização lazy (reutiliza instância se já existir)
@@ -332,52 +324,48 @@ async function gerarBuffersAudio(
 }
 
 // ---------------------------------------------------------------------------
-// Concatenação de MP3s via FFmpeg
+// Concatenação de MP3s — puro Node.js, sem binário nativo
+// Funciona na Vercel (Linux) e em qualquer plataforma
 // ---------------------------------------------------------------------------
 
-async function concatenarMP3sComFFmpeg(buffers: Buffer[]): Promise<Buffer> {
-  // Caso trivial: chunk único, não precisa de FFmpeg
+/**
+ * Remove o header ID3v2 do início de um buffer MP3, se presente.
+ * ID3v2 começa com os magic bytes "ID3" (0x49 0x44 0x33).
+ * O tamanho total do header está nos bytes 6–9 em syncsafe integer (7 bits/byte).
+ */
+function removerHeaderID3(buffer: Buffer): Buffer {
+  if (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) {
+    const tamanho =
+      ((buffer[6] & 0x7f) << 21) |
+      ((buffer[7] & 0x7f) << 14) |
+      ((buffer[8] & 0x7f) << 7) |
+      (buffer[9] & 0x7f);
+    // +10 para pular os 10 bytes do próprio header ID3v2
+    return buffer.slice(10 + tamanho);
+  }
+  return buffer;
+}
+
+/**
+ * Concatena múltiplos buffers MP3 corretamente:
+ * - mantém o header ID3 do primeiro chunk (players usam ele para metadados)
+ * - remove headers ID3 dos chunks seguintes (evita que o player pare no fim do 1º chunk)
+ * - resultado é um MP3 válido com duração e conteúdo completos
+ */
+function concatenarMP3s(buffers: Buffer[]): Buffer {
   if (buffers.length === 1) return buffers[0];
 
-  const tmpDir = os.tmpdir();
-  const sessionId = `tts_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const partes: Buffer[] = [];
 
-  // Salva cada chunk como arquivo temporário
-  const arquivosChunk: string[] = [];
   for (let i = 0; i < buffers.length; i++) {
-    const filePath = path.join(tmpDir, `${sessionId}_chunk_${i}.mp3`);
-    await fs.writeFile(filePath, buffers[i]);
-    arquivosChunk.push(filePath);
+    if (i === 0) {
+      partes.push(buffers[i]);
+    } else {
+      partes.push(removerHeaderID3(buffers[i]));
+    }
   }
 
-  // Arquivo de lista para o concat demuxer do FFmpeg
-  const listaPath = path.join(tmpDir, `${sessionId}_list.txt`);
-  const listaConteudo = arquivosChunk.map((f) => `file '${f}'`).join("\n");
-  await fs.writeFile(listaPath, listaConteudo);
-
-  // Arquivo de saída
-  const outputPath = path.join(tmpDir, `${sessionId}_output.mp3`);
-
-  // Executa FFmpeg
-  await new Promise<void>((resolve, reject) => {
-    ffmpeg()
-      .input(listaPath)
-      .inputOptions(["-f", "concat", "-safe", "0"])
-      .audioCodec("libmp3lame")
-      .audioBitrate("128k")
-      .output(outputPath)
-      .on("end", () => resolve())
-      .on("error", (err) => reject(err))
-      .run();
-  });
-
-  const outputBuffer = await fs.readFile(outputPath);
-
-  // Limpa temporários sem bloquear a resposta
-  const todosArquivos = [...arquivosChunk, listaPath, outputPath];
-  Promise.all(todosArquivos.map((f) => fs.unlink(f).catch(() => null)));
-
-  return outputBuffer;
+  return Buffer.concat(partes);
 }
 
 // ---------------------------------------------------------------------------
@@ -478,7 +466,7 @@ export async function POST(req: NextRequest) {
 
     const chunks = dividirEmChunks(textoTTS);
     const buffers = await gerarBuffersAudio(openai, chunks);
-    audioFinal = await concatenarMP3sComFFmpeg(buffers);
+    audioFinal = concatenarMP3s(buffers);
   } catch (err) {
     console.error("[TTS] Erro ao gerar áudio:", err);
     await postRef.set(
