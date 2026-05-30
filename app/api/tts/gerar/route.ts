@@ -235,11 +235,13 @@ function processarTermosEstrangeiros(texto: string): string {
   return texto;
 }
 
+// CORREÇÃO: chamadas diretas em vez de replace(/([\s\S]+)/, fn)
+// que corrompida caracteres acentuados como ã, ç, õ
 function limparConteudo(raw: string): string {
-  return raw
-    .replace(/<[^>]+>/g, " ")
-    .replace(/([\s\S]+)/, removerSecoesDesnecessarias)
-    .replace(/([\s\S]+)/, processarTermosEstrangeiros)
+  let texto = raw.replace(/<[^>]+>/g, " ");
+  texto = removerSecoesDesnecessarias(texto);
+  texto = processarTermosEstrangeiros(texto);
+  return texto
     .replace(/(\*\*|__)(.*?)\1/g, "$2")
     .replace(/(\*|_)(.*?)\1/g, "$2")
     .replace(/~~(.*?)~~/g, "$1")
@@ -255,15 +257,30 @@ function limparConteudo(raw: string): string {
 
 // ---------------------------------------------------------------------------
 // Montagem do texto para TTS
+// CORREÇÃO: estrutura diferente por tipo — reflexão usa fraseInstigadora e
+// perguntaReflexiva em vez de igreja e data
 // ---------------------------------------------------------------------------
 
 function montarTextoTTS(
   titulo: string,
   conteudo: string,
+  tipo: "sermao" | "estudo" | "reflexao",
   autorNome?: string,
   igreja?: string,
-  data?: string
+  data?: string,
+  fraseInstigadora?: string,
+  perguntaReflexiva?: string,
 ): string {
+  if (tipo === "reflexao") {
+    const partes: string[] = [titulo.trim()];
+    if (autorNome?.trim()) partes.push(autorNome.trim());
+    if (fraseInstigadora?.trim()) partes.push(fraseInstigadora.trim());
+    partes.push(conteudo);
+    if (perguntaReflexiva?.trim()) partes.push(perguntaReflexiva.trim());
+    return partes.join(". ");
+  }
+
+  // sermao / estudo
   const partes: string[] = [titulo.trim()];
   if (autorNome?.trim()) partes.push(autorNome.trim());
   if (igreja?.trim()) partes.push(igreja.trim());
@@ -456,6 +473,8 @@ export async function POST(req: NextRequest) {
   const autorNome = postData.autorNome as string | undefined;
   const igreja = postData.igreja as string | undefined;
   const data = postData.data as string | undefined;
+  const fraseInstigadora = postData.fraseInstigadora as string | undefined;
+  const perguntaReflexiva = postData.perguntaReflexiva as string | undefined;
 
   // ── 5. Marcar como "generating" (lock distribuído) ────────────────────────
   await postRef.set(
@@ -465,7 +484,16 @@ export async function POST(req: NextRequest) {
 
   // ── 6. Limpeza e montagem do texto ───────────────────────────────────────
   const conteudoLimpo = limparConteudo(conteudo);
-  const textoTTS = montarTextoTTS(titulo, conteudoLimpo, autorNome, igreja, data);
+  const textoTTS = montarTextoTTS(
+    titulo,
+    conteudoLimpo,
+    tipo,
+    autorNome,
+    igreja,
+    data,
+    fraseInstigadora,
+    perguntaReflexiva,
+  );
 
   // ── 7. Geração e concatenação do áudio ───────────────────────────────────
   let audioFinal: Buffer;
