@@ -54,17 +54,218 @@ interface TTSRequestBody {
 }
 
 // ---------------------------------------------------------------------------
+// Transliteração — Grego → Latino (padrão SBL simplificado)
+// ---------------------------------------------------------------------------
+
+/**
+ * Detecta se uma string contém caracteres do alfabeto grego.
+ */
+function contemGrego(texto: string): boolean {
+  return /[\u0370-\u03FF\u1F00-\u1FFF]/.test(texto);
+}
+
+/**
+ * Detecta se uma string contém caracteres do alfabeto hebraico.
+ */
+function contemHebraico(texto: string): boolean {
+  return /[\u0590-\u05FF]/.test(texto);
+}
+
+/**
+ * Transliteração letra a letra do grego para o alfabeto latino,
+ * seguindo o padrão SBL (Society of Biblical Literature) simplificado.
+ * Lida com letras maiúsculas, minúsculas e diacríticos comuns.
+ */
+function transliterarGrego(palavra: string): string {
+  // Mapa de caracteres gregos → transliteração latina
+  const mapa: Record<string, string> = {
+    // Alfa
+    "α": "a", "ά": "a", "ὰ": "a", "ᾶ": "a", "ἀ": "a", "ἁ": "a",
+    "ἂ": "a", "ἃ": "a", "ἄ": "a", "ἅ": "a", "ἆ": "a", "ἇ": "a",
+    "ᾀ": "a", "ᾁ": "a", "ᾂ": "a", "ᾃ": "a", "ᾄ": "a", "ᾅ": "a",
+    "ᾆ": "a", "ᾇ": "a", "ᾲ": "a", "ᾳ": "a", "ᾴ": "a", "ᾷ": "a",
+    "Α": "A", "Ά": "A", "Ὰ": "A", "Ἀ": "A", "Ἁ": "A", "Ἂ": "A",
+    "Ἃ": "A", "Ἄ": "A", "Ἅ": "A", "Ἆ": "A", "Ἇ": "A",
+    // Beta
+    "β": "b", "Β": "B",
+    // Gamma
+    "γ": "g", "Γ": "G",
+    // Delta
+    "δ": "d", "Δ": "D",
+    // Epsilon
+    "ε": "e", "έ": "e", "ὲ": "e", "ἐ": "e", "ἑ": "e", "ἒ": "e",
+    "ἓ": "e", "ἔ": "e", "ἕ": "e",
+    "Ε": "E", "Έ": "E", "Ὲ": "E", "Ἐ": "E", "Ἑ": "E", "Ἒ": "E",
+    "Ἓ": "E", "Ἔ": "E", "Ἕ": "E",
+    // Zeta
+    "ζ": "z", "Ζ": "Z",
+    // Eta (vogal longa ē)
+    "η": "ē", "ή": "ē", "ὴ": "ē", "ῆ": "ē", "ἠ": "ē", "ἡ": "ē",
+    "ἢ": "ē", "ἣ": "ē", "ἤ": "ē", "ἥ": "ē", "ἦ": "ē", "ἧ": "ē",
+    "ῂ": "ē", "ῃ": "ē", "ῄ": "ē", "ῇ": "ē",
+    "Η": "Ē", "Ή": "Ē", "Ὴ": "Ē", "Ἠ": "Ē", "Ἡ": "Ē", "Ἢ": "Ē",
+    "Ἣ": "Ē", "Ἤ": "Ē", "Ἥ": "Ē", "Ἦ": "Ē", "Ἧ": "Ē",
+    // Theta
+    "θ": "th", "Θ": "Th",
+    // Iota
+    "ι": "i", "ί": "i", "ὶ": "i", "ῖ": "i", "ἰ": "i", "ἱ": "i",
+    "ἲ": "i", "ἳ": "i", "ἴ": "i", "ἵ": "i", "ἶ": "i", "ἷ": "i",
+    "ϊ": "i", "ΐ": "i",
+    "Ι": "I", "Ί": "I", "Ὶ": "I", "Ἰ": "I", "Ἱ": "I", "Ἲ": "I",
+    "Ἳ": "I", "Ἴ": "I", "Ἵ": "I", "Ἶ": "I", "Ἷ": "I",
+    // Kappa
+    "κ": "k", "Κ": "K",
+    // Lambda
+    "λ": "l", "Λ": "L",
+    // Mu
+    "μ": "m", "Μ": "M",
+    // Nu
+    "ν": "n", "Ν": "N",
+    // Xi
+    "ξ": "x", "Ξ": "X",
+    // Omicron
+    "ο": "o", "ό": "o", "ὸ": "o", "ὀ": "o", "ὁ": "o", "ὂ": "o",
+    "ὃ": "o", "ὄ": "o", "ὅ": "o",
+    "Ο": "O", "Ό": "O", "Ὸ": "O", "Ὀ": "O", "Ὁ": "O", "Ὂ": "O",
+    "Ὃ": "O", "Ὄ": "O", "Ὅ": "O",
+    // Pi
+    "π": "p", "Π": "P",
+    // Rho
+    "ρ": "r", "ῥ": "rh", "ῤ": "r", "Ρ": "R", "Ῥ": "Rh",
+    // Sigma
+    "σ": "s", "ς": "s", "Σ": "S",
+    // Tau
+    "τ": "t", "Τ": "T",
+    // Upsilon
+    "υ": "y", "ύ": "y", "ὺ": "y", "ῦ": "y", "ὐ": "y", "ὑ": "y",
+    "ὒ": "y", "ὓ": "y", "ὔ": "y", "ὕ": "y", "ὖ": "y", "ὗ": "y",
+    "ϋ": "y", "ΰ": "y",
+    "Υ": "Y", "Ύ": "Y", "Ὺ": "Y", "Ὑ": "Y", "Ὓ": "Y", "Ὕ": "Y", "Ὗ": "Y",
+    // Phi
+    "φ": "ph", "Φ": "Ph",
+    // Chi
+    "χ": "ch", "Χ": "Ch",
+    // Psi
+    "ψ": "ps", "Ψ": "Ps",
+    // Omega (vogal longa ō)
+    "ω": "ō", "ώ": "ō", "ὼ": "ō", "ῶ": "ō", "ὠ": "ō", "ὡ": "ō",
+    "ὢ": "ō", "ὣ": "ō", "ὤ": "ō", "ὥ": "ō", "ὦ": "ō", "ὧ": "ō",
+    "ῲ": "ō", "ῳ": "ō", "ῴ": "ō", "ῷ": "ō",
+    "Ω": "Ō", "Ώ": "Ō", "Ὼ": "Ō", "Ὠ": "Ō", "Ὡ": "Ō", "Ὢ": "Ō",
+    "Ὣ": "Ō", "Ὤ": "Ō", "Ὥ": "Ō", "Ὦ": "Ō", "Ὧ": "Ō",
+  };
+
+  return palavra
+    .split("")
+    .map((c) => mapa[c] ?? c)
+    .join("");
+}
+
+/**
+ * Transliteração letra a letra do hebraico para o alfabeto latino,
+ * seguindo convenção acadêmica simplificada.
+ */
+function transliterarHebraico(palavra: string): string {
+  const mapa: Record<string, string> = {
+    "א": "", // alef — geralmente silencioso, omitido
+    "בּ": "b", "ב": "v",
+    "ג": "g",
+    "ד": "d",
+    "ה": "h",
+    "ו": "v",
+    "ז": "z",
+    "ח": "kh",
+    "ט": "t",
+    "י": "y",
+    "כ": "kh", "ך": "kh", "כּ": "k",
+    "ל": "l",
+    "מ": "m", "ם": "m",
+    "נ": "n", "ן": "n",
+    "ס": "s",
+    "ע": "", // ain — geralmente silencioso, omitido
+    "פ": "f", "ף": "f", "פּ": "p",
+    "צ": "ts", "ץ": "ts",
+    "ק": "q",
+    "ר": "r",
+    "ש": "sh", "שׁ": "sh", "שׂ": "s",
+    "ת": "t",
+    // Vogais (nikud)
+    "\u05B0": "e", // shva
+    "\u05B1": "e", // khataf segol
+    "\u05B2": "a", // khataf patakh
+    "\u05B3": "o", // khataf kamats
+    "\u05B4": "i", // khirik
+    "\u05B5": "e", // tsere
+    "\u05B6": "e", // segol
+    "\u05B7": "a", // patakh
+    "\u05B8": "a", // kamats
+    "\u05B9": "o", // kholam
+    "\u05BA": "o", // kholam male
+    "\u05BB": "u", // kubuts
+    "\u05BC": "",  // dagesh — modifica a consoante, ignorado aqui
+    "\u05C1": "",  // shin dot
+    "\u05C2": "",  // sin dot
+  };
+
+  return palavra
+    .split("")
+    .map((c) => mapa[c] ?? c)
+    .join("");
+}
+
+// ---------------------------------------------------------------------------
 // Limpeza de conteúdo
 // ---------------------------------------------------------------------------
 
 /**
- * Remove tags HTML, markdown visual e normaliza espaços/quebras de linha.
+ * Estratégia para palavras em grego ou hebraico no texto:
+ *
+ * Caso 1 — palavra estrangeira SEGUIDA de transliteração entre parênteses:
+ *   ex: "ἠγάπησεν (ēgapēsen)" → mantém só "(ēgapēsen)" sem os parênteses
+ *   Resultado: "ēgapēsen"
+ *
+ * Caso 2 — palavra estrangeira SEM transliteração ao lado:
+ *   ex: "ὁ θεὸς" → transliteração automática via mapa de caracteres
+ *   Resultado: "ho theos"
+ */
+function processarTermosEstrangeiros(texto: string): string {
+  // Caso 1: grego/hebraico seguido de transliteração entre parênteses
+  // Ex: "ἠγάπησεν (ēgapēsen)" → "ēgapēsen"
+  texto = texto.replace(
+    /[\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF\w\s]*?([\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF]+[\w\s]*?)\s*\(([^)]+)\)/g,
+    (match, _estrangeiro, transliteracao) => {
+      // Só substitui se a palavra entre parênteses não contiver grego/hebraico
+      if (contemGrego(transliteracao) || contemHebraico(transliteracao)) {
+        return match; // deixa passar para o Caso 2
+      }
+      return transliteracao;
+    }
+  );
+
+  // Caso 2: grego sem transliteração → transliteração automática
+  texto = texto.replace(/[\u0370-\u03FF\u1F00-\u1FFF]+/g, (match) =>
+    transliterarGrego(match)
+  );
+
+  // Caso 2: hebraico sem transliteração → transliteração automática
+  texto = texto.replace(/[\u0590-\u05FF]+/g, (match) =>
+    transliterarHebraico(match)
+  );
+
+  return texto;
+}
+
+/**
+ * Remove tags HTML, markdown visual, processa termos estrangeiros
+ * e normaliza espaços/quebras de linha.
  * Preserva pontuação e pausa natural entre parágrafos.
  */
 function limparConteudo(raw: string): string {
   return raw
     // Remove tags HTML
     .replace(/<[^>]+>/g, " ")
+    // Processa termos em grego e hebraico antes de qualquer outra limpeza
+    .replace(/([\s\S]+)/, processarTermosEstrangeiros)
     // Remove marcações markdown: **negrito**, *itálico*, __sublinhado__, ~~tachado~~
     .replace(/(\*\*|__)(.*?)\1/g, "$2")
     .replace(/(\*|_)(.*?)\1/g, "$2")
