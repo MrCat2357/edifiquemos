@@ -24,6 +24,7 @@ import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useAudioSync } from "@/hooks/useAudioSync";
+import { useTTS } from "@/hooks/useTTS";
 import type { AudioPublication } from "@/providers/AudioProvider";
 import { FALLBACK_AUDIO } from "@/lib/audioQueue";
 
@@ -477,13 +478,8 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
   const [likes, setLikes] = useState<number>(reflexao.likes ?? 0);
   const [likedBy, setLikedBy] = useState<string[]>(reflexao.likedBy ?? []);
   const [likePending, setLikePending] = useState(false);
-
   const [commentCount, setCommentCount] = useState<number>(reflexao.commentCount ?? 0);
-
-  // Modal de login — usado por curtir, comentar e ouvir
   const [showLoginModal, setShowLoginModal] = useState(false);
-
-  const [buildingQueue, setBuildingQueue] = useState(false);
 
   const currentPath = typeof window !== "undefined"
     ? window.location.pathname + window.location.search
@@ -493,6 +489,10 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
   // ── useAudioSync ──────────────────────────────────────────────────────────
   const { handlePlayQueueItem } = useAudioSync(reflexao.id ?? "", fromParam);
+
+  // ── TTS ──────────────────────────────────────────────────────────────────
+  // error exposto para estado visual "Tentar novamente"
+  const { resolveAudioUrl, isGenerating: ttsGenerating, error: ttsError } = useTTS();
 
   useEffect(() => {
     const currentUid = auth.currentUser?.uid;
@@ -574,6 +574,7 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
   const ouvirBtnRef = useRef<HTMLSpanElement>(null);
   const [ouvirFlutuante, setOuvirFlutuante] = useState(false);
+  const [buildingQueue, setBuildingQueue] = useState(false);
 
   useEffect(() => {
     const el = ouvirBtnRef.current;
@@ -586,16 +587,41 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
     return () => observer.disconnect();
   }, []);
 
-  const pubDestaReflexao: AudioPublication = {
-    id: reflexao.id ?? "",
-    tipo: "reflexao",
-    titulo: reflexao.titulo,
-    autorNome: reflexao.autorNome,
-    autorFoto: null,
-    slug: reflexao.slug,
-    autorSlug: autorSlug,
-    audioUrl: (reflexao as any).audioUrl || FALLBACK_AUDIO,
-  };
+  const ouvirOcupado = ttsGenerating || buildingQueue || audioCarregando;
+
+  // ── Quatro estados visuais do botão Ouvir ────────────────────────────────
+  // idle → "Ouvir"
+  // gerando → "Gerando áudio…" (ttsGenerating)
+  // carregando → "Carregando…" (buildingQueue | audioCarregando)
+  // tocando → "Pausar" (audioTocando)
+  // erro → "Tentar novamente" (ttsError && !ttsGenerating)
+  const ouvirLabel =
+    ttsGenerating   ? "Gerando áudio…"   :
+    buildingQueue   ? "Carregando…"      :
+    audioCarregando ? "Carregando…"      :
+    ttsError        ? "Tentar novamente" :
+    audioTocando    ? "Pausar"           :
+    audioAtivo      ? "Continuar"        :
+    "Ouvir";
+
+  // Cores do botão: vermelho em erro, verde quando ativo, padrão caso contrário
+  const ouvirBtnBorderColor = ttsError
+    ? "var(--red-dim, #fecaca)"
+    : audioAtivo
+    ? "var(--emerald-dim)"
+    : "var(--border-light)";
+
+  const ouvirBtnBg = ttsError
+    ? "var(--red-dim, #fef2f2)"
+    : audioAtivo
+    ? "var(--emerald-dim)"
+    : "transparent";
+
+  const ouvirBtnColor = ttsError
+    ? "var(--red, #ef4444)"
+    : audioAtivo
+    ? "var(--emerald)"
+    : "var(--text-3)";
 
   async function handleOuvir(e: React.MouseEvent) {
     e.stopPropagation();
@@ -607,13 +633,25 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
 
     // Se já há fila ativa com esta reflexão, apenas toggle
     if (queue.length > 0 && queue.some((p) => p.id === reflexao.id)) {
-      playOrToggle(pubDestaReflexao);
+      playOrToggle(pubDestaReflexao());
       return;
     }
 
-    // Monta fila de todas as reflexões do mesmo autor
     setBuildingQueue(true);
     try {
+      // Resolve audioUrl via TTS se necessário
+      const audioUrl = await resolveAudioUrl({
+        postId: reflexao.id,
+        tipo: "reflexao",
+        titulo: reflexao.titulo,
+        audioUrlExistente: reflexao.audioUrl && reflexao.audioStatus === "ready"
+          ? reflexao.audioUrl
+          : undefined,
+      });
+
+      const pub = pubDestaReflexao(audioUrl);
+
+      // Monta fila de todas as reflexões do mesmo autor
       const snap = await getDocs(
         query(
           collection(db, "posts"),
@@ -635,15 +673,28 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       }));
 
       if (novaFila.length > 0) {
-        playQueue(pubDestaReflexao, novaFila, "perfil");
+        playQueue(pub, novaFila, "perfil");
       } else {
-        playQueue(pubDestaReflexao, [pubDestaReflexao], "perfil");
+        playQueue(pub, [pub], "perfil");
       }
     } catch (err) {
       console.error("Erro ao montar fila de reflexões:", err);
-      playQueue(pubDestaReflexao, [pubDestaReflexao], "perfil");
+      // ttsError já foi setado pelo hook — o botão mostrará "Tentar novamente"
     }
     setBuildingQueue(false);
+  }
+
+  function pubDestaReflexao(audioUrl?: string): AudioPublication {
+    return {
+      id: reflexao.id ?? "",
+      tipo: "reflexao",
+      titulo: reflexao.titulo,
+      autorNome: reflexao.autorNome,
+      autorFoto: null,
+      slug: reflexao.slug,
+      autorSlug: autorSlug,
+      audioUrl: audioUrl ?? reflexao.audioUrl ?? FALLBACK_AUDIO,
+    };
   }
 
   const paragrafos = reflexao.conteudo
@@ -665,14 +716,6 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
     reflexao.imagemFotografoNome &&
     reflexao.imagemFotografoUrl &&
     reflexao.imagemUnsplashUrl;
-
-  const ouvirLabel = buildingQueue || audioCarregando
-    ? "Carregando…"
-    : audioTocando
-    ? "Pausar"
-    : audioAtivo
-    ? "Continuar"
-    : "Ouvir";
 
   return (
     <div style={{
@@ -865,27 +908,37 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
           )}
         </button>
 
+        {/* ── Botão Ouvir inline ── */}
         <button
           onClick={handleOuvir}
-          disabled={buildingQueue}
-          aria-label={audioTocando ? "Pausar áudio" : "Ouvir reflexão"}
+          disabled={ouvirOcupado}
+          aria-label={
+            ttsError     ? "Tentar novamente"    :
+            audioTocando ? "Pausar áudio"        :
+            "Ouvir reflexão"
+          }
           style={{
             display: "inline-flex", alignItems: "center", gap: "0.4rem",
             padding: "6px 14px", borderRadius: "var(--radius-full)",
-            border: "1px solid",
-            borderColor: audioAtivo ? "var(--emerald-dim)" : "var(--border-light)",
-            background: audioAtivo ? "var(--emerald-dim)" : "transparent",
-            color: audioAtivo ? "var(--emerald)" : "var(--text-3)",
+            border: `1px solid ${ouvirBtnBorderColor}`,
+            background: ouvirBtnBg,
+            color: ouvirBtnColor,
             fontSize: "0.82rem", fontWeight: 600,
-            cursor: (buildingQueue || audioCarregando) ? "default" : "pointer",
-            opacity: (buildingQueue || audioCarregando) ? 0.7 : 1,
+            cursor: ouvirOcupado ? "default" : "pointer",
+            opacity: ouvirOcupado ? 0.7 : 1,
             transition: "all 0.2s cubic-bezier(0.4,0,0.2,1)",
             fontFamily: "inherit",
           }}
         >
-          {buildingQueue || audioCarregando ? (
+          {ttsGenerating ? (
+            /* spinner de geração */
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+            </svg>
+          ) : ttsError ? (
+            /* ícone de aviso para "Tentar novamente" */
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
           ) : audioTocando ? (
             <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
@@ -908,8 +961,12 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
       {ouvirFlutuante && !current && (
         <button
           onClick={handleOuvir}
-          disabled={buildingQueue}
-          aria-label={audioTocando ? "Pausar áudio" : "Ouvir reflexão"}
+          disabled={ouvirOcupado}
+          aria-label={
+            ttsError     ? "Tentar novamente"    :
+            audioTocando ? "Pausar áudio"        :
+            "Ouvir reflexão"
+          }
           style={{
             position: "fixed",
             top: "calc(var(--header-h) + 12px)",
@@ -920,29 +977,45 @@ export default function ReflexaoView({ reflexao, autorSlug }: Props) {
             gap: "6px",
             padding: "8px 16px",
             borderRadius: "var(--radius-full)",
-            border: "1px solid var(--emerald-dim)",
-            background: audioTocando ? "var(--emerald)" : "var(--bg-card)",
-            color: audioTocando ? "#fff" : "var(--emerald)",
+            border: `1px solid ${ouvirBtnBorderColor}`,
+            background: ttsError
+              ? "var(--red-dim, #fef2f2)"
+              : audioTocando
+              ? "var(--emerald)"
+              : "var(--bg-card)",
+            color: ttsError
+              ? "var(--red, #ef4444)"
+              : audioTocando
+              ? "#fff"
+              : "var(--emerald)",
             fontSize: "0.8rem",
             fontWeight: 700,
-            cursor: buildingQueue ? "default" : "pointer",
+            cursor: ouvirOcupado ? "default" : "pointer",
             boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
             backdropFilter: "blur(8px)",
             transition: "all 0.2s ease",
             fontFamily: "inherit",
-            opacity: buildingQueue ? 0.7 : 1,
+            opacity: ouvirOcupado ? 0.7 : 1,
           }}
         >
-          {buildingQueue || audioCarregando ? (
+          {ttsGenerating ? (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
             </svg>
+          ) : buildingQueue || audioCarregando ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+            </svg>
+          ) : ttsError ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
           ) : audioTocando ? (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
           ) : (
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z" /></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
           )}
-          <span>{buildingQueue ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}</span>
+          <span>{ouvirLabel}</span>
         </button>
       )}
 

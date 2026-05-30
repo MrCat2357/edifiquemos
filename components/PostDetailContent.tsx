@@ -15,6 +15,7 @@ import BannerLogin from "@/components/BannerLogin";
 import CommentSection from "@/components/comments/CommentSection";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { useAudioSync } from "@/hooks/useAudioSync";
+import { useTTS } from "@/hooks/useTTS";
 import {
   FALLBACK_AUDIO,
   fetchFeedGlobal,
@@ -792,7 +793,6 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
   const [viewCount, setViewCount] = useState<number>(post.visualizacoes ?? 0);
-  // modal login — usado por curtir E por ouvir
   const [modalLoginVisivel, setModalLoginVisivel] = useState(false);
   const [bannerLoginVisivel, setBannerLoginVisivel] = useState(false);
 
@@ -938,6 +938,10 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     contextType,
   } = useAudioPlayer();
 
+  // ── TTS ──────────────────────────────────────────────────────────────────
+  // error exposto para estado visual "Tentar novamente"
+  const { resolveAudioUrl, isGenerating: ttsGenerating, error: ttsError } = useTTS();
+
   const audioAtivo = isCurrentPublication(postId);
   const audioTocando = isCurrentlyPlaying(postId);
   const audioCarregando = audioAtivo && audioLoading;
@@ -956,25 +960,36 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
     return () => observer.disconnect();
   }, []);
 
-  const pubDestePost: AudioPublication = {
-    id: postId,
-    tipo: post.tipo,
-    titulo: post.titulo,
-    autorNome: nomeExibicao,
-    autorFoto: fotoAutor,
-    slug: post.slug,
-    audioUrl: post.audioUrl || FALLBACK_AUDIO,
-  };
-
   const [buildingQueue, setBuildingQueue] = useState(false);
 
+  // ── Quatro estados visuais do botão Ouvir ────────────────────────────────
+  // idle → "Ouvir"
+  // gerando → "Gerando áudio…" (ttsGenerating)
+  // carregando → "Carregando…" (buildingQueue | audioCarregando)
+  // tocando → "Pausar" (audioTocando)
+  // erro → "Tentar novamente" (ttsError && !ttsGenerating)
+  const ouvirLabel =
+    ttsGenerating   ? "Gerando áudio…"    :
+    buildingQueue   ? "Carregando…"       :
+    audioCarregando ? "Carregando…"       :
+    ttsError        ? "Tentar novamente"  :
+    audioTocando    ? "Pausar"            :
+    "Ouvir";
+
+  const ouvirOcupado = ttsGenerating || buildingQueue || audioCarregando;
+
+  // Cores do botão: vermelho em erro, verde quando ativo, padrão caso contrário
+  const ouvirBtnColor   = ttsError ? "var(--red, #ef4444)"     : audioAtivo ? "var(--emerald)"     : undefined;
+  const ouvirBtnBorder  = ttsError ? "var(--red-dim, #fecaca)" : audioAtivo ? "var(--emerald-dim)" : undefined;
+  const ouvirBtnBg      = ttsError ? "var(--red-dim, #fef2f2)" : audioAtivo ? "var(--emerald-dim)" : undefined;
+
   async function buildAndPlay() {
-    // ── Verificar login antes de qualquer coisa ──────────────────────────
     if (!auth.currentUser) {
       setModalLoginVisivel(true);
       return;
     }
 
+    // Se já está na fila e no contexto correto, apenas toggle
     const filaTemEstePost = queue.length > 0 && queue.some((p) => p.id === postId);
     const contextoCorreto =
       (fromParam === "home"   && contextType === "home")   ||
@@ -982,12 +997,22 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       (fromParam === "serie"  && contextType === "serie")  ||
       (!fromParam && contextType === null);
     if (filaTemEstePost && contextoCorreto) {
-      playOrToggle(pubDestePost);
+      playOrToggle(pubDestePost());
       return;
     }
 
     setBuildingQueue(true);
     try {
+      // Resolve audioUrl via TTS se necessário
+      const audioUrl = await resolveAudioUrl({
+        postId,
+        tipo: post.tipo === "artigo" ? "estudo" : post.tipo,
+        titulo: post.titulo,
+        audioUrlExistente: post.audioUrl && post.audioStatus === "ready" ? post.audioUrl : undefined,
+      });
+
+      const pub: AudioPublication = pubDestePost(audioUrl);
+
       if (fromParam === "serie" && serieSlugParam) {
         const serieSnap = await getDocs(
           query(collection(db, "series"), where("slug", "==", serieSlugParam))
@@ -1009,7 +1034,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
               audioUrl: s.data()!.audioUrl || FALLBACK_AUDIO,
             }));
           if (novaFila.length > 0) {
-            playQueue(pubDestePost, novaFila, "serie");
+            playQueue(pub, novaFila, "serie");
             setBuildingQueue(false);
             return;
           }
@@ -1020,7 +1045,7 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
         const feedItems = await fetchFeedGlobal();
         const novaFila = await buildAudioQueueFromFeed(feedItems);
         if (novaFila.length > 0) {
-          playQueue(pubDestePost, novaFila, "home");
+          playQueue(pub, novaFila, "home");
           setBuildingQueue(false);
           return;
         }
@@ -1041,18 +1066,30 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
           audioUrl: d.data().audioUrl || FALLBACK_AUDIO,
         }));
         if (novaFila.length > 0) {
-          playQueue(pubDestePost, novaFila, "perfil");
+          playQueue(pub, novaFila, "perfil");
           setBuildingQueue(false);
           return;
         }
       }
 
-      playQueue(pubDestePost, [pubDestePost], null);
+      playQueue(pub, [pub], null);
     } catch (err) {
       console.error("Erro ao construir fila de áudio:", err);
-      playOrToggle(pubDestePost);
+      showToast("Erro ao gerar áudio. Tente novamente.");
     }
     setBuildingQueue(false);
+  }
+
+  function pubDestePost(audioUrl?: string): AudioPublication {
+    return {
+      id: postId,
+      tipo: post.tipo,
+      titulo: post.titulo,
+      autorNome: nomeExibicao,
+      autorFoto: fotoAutor,
+      slug: post.slug,
+      audioUrl: audioUrl ?? post.audioUrl ?? FALLBACK_AUDIO,
+    };
   }
 
   // ── Sincronização áudio ↔ navegação ──────────────────────────────────────
@@ -1201,11 +1238,44 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             style={{ opacity: gerandoPdf ? 0.6 : 1, ...actionBtnStyle }} title="Baixar como PDF">
             {gerandoPdf ? <><span className="btn-spinner" />Gerando…</> : <><IconDownload size={14} />Salvar PDF</>}
             {downloadCount > 0 && (
-              <span style={{ marginLeft: "2px", fontSize: "0.78rem", fontWeight: 700, color: "var(--text-3)" }}
-                title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
-                {downloadCount}
-              </span>
+              <span style={{ marginLeft: "2px", fontSize: "0.78rem", fontWeight: 700, color: "var(--text-3)" }}>{downloadCount}</span>
             )}
+          </button>
+
+          {/* ── Botão Ouvir inline ── */}
+          <button
+            onClick={buildAndPlay}
+            disabled={ouvirOcupado}
+            className="post-btn-share"
+            style={{
+              ...actionBtnStyle,
+              opacity: ouvirOcupado ? 0.7 : 1,
+              borderColor: ouvirBtnBorder,
+              background: ouvirBtnBg,
+              color: ouvirBtnColor,
+            }}
+            title={
+              ttsError      ? "Clique para tentar novamente" :
+              audioTocando  ? "Pausar"                       :
+              "Ouvir este conteúdo"
+            }
+          >
+            {ttsGenerating ? (
+              /* spinner de geração */
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+              </svg>
+            ) : ttsError ? (
+              /* ícone de aviso para "Tentar novamente" */
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            ) : audioTocando ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+            )}
+            {ouvirLabel}
           </button>
 
           <div style={{
@@ -1235,8 +1305,12 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
       {ouvirFlutuante && (
         <button
           onClick={buildAndPlay}
-          disabled={buildingQueue}
-          aria-label={audioTocando ? "Pausar áudio" : "Ouvir este conteúdo"}
+          disabled={ouvirOcupado}
+          aria-label={
+            ttsError     ? "Tentar novamente"    :
+            audioTocando ? "Pausar áudio"        :
+            "Ouvir este conteúdo"
+          }
           style={{
             position: "fixed",
             top: "calc(var(--header-h) + 12px)",
@@ -1247,28 +1321,40 @@ export default function PostDetailContent({ post, postId, autor }: PostDetailPro
             gap: "6px",
             padding: "8px 16px",
             borderRadius: "var(--radius-full)",
-            border: "1px solid var(--emerald-dim)",
-            background: audioTocando ? "var(--emerald)" : "var(--bg-card)",
-            color: audioTocando ? "#fff" : "var(--emerald)",
+            border: `1px solid ${ouvirBtnBorder ?? "var(--emerald-dim)"}`,
+            background: ttsError
+              ? "var(--red-dim, #fef2f2)"
+              : audioTocando
+              ? "var(--emerald)"
+              : "var(--bg-card)",
+            color: ttsError
+              ? "var(--red, #ef4444)"
+              : audioTocando
+              ? "#fff"
+              : "var(--emerald)",
             fontSize: "0.8rem",
             fontWeight: 700,
-            cursor: buildingQueue ? "default" : "pointer",
+            cursor: ouvirOcupado ? "default" : "pointer",
             boxShadow: "0 4px 20px rgba(0,0,0,0.4)",
             backdropFilter: "blur(8px)",
             transition: "all 0.2s ease",
             fontFamily: "inherit",
-            opacity: buildingQueue ? 0.7 : 1,
+            opacity: ouvirOcupado ? 0.7 : 1,
           }}
         >
-          {buildingQueue || audioCarregando ? (
+          {ttsGenerating ? (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          ) : buildingQueue || audioCarregando ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          ) : ttsError ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
           ) : audioTocando ? (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
           ) : (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
           )}
           <span style={{ display: "var(--ouvir-label-display, inline)" }}>
-            {buildingQueue ? "Carregando…" : audioCarregando ? "Carregando…" : audioTocando ? "Pausar" : "Ouvir"}
+            {ouvirLabel}
           </span>
         </button>
       )}
