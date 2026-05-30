@@ -49,7 +49,6 @@ interface TTSRequestBody {
   postId: string;
   tipo: "sermao" | "estudo" | "reflexao";
   titulo: string;
-  referencia?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +224,7 @@ function processarTermosEstrangeiros(texto: string): string {
     transliterarGrego(match)
   );
 
-  // Caso 2: hebraico restante → transliteração automática
+  // Caso 3: hebraico restante → transliteração automática
   texto = texto.replace(/[\u0590-\u05FF]+/g, (match) =>
     transliterarHebraico(match)
   );
@@ -258,10 +257,14 @@ function limparConteudo(raw: string): string {
 function montarTextoTTS(
   titulo: string,
   conteudo: string,
-  referencia?: string
+  autorNome?: string,
+  igreja?: string,
+  data?: string
 ): string {
   const partes: string[] = [titulo.trim()];
-  if (referencia?.trim()) partes.push(referencia.trim());
+  if (autorNome?.trim()) partes.push(autorNome.trim());
+  if (igreja?.trim()) partes.push(igreja.trim());
+  if (data?.trim()) partes.push(data.trim());
   partes.push(conteudo);
   return partes.join(". ");
 }
@@ -407,7 +410,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Body inválido." }, { status: 400 });
   }
 
-  const { postId, tipo, titulo, referencia } = body;
+  const { postId, tipo, titulo } = body;
 
   if (!postId || !tipo || !titulo) {
     return NextResponse.json(
@@ -427,7 +430,7 @@ export async function POST(req: NextRequest) {
   // ── 3. Referência ao documento Firestore ─────────────────────────────────
   const postRef = adminDb.collection("posts").doc(postId);
 
-  // ── 4. Verificar cache e ler conteudo do Firestore ────────────────────────
+  // ── 4. Verificar cache e ler campos do Firestore ──────────────────────────
   const postSnap = await postRef.get();
   const postData = postSnap.data() ?? {};
 
@@ -446,6 +449,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Campos opcionais lidos do Firestore
+  const autorNome = postData.autorNome as string | undefined;
+  const igreja = postData.igreja as string | undefined;
+  const data = postData.data as string | undefined;
+
   // ── 5. Marcar como "generating" (lock distribuído) ────────────────────────
   await postRef.set(
     { audioStatus: "generating" as AudioStatus },
@@ -454,7 +462,7 @@ export async function POST(req: NextRequest) {
 
   // ── 6. Limpeza e montagem do texto ───────────────────────────────────────
   const conteudoLimpo = limparConteudo(conteudo);
-  const textoTTS = montarTextoTTS(titulo, conteudoLimpo, referencia);
+  const textoTTS = montarTextoTTS(titulo, conteudoLimpo, autorNome, igreja, data);
 
   // ── 7. Geração e concatenação do áudio ───────────────────────────────────
   let audioFinal: Buffer;
