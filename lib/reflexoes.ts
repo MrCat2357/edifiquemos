@@ -34,6 +34,10 @@ export interface Reflexao {
   tipo: "reflexao";
   criadoEm: Timestamp | null;
   editadoEm?: Timestamp | Date | null;
+  // Áudio TTS — opcionais: gravados depois pela API TTS
+  audioUrl?: string;
+  audioStatus?: string;
+  audioUpdatedAt?: Timestamp | null;
   // Engajamento — opcionais: documentos antigos não têm esses campos
   likes?: number;
   likedBy?: string[];
