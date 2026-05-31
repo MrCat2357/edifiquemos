@@ -1,29 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "firebase-admin/auth";
-import { getApps, initializeApp, cert } from "firebase-admin/app";
+import { getApps, getApp, initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import OpenAI from "openai";
 
 // ---------------------------------------------------------------------------
-// Firebase Admin — inicialização lazy (reutiliza instância se já existir)
+// Firebase Admin — inicialização defensiva contra singleton com bucket vazio
+//
+// Problema: em cold starts na Vercel, se a instância [DEFAULT] for criada
+// antes de NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET estar disponível (bucket vazio),
+// o singleton fica "preso" sem bucket — mesmo após a env ser carregada.
+//
+// Solução: usar uma instância NOMEADA com o bucket como parte do nome.
+// Assim, a instância sem bucket ([DEFAULT]) nunca é reutilizada para Storage.
 // ---------------------------------------------------------------------------
 
-function ensureAdminInitialized() {
-  if (getApps().length > 0) return;
+const ADMIN_APP_NAME = "tts-admin";
 
+function ensureAdminInitialized() {
+  // Já existe instância nomeada válida — reutiliza
+  if (getApps().find((a) => a.name === ADMIN_APP_NAME)) return;
+
+  const bucket = (process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? "").trim();
   const privateKey = (process.env.FIREBASE_ADMIN_PRIVATE_KEY ?? "")
     .replace(/^"|"$/g, "")
     .replace(/\\n/g, "\n");
 
-  initializeApp({
-    credential: cert({
-      projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
-      privateKey,
-    }),
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  });
+  initializeApp(
+    {
+      credential: cert({
+        projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
+        privateKey,
+      }),
+      storageBucket: bucket || undefined,
+    },
+    ADMIN_APP_NAME
+  );
+}
+
+function getAdminApp() {
+  ensureAdminInitialized();
+  return getApp(ADMIN_APP_NAME);
 }
 
 // ---------------------------------------------------------------------------
@@ -52,133 +71,74 @@ function contemHebraico(texto: string): boolean {
 
 function transliterarGrego(palavra: string): string {
   const mapa: Record<string, string> = {
-    // Alfa
     "α": "a", "ά": "a", "ὰ": "a", "ᾶ": "a", "ἀ": "a", "ἁ": "a",
     "ἂ": "a", "ἃ": "a", "ἄ": "a", "ἅ": "a", "ἆ": "a", "ἇ": "a",
     "ᾀ": "a", "ᾁ": "a", "ᾂ": "a", "ᾃ": "a", "ᾄ": "a", "ᾅ": "a",
     "ᾆ": "a", "ᾇ": "a", "ᾲ": "a", "ᾳ": "a", "ᾴ": "a", "ᾷ": "a",
     "Α": "A", "Ά": "A", "Ὰ": "A", "Ἀ": "A", "Ἁ": "A", "Ἂ": "A",
     "Ἃ": "A", "Ἄ": "A", "Ἅ": "A", "Ἆ": "A", "Ἇ": "A",
-    // Beta
     "β": "b", "Β": "B",
-    // Gamma
     "γ": "g", "Γ": "G",
-    // Delta
     "δ": "d", "Δ": "D",
-    // Epsilon
     "ε": "e", "έ": "e", "ὲ": "e", "ἐ": "e", "ἑ": "e", "ἒ": "e",
     "ἓ": "e", "ἔ": "e", "ἕ": "e",
     "Ε": "E", "Έ": "E", "Ὲ": "E", "Ἐ": "E", "Ἑ": "E", "Ἒ": "E",
     "Ἓ": "E", "Ἔ": "E", "Ἕ": "E",
-    // Zeta
     "ζ": "z", "Ζ": "Z",
-    // Eta (vogal longa ē)
     "η": "ē", "ή": "ē", "ὴ": "ē", "ῆ": "ē", "ἠ": "ē", "ἡ": "ē",
     "ἢ": "ē", "ἣ": "ē", "ἤ": "ē", "ἥ": "ē", "ἦ": "ē", "ἧ": "ē",
     "ῂ": "ē", "ῃ": "ē", "ῄ": "ē", "ῇ": "ē",
     "Η": "Ē", "Ή": "Ē", "Ὴ": "Ē", "Ἠ": "Ē", "Ἡ": "Ē", "Ἢ": "Ē",
     "Ἣ": "Ē", "Ἤ": "Ē", "Ἥ": "Ē", "Ἦ": "Ē", "Ἧ": "Ē",
-    // Theta
     "θ": "th", "Θ": "Th",
-    // Iota
     "ι": "i", "ί": "i", "ὶ": "i", "ῖ": "i", "ἰ": "i", "ἱ": "i",
     "ἲ": "i", "ἳ": "i", "ἴ": "i", "ἵ": "i", "ἶ": "i", "ἷ": "i",
     "ϊ": "i", "ΐ": "i",
     "Ι": "I", "Ί": "I", "Ὶ": "I", "Ἰ": "I", "Ἱ": "I", "Ἲ": "I",
     "Ἳ": "I", "Ἴ": "I", "Ἵ": "I", "Ἶ": "I", "Ἷ": "I",
-    // Kappa
     "κ": "k", "Κ": "K",
-    // Lambda
     "λ": "l", "Λ": "L",
-    // Mu
     "μ": "m", "Μ": "M",
-    // Nu
     "ν": "n", "Ν": "N",
-    // Xi
     "ξ": "x", "Ξ": "X",
-    // Omicron
     "ο": "o", "ό": "o", "ὸ": "o", "ὀ": "o", "ὁ": "o", "ὂ": "o",
     "ὃ": "o", "ὄ": "o", "ὅ": "o",
     "Ο": "O", "Ό": "O", "Ὸ": "O", "Ὀ": "O", "Ὁ": "O", "Ὂ": "O",
     "Ὃ": "O", "Ὄ": "O", "Ὅ": "O",
-    // Pi
     "π": "p", "Π": "P",
-    // Rho
     "ρ": "r", "ῥ": "rh", "ῤ": "r", "Ρ": "R", "Ῥ": "Rh",
-    // Sigma
     "σ": "s", "ς": "s", "Σ": "S",
-    // Tau
     "τ": "t", "Τ": "T",
-    // Upsilon
     "υ": "y", "ύ": "y", "ὺ": "y", "ῦ": "y", "ὐ": "y", "ὑ": "y",
     "ὒ": "y", "ὓ": "y", "ὔ": "y", "ὕ": "y", "ὖ": "y", "ὗ": "y",
     "ϋ": "y", "ΰ": "y",
     "Υ": "Y", "Ύ": "Y", "Ὺ": "Y", "Ὑ": "Y", "Ὓ": "Y", "Ὕ": "Y", "Ὗ": "Y",
-    // Phi
     "φ": "ph", "Φ": "Ph",
-    // Chi
     "χ": "ch", "Χ": "Ch",
-    // Psi
     "ψ": "ps", "Ψ": "Ps",
-    // Omega (vogal longa ō)
     "ω": "ō", "ώ": "ō", "ὼ": "ō", "ῶ": "ō", "ὠ": "ō", "ὡ": "ō",
     "ὢ": "ō", "ὣ": "ō", "ὤ": "ō", "ὥ": "ō", "ὦ": "ō", "ὧ": "ō",
     "ῲ": "ō", "ῳ": "ō", "ῴ": "ō", "ῷ": "ō",
     "Ω": "Ō", "Ώ": "Ō", "Ὼ": "Ō", "Ὠ": "Ō", "Ὡ": "Ō", "Ὢ": "Ō",
     "Ὣ": "Ō", "Ὤ": "Ō", "Ὥ": "Ō", "Ὦ": "Ō", "Ὧ": "Ō",
   };
-
-  return palavra
-    .split("")
-    .map((c) => mapa[c] ?? c)
-    .join("");
+  return palavra.split("").map((c) => mapa[c] ?? c).join("");
 }
 
 function transliterarHebraico(palavra: string): string {
   const mapa: Record<string, string> = {
-    "א": "",
-    "בּ": "b", "ב": "v",
-    "ג": "g",
-    "ד": "d",
-    "ה": "h",
-    "ו": "v",
-    "ז": "z",
-    "ח": "kh",
-    "ט": "t",
-    "י": "y",
-    "כ": "kh", "ך": "kh", "כּ": "k",
-    "ל": "l",
-    "מ": "m", "ם": "m",
-    "נ": "n", "ן": "n",
-    "ס": "s",
-    "ע": "",
-    "פ": "f", "ף": "f", "פּ": "p",
-    "צ": "ts", "ץ": "ts",
-    "ק": "q",
-    "ר": "r",
-    "ש": "sh", "שׁ": "sh", "שׂ": "s",
-    "ת": "t",
-    "\u05B0": "e",
-    "\u05B1": "e",
-    "\u05B2": "a",
-    "\u05B3": "o",
-    "\u05B4": "i",
-    "\u05B5": "e",
-    "\u05B6": "e",
-    "\u05B7": "a",
-    "\u05B8": "a",
-    "\u05B9": "o",
-    "\u05BA": "o",
-    "\u05BB": "u",
-    "\u05BC": "",
-    "\u05C1": "",
-    "\u05C2": "",
+    "א": "", "בּ": "b", "ב": "v", "ג": "g", "ד": "d", "ה": "h",
+    "ו": "v", "ז": "z", "ח": "kh", "ט": "t", "י": "y",
+    "כ": "kh", "ך": "kh", "כּ": "k", "ל": "l",
+    "מ": "m", "ם": "m", "נ": "n", "ן": "n", "ס": "s", "ע": "",
+    "פ": "f", "ף": "f", "פּ": "p", "צ": "ts", "ץ": "ts",
+    "ק": "q", "ר": "r", "ש": "sh", "שׁ": "sh", "שׂ": "s", "ת": "t",
+    "\u05B0": "e", "\u05B1": "e", "\u05B2": "a", "\u05B3": "o",
+    "\u05B4": "i", "\u05B5": "e", "\u05B6": "e", "\u05B7": "a",
+    "\u05B8": "a", "\u05B9": "o", "\u05BA": "o", "\u05BB": "u",
+    "\u05BC": "", "\u05C1": "", "\u05C2": "",
   };
-
-  return palavra
-    .split("")
-    .map((c) => mapa[c] ?? c)
-    .join("");
+  return palavra.split("").map((c) => mapa[c] ?? c).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -195,27 +155,15 @@ function removerSecoesDesnecessarias(texto: string): string {
 }
 
 function processarTermosEstrangeiros(texto: string): string {
-  // Caso 1: grego/hebraico imediatamente seguido de transliteração entre parênteses
   texto = texto.replace(
     /([\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF][\u0370-\u03FF\u1F00-\u1FFF\u0590-\u05FF\s]*?)\s*\(([^)]+)\)/g,
     (match, _estrangeiro, transliteracao) => {
-      if (contemGrego(transliteracao) || contemHebraico(transliteracao)) {
-        return match;
-      }
+      if (contemGrego(transliteracao) || contemHebraico(transliteracao)) return match;
       return transliteracao;
     }
   );
-
-  // Caso 2: grego restante → transliteração automática
-  texto = texto.replace(/[\u0370-\u03FF\u1F00-\u1FFF]+/g, (match) =>
-    transliterarGrego(match)
-  );
-
-  // Caso 3: hebraico restante → transliteração automática
-  texto = texto.replace(/[\u0590-\u05FF]+/g, (match) =>
-    transliterarHebraico(match)
-  );
-
+  texto = texto.replace(/[\u0370-\u03FF\u1F00-\u1FFF]+/g, (match) => transliterarGrego(match));
+  texto = texto.replace(/[\u0590-\u05FF]+/g, (match) => transliterarHebraico(match));
   return texto;
 }
 
@@ -223,7 +171,6 @@ function processarTermosEstrangeiros(texto: string): string {
 // Conversão de ordinais e porcentagens — Problema 1
 // ---------------------------------------------------------------------------
 
-// Tabela de inteiros por extenso (1–99), usada para ordinais e porcentagens
 const UNIDADES = [
   "", "um", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove",
   "dez", "onze", "doze", "treze", "quatorze", "quinze", "dezesseis",
@@ -253,21 +200,16 @@ function inteiroExtenso(n: number): string {
     const centena = c === 1 ? "cento" : CENTENAS[c];
     return `${centena} e ${inteiroExtenso(resto)}`;
   }
-  // Para números maiores, retorna o numeral (raro em texto religioso)
   return String(n);
 }
 
-// Ordinais masculinos e femininos (1–99)
 const ORDINAIS_MASC: Record<number, string> = {
   1: "primeiro", 2: "segundo", 3: "terceiro", 4: "quarto", 5: "quinto",
   6: "sexto", 7: "sétimo", 8: "oitavo", 9: "nono", 10: "décimo",
   11: "décimo primeiro", 12: "décimo segundo", 13: "décimo terceiro",
   14: "décimo quarto", 15: "décimo quinto", 16: "décimo sexto",
   17: "décimo sétimo", 18: "décimo oitavo", 19: "décimo nono",
-  20: "vigésimo", 21: "vigésimo primeiro", 22: "vigésimo segundo",
-  23: "vigésimo terceiro", 24: "vigésimo quarto", 25: "vigésimo quinto",
-  26: "vigésimo sexto", 27: "vigésimo sétimo", 28: "vigésimo oitavo",
-  29: "vigésimo nono", 30: "trigésimo", 40: "quadragésimo",
+  20: "vigésimo", 30: "trigésimo", 40: "quadragésimo",
   50: "quinquagésimo", 60: "sexagésimo", 70: "septuagésimo",
   80: "octagésimo", 90: "nonagésimo", 100: "centésimo",
 };
@@ -278,10 +220,7 @@ const ORDINAIS_FEM: Record<number, string> = {
   11: "décima primeira", 12: "décima segunda", 13: "décima terceira",
   14: "décima quarta", 15: "décima quinta", 16: "décima sexta",
   17: "décima sétima", 18: "décima oitava", 19: "décima nona",
-  20: "vigésima", 21: "vigésima primeira", 22: "vigésima segunda",
-  23: "vigésima terceira", 24: "vigésima quarta", 25: "vigésima quinta",
-  26: "vigésima sexta", 27: "vigésima sétima", 28: "vigésima oitava",
-  29: "vigésima nona", 30: "trigésima", 40: "quadragésima",
+  20: "vigésima", 30: "trigésima", 40: "quadragésima",
   50: "quinquagésima", 60: "sexagésima", 70: "septuagésima",
   80: "octagésima", 90: "nonagésima", 100: "centésima",
 };
@@ -289,7 +228,6 @@ const ORDINAIS_FEM: Record<number, string> = {
 function ordinalExtenso(n: number, feminino: boolean): string {
   const tabela = feminino ? ORDINAIS_FEM : ORDINAIS_MASC;
   if (tabela[n]) return tabela[n];
-  // Compostos não tabelados (ex: 31º → trigésimo primeiro)
   const dezena = Math.floor(n / 10) * 10;
   const unidade = n % 10;
   if (unidade === 0) return tabela[dezena] ?? String(n);
@@ -298,19 +236,8 @@ function ordinalExtenso(n: number, feminino: boolean): string {
   return `${base} ${uni}`;
 }
 
-/**
- * Converte ordinais (1º, 2ª, 4°) e porcentagens (10%) em texto por extenso.
- *
- * Regras:
- * - NNN% → "NNN por cento"
- * - NNNº ou NNN° (sem C/F) → ordinal masculino
- * - NNNª → ordinal feminino
- * - NNN°C ou NNN°F → "NNN graus Celsius/Fahrenheit"
- *
- * Não altera nada fora dessas expressões.
- */
 function converterOrdinaisEPorcentagens(texto: string): string {
-  // Porcentagens: "10%", "0,5%", "100 %" — inclui decimal com vírgula ou ponto
+  // Porcentagens: "10%", "0,5%"
   texto = texto.replace(
     /(\d+(?:[.,]\d+)?)\s*%/g,
     (_match, num) => {
@@ -318,7 +245,6 @@ function converterOrdinaisEPorcentagens(texto: string): string {
       const inteiro = parseInt(partes[0], 10);
       const temDecimal = partes.length > 1 && parseInt(partes[1], 10) !== 0;
       if (temDecimal) {
-        // Ex: "0,5%" → "zero vírgula cinco por cento"
         const decStr = partes[1].replace(/0+$/, "");
         const dec = parseInt(decStr, 10);
         return `${inteiroExtenso(inteiro)} vírgula ${inteiroExtenso(dec)} por cento`;
@@ -327,7 +253,7 @@ function converterOrdinaisEPorcentagens(texto: string): string {
     }
   );
 
-  // Temperatura: NNN°C ou NNN°F (antes dos ordinais para não conflitar)
+  // Temperatura: NNN°C ou NNN°F
   texto = texto.replace(
     /(\d+)\s*°\s*([CF])\b/gi,
     (_match, num, escala) => {
@@ -337,34 +263,25 @@ function converterOrdinaisEPorcentagens(texto: string): string {
     }
   );
 
-  // Ordinais masculinos: "1º" ou "1°" (sem C/F na sequência — já tratado acima)
+  // Ordinais masculinos: "1º" ou "1°"
   texto = texto.replace(
     /(\d+)\s*[º°]/g,
-    (_match, num) => {
-      const n = parseInt(num, 10);
-      return ordinalExtenso(n, false);
-    }
+    (_match, num) => ordinalExtenso(parseInt(num, 10), false)
   );
 
   // Ordinais femininos: "2ª"
   texto = texto.replace(
     /(\d+)\s*ª/g,
-    (_match, num) => {
-      const n = parseInt(num, 10);
-      return ordinalExtenso(n, true);
-    }
+    (_match, num) => ordinalExtenso(parseInt(num, 10), true)
   );
 
   return texto;
 }
 
-// CORREÇÃO: chamadas diretas em vez de replace(/([\s\S]+)/, fn)
-// que corrompida caracteres acentuados como ã, ç, õ
 function limparConteudo(raw: string): string {
   let texto = raw.replace(/<[^>]+>/g, " ");
   texto = removerSecoesDesnecessarias(texto);
   texto = processarTermosEstrangeiros(texto);
-  // ── Problema 1: converter ordinais e porcentagens antes de remover markdown ──
   texto = converterOrdinaisEPorcentagens(texto);
   return texto
     .replace(/(\*\*|__)(.*?)\1/g, "$2")
@@ -382,8 +299,6 @@ function limparConteudo(raw: string): string {
 
 // ---------------------------------------------------------------------------
 // Montagem do texto para TTS
-// CORREÇÃO: estrutura diferente por tipo — reflexão usa fraseInstigadora e
-// perguntaReflexiva em vez de igreja e data
 // ---------------------------------------------------------------------------
 
 function montarTextoTTS(
@@ -404,8 +319,6 @@ function montarTextoTTS(
     if (perguntaReflexiva?.trim()) partes.push(perguntaReflexiva.trim());
     return partes.join(". ");
   }
-
-  // sermao / estudo
   const partes: string[] = [titulo.trim()];
   if (autorNome?.trim()) partes.push(autorNome.trim());
   if (igreja?.trim()) partes.push(igreja.trim());
@@ -422,27 +335,16 @@ const TTS_MAX_CHARS = 4096;
 
 function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
   if (texto.length <= maxChars) return [texto];
-
   const chunks: string[] = [];
   let restante = texto;
-
   while (restante.length > 0) {
-    if (restante.length <= maxChars) {
-      chunks.push(restante);
-      break;
-    }
-
+    if (restante.length <= maxChars) { chunks.push(restante); break; }
     const fatia = restante.slice(0, maxChars);
     const ultimoPonto = fatia.lastIndexOf(". ");
-
-    const corte = ultimoPonto > maxChars * 0.5
-      ? ultimoPonto + 2
-      : maxChars;
-
+    const corte = ultimoPonto > maxChars * 0.5 ? ultimoPonto + 2 : maxChars;
     chunks.push(restante.slice(0, corte).trim());
     restante = restante.slice(corte).trim();
   }
-
   return chunks;
 }
 
@@ -450,12 +352,8 @@ function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
 // Geração de áudio via OpenAI TTS
 // ---------------------------------------------------------------------------
 
-async function gerarBuffersAudio(
-  openai: OpenAI,
-  chunks: string[]
-): Promise<Buffer[]> {
+async function gerarBuffersAudio(openai: OpenAI, chunks: string[]): Promise<Buffer[]> {
   const buffers: Buffer[] = [];
-
   for (const chunk of chunks) {
     const response = await openai.audio.speech.create({
       model: "tts-1",
@@ -463,24 +361,16 @@ async function gerarBuffersAudio(
       input: chunk,
       response_format: "mp3",
     });
-
     const arrayBuffer = await response.arrayBuffer();
     buffers.push(Buffer.from(arrayBuffer));
   }
-
   return buffers;
 }
 
 // ---------------------------------------------------------------------------
-// Concatenação de MP3s — puro Node.js, sem binário nativo
-// Funciona na Vercel (Linux) e em qualquer plataforma
+// Concatenação de MP3s
 // ---------------------------------------------------------------------------
 
-/**
- * Remove o header ID3v2 do início de um buffer MP3, se presente.
- * ID3v2 começa com os magic bytes "ID3" (0x49 0x44 0x33).
- * O tamanho total do header está nos bytes 6–9 em syncsafe integer (7 bits/byte).
- */
 function removerHeaderID3(buffer: Buffer): Buffer {
   if (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) {
     const tamanho =
@@ -488,31 +378,17 @@ function removerHeaderID3(buffer: Buffer): Buffer {
       ((buffer[7] & 0x7f) << 14) |
       ((buffer[8] & 0x7f) << 7) |
       (buffer[9] & 0x7f);
-    // +10 para pular os 10 bytes do próprio header ID3v2
     return buffer.slice(10 + tamanho);
   }
   return buffer;
 }
 
-/**
- * Concatena múltiplos buffers MP3 corretamente:
- * - mantém o header ID3 do primeiro chunk (players usam ele para metadados)
- * - remove headers ID3 dos chunks seguintes (evita que o player pare no fim do 1º chunk)
- * - resultado é um MP3 válido com duração e conteúdo completos
- */
 function concatenarMP3s(buffers: Buffer[]): Buffer {
   if (buffers.length === 1) return buffers[0];
-
   const partes: Buffer[] = [];
-
   for (let i = 0; i < buffers.length; i++) {
-    if (i === 0) {
-      partes.push(buffers[i]);
-    } else {
-      partes.push(removerHeaderID3(buffers[i]));
-    }
+    partes.push(i === 0 ? buffers[i] : removerHeaderID3(buffers[i]));
   }
-
   return Buffer.concat(partes);
 }
 
@@ -523,28 +399,23 @@ function concatenarMP3s(buffers: Buffer[]): Buffer {
 export async function POST(req: NextRequest) {
   ensureAdminInitialized();
 
-  const adminAuth = getAuth();
-  const adminDb = getFirestore();
-  const adminStorage = getStorage();
+  const adminApp = getAdminApp();
+  const adminAuth = getAuth(adminApp);
+  const adminDb = getFirestore(adminApp);
+  const adminStorage = getStorage(adminApp);
 
   // ── 1. Autenticação ──────────────────────────────────────────────────────
   const authHeader = req.headers.get("authorization") ?? "";
   const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
   if (!idToken) {
-    return NextResponse.json(
-      { error: "Não autenticado." },
-      { status: 401 }
-    );
+    return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
   }
 
   try {
     await adminAuth.verifyIdToken(idToken);
   } catch {
-    return NextResponse.json(
-      { error: "Token inválido ou expirado." },
-      { status: 401 }
-    );
+    return NextResponse.json({ error: "Token inválido ou expirado." }, { status: 401 });
   }
 
   // ── 2. Parse e validação do body ─────────────────────────────────────────
@@ -572,6 +443,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Validação crítica: bucket configurado?
+  const bucket = (process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? "").trim();
+  if (!bucket) {
+    console.error("[TTS] NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET não configurado.");
+    return NextResponse.json(
+      { error: "Configuração de storage ausente no servidor." },
+      { status: 500 }
+    );
+  }
+
   // ── 3. Referência ao documento Firestore ─────────────────────────────────
   const postRef = adminDb.collection("posts").doc(postId);
 
@@ -594,65 +475,46 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Campos opcionais lidos do Firestore
   const autorNome = postData.autorNome as string | undefined;
   const igreja = postData.igreja as string | undefined;
   const data = postData.data as string | undefined;
   const fraseInstigadora = postData.fraseInstigadora as string | undefined;
   const perguntaReflexiva = postData.perguntaReflexiva as string | undefined;
 
-  // ── 5. Marcar como "generating" (lock distribuído) ────────────────────────
-  await postRef.set(
-    { audioStatus: "generating" as AudioStatus },
-    { merge: true }
-  );
+  // ── 5. Marcar como "generating" ───────────────────────────────────────────
+  await postRef.set({ audioStatus: "generating" as AudioStatus }, { merge: true });
 
-  // ── 6. Limpeza e montagem do texto ───────────────────────────────────────
+  // ── 6. Limpeza e montagem do texto ────────────────────────────────────────
   const conteudoLimpo = limparConteudo(conteudo);
   const textoTTS = montarTextoTTS(
-    titulo,
-    conteudoLimpo,
-    tipo,
-    autorNome,
-    igreja,
-    data,
-    fraseInstigadora,
-    perguntaReflexiva,
+    titulo, conteudoLimpo, tipo,
+    autorNome, igreja, data, fraseInstigadora, perguntaReflexiva,
   );
 
-  // ── 7. Geração e concatenação do áudio ───────────────────────────────────
+  // ── 7. Geração de áudio ───────────────────────────────────────────────────
   let audioFinal: Buffer;
 
   try {
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-
+    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     const chunks = dividirEmChunks(textoTTS);
     const buffers = await gerarBuffersAudio(openai, chunks);
     audioFinal = concatenarMP3s(buffers);
   } catch (err) {
     console.error("[TTS] Erro ao gerar áudio:", err);
     await postRef.set(
-      {
-        audioStatus: "error" as AudioStatus,
-        audioUpdatedAt: Timestamp.now(),
-      },
+      { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now() },
       { merge: true }
     );
-    return NextResponse.json(
-      { error: "Falha ao gerar áudio via TTS." },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: "Falha ao gerar áudio via TTS." }, { status: 502 });
   }
 
   // ── 8. Upload para Firebase Storage ──────────────────────────────────────
   let downloadURL: string;
 
   try {
-    const bucket = adminStorage.bucket();
+    const storageBucket = adminStorage.bucket(bucket);
     const storagePath = `tts/posts/${postId}.mp3`;
-    const file = bucket.file(storagePath);
+    const file = storageBucket.file(storagePath);
 
     await file.save(audioFinal, {
       metadata: {
@@ -670,19 +532,13 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("[TTS] Erro ao fazer upload para Storage:", err);
     await postRef.set(
-      {
-        audioStatus: "error" as AudioStatus,
-        audioUpdatedAt: Timestamp.now(),
-      },
+      { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now() },
       { merge: true }
     );
-    return NextResponse.json(
-      { error: "Falha ao salvar arquivo de áudio." },
-      { status: 502 }
-    );
+    return NextResponse.json({ error: "Falha ao salvar arquivo de áudio." }, { status: 502 });
   }
 
-  // ── 9. Salvar URL e status no Firestore ───────────────────────────────────
+  // ── 9. Salvar URL no Firestore ────────────────────────────────────────────
   try {
     await postRef.set(
       {
