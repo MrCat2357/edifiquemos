@@ -12,34 +12,18 @@ import OpenAI from "openai";
 function ensureAdminInitialized() {
   if (getApps().length > 0) return;
 
-  const isProd =
-    process.env.NODE_ENV === "production" ||
-    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID === "vozdafe-site";
+  const privateKey = (process.env.FIREBASE_ADMIN_PRIVATE_KEY ?? "")
+    .replace(/^"|"$/g, "")
+    .replace(/\\n/g, "\n");
 
-  try {
-    const fileName = isProd
-      ? "./serviceAccount.production.json"
-      : "./serviceAccount.staging.json";
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const serviceAccount = require(fileName);
-    initializeApp({
-      credential: cert(serviceAccount),
-      storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    });
-  } catch {
-    const privateKey = (process.env.FIREBASE_ADMIN_PRIVATE_KEY ?? "")
-      .replace(/^"|"$/g, "")
-      .replace(/\\n/g, "\n");
-
-    initializeApp({
-      credential: cert({
-        projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
-        privateKey,
-      }),
-      storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    });
-  }
+  initializeApp({
+    credential: cert({
+      projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
+      privateKey,
+    }),
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -235,12 +219,153 @@ function processarTermosEstrangeiros(texto: string): string {
   return texto;
 }
 
+// ---------------------------------------------------------------------------
+// Conversão de ordinais e porcentagens — Problema 1
+// ---------------------------------------------------------------------------
+
+// Tabela de inteiros por extenso (1–99), usada para ordinais e porcentagens
+const UNIDADES = [
+  "", "um", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove",
+  "dez", "onze", "doze", "treze", "quatorze", "quinze", "dezesseis",
+  "dezessete", "dezoito", "dezenove",
+];
+const DEZENAS = [
+  "", "", "vinte", "trinta", "quarenta", "cinquenta",
+  "sessenta", "setenta", "oitenta", "noventa",
+];
+const CENTENAS = [
+  "", "cem", "duzentos", "trezentos", "quatrocentos", "quinhentos",
+  "seiscentos", "setecentos", "oitocentos", "novecentos",
+];
+
+function inteiroExtenso(n: number): string {
+  if (n <= 0 || !Number.isInteger(n)) return String(n);
+  if (n < 20) return UNIDADES[n];
+  if (n < 100) {
+    const d = Math.floor(n / 10);
+    const u = n % 10;
+    return u === 0 ? DEZENAS[d] : `${DEZENAS[d]} e ${UNIDADES[u]}`;
+  }
+  if (n < 1000) {
+    const c = Math.floor(n / 100);
+    const resto = n % 100;
+    if (resto === 0) return CENTENAS[c];
+    const centena = c === 1 ? "cento" : CENTENAS[c];
+    return `${centena} e ${inteiroExtenso(resto)}`;
+  }
+  // Para números maiores, retorna o numeral (raro em texto religioso)
+  return String(n);
+}
+
+// Ordinais masculinos e femininos (1–99)
+const ORDINAIS_MASC: Record<number, string> = {
+  1: "primeiro", 2: "segundo", 3: "terceiro", 4: "quarto", 5: "quinto",
+  6: "sexto", 7: "sétimo", 8: "oitavo", 9: "nono", 10: "décimo",
+  11: "décimo primeiro", 12: "décimo segundo", 13: "décimo terceiro",
+  14: "décimo quarto", 15: "décimo quinto", 16: "décimo sexto",
+  17: "décimo sétimo", 18: "décimo oitavo", 19: "décimo nono",
+  20: "vigésimo", 21: "vigésimo primeiro", 22: "vigésimo segundo",
+  23: "vigésimo terceiro", 24: "vigésimo quarto", 25: "vigésimo quinto",
+  26: "vigésimo sexto", 27: "vigésimo sétimo", 28: "vigésimo oitavo",
+  29: "vigésimo nono", 30: "trigésimo", 40: "quadragésimo",
+  50: "quinquagésimo", 60: "sexagésimo", 70: "septuagésimo",
+  80: "octagésimo", 90: "nonagésimo", 100: "centésimo",
+};
+
+const ORDINAIS_FEM: Record<number, string> = {
+  1: "primeira", 2: "segunda", 3: "terceira", 4: "quarta", 5: "quinta",
+  6: "sexta", 7: "sétima", 8: "oitava", 9: "nona", 10: "décima",
+  11: "décima primeira", 12: "décima segunda", 13: "décima terceira",
+  14: "décima quarta", 15: "décima quinta", 16: "décima sexta",
+  17: "décima sétima", 18: "décima oitava", 19: "décima nona",
+  20: "vigésima", 21: "vigésima primeira", 22: "vigésima segunda",
+  23: "vigésima terceira", 24: "vigésima quarta", 25: "vigésima quinta",
+  26: "vigésima sexta", 27: "vigésima sétima", 28: "vigésima oitava",
+  29: "vigésima nona", 30: "trigésima", 40: "quadragésima",
+  50: "quinquagésima", 60: "sexagésima", 70: "septuagésima",
+  80: "octagésima", 90: "nonagésima", 100: "centésima",
+};
+
+function ordinalExtenso(n: number, feminino: boolean): string {
+  const tabela = feminino ? ORDINAIS_FEM : ORDINAIS_MASC;
+  if (tabela[n]) return tabela[n];
+  // Compostos não tabelados (ex: 31º → trigésimo primeiro)
+  const dezena = Math.floor(n / 10) * 10;
+  const unidade = n % 10;
+  if (unidade === 0) return tabela[dezena] ?? String(n);
+  const base = tabela[dezena] ?? inteiroExtenso(dezena);
+  const uni = (feminino ? ORDINAIS_FEM : ORDINAIS_MASC)[unidade] ?? inteiroExtenso(unidade);
+  return `${base} ${uni}`;
+}
+
+/**
+ * Converte ordinais (1º, 2ª, 4°) e porcentagens (10%) em texto por extenso.
+ *
+ * Regras:
+ * - NNN% → "NNN por cento"
+ * - NNNº ou NNN° (sem C/F) → ordinal masculino
+ * - NNNª → ordinal feminino
+ * - NNN°C ou NNN°F → "NNN graus Celsius/Fahrenheit"
+ *
+ * Não altera nada fora dessas expressões.
+ */
+function converterOrdinaisEPorcentagens(texto: string): string {
+  // Porcentagens: "10%", "0,5%", "100 %" — inclui decimal com vírgula ou ponto
+  texto = texto.replace(
+    /(\d+(?:[.,]\d+)?)\s*%/g,
+    (_match, num) => {
+      const partes = num.replace(",", ".").split(".");
+      const inteiro = parseInt(partes[0], 10);
+      const temDecimal = partes.length > 1 && parseInt(partes[1], 10) !== 0;
+      if (temDecimal) {
+        // Ex: "0,5%" → "zero vírgula cinco por cento"
+        const decStr = partes[1].replace(/0+$/, "");
+        const dec = parseInt(decStr, 10);
+        return `${inteiroExtenso(inteiro)} vírgula ${inteiroExtenso(dec)} por cento`;
+      }
+      return `${inteiroExtenso(inteiro)} por cento`;
+    }
+  );
+
+  // Temperatura: NNN°C ou NNN°F (antes dos ordinais para não conflitar)
+  texto = texto.replace(
+    /(\d+)\s*°\s*([CF])\b/gi,
+    (_match, num, escala) => {
+      const n = parseInt(num, 10);
+      const nome = escala.toUpperCase() === "C" ? "Celsius" : "Fahrenheit";
+      return `${inteiroExtenso(n)} graus ${nome}`;
+    }
+  );
+
+  // Ordinais masculinos: "1º" ou "1°" (sem C/F na sequência — já tratado acima)
+  texto = texto.replace(
+    /(\d+)\s*[º°]/g,
+    (_match, num) => {
+      const n = parseInt(num, 10);
+      return ordinalExtenso(n, false);
+    }
+  );
+
+  // Ordinais femininos: "2ª"
+  texto = texto.replace(
+    /(\d+)\s*ª/g,
+    (_match, num) => {
+      const n = parseInt(num, 10);
+      return ordinalExtenso(n, true);
+    }
+  );
+
+  return texto;
+}
+
 // CORREÇÃO: chamadas diretas em vez de replace(/([\s\S]+)/, fn)
 // que corrompida caracteres acentuados como ã, ç, õ
 function limparConteudo(raw: string): string {
   let texto = raw.replace(/<[^>]+>/g, " ");
   texto = removerSecoesDesnecessarias(texto);
   texto = processarTermosEstrangeiros(texto);
+  // ── Problema 1: converter ordinais e porcentagens antes de remover markdown ──
+  texto = converterOrdinaisEPorcentagens(texto);
   return texto
     .replace(/(\*\*|__)(.*?)\1/g, "$2")
     .replace(/(\*|_)(.*?)\1/g, "$2")
@@ -532,9 +657,6 @@ export async function POST(req: NextRequest) {
     await file.save(audioFinal, {
       metadata: {
         contentType: "audio/mpeg",
-        // Cache-control curto: permite que CDNs e browsers revalidem após
-        // regeneração de voz. A URL versionada (parâmetro v=) é a proteção
-        // real contra cache obsoleto — este header é defesa adicional.
         cacheControl: "public, max-age=3600",
       },
     });
@@ -544,10 +666,6 @@ export async function POST(req: NextRequest) {
       expires: "03-01-2500",
     });
 
-    // Cache-buster: adiciona timestamp à URL para garantir que o navegador
-    // não sirva versão antiga após regeneração de voz pelo autor.
-    // A URL gravada no Firestore muda a cada geração — visitantes que
-    // apertam Ouvir recebem sempre a URL já gravada (sem gerar novamente).
     downloadURL = `${signedUrl}&v=${Date.now()}`;
   } catch (err) {
     console.error("[TTS] Erro ao fazer upload para Storage:", err);

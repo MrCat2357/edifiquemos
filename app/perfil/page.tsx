@@ -37,6 +37,8 @@ const CommentSection = dynamic(
   { ssr: false, loading: () => null }
 );
 
+const FALLBACK_AUDIO = "https://archive.org/download/testmp3testfile/mpthreetest.mp3";
+
 /* ── gerarSlugUnico ─────────────────────────────────── */
 
 async function gerarSlugUnico(base: string, uidAtual: string): Promise<string> {
@@ -152,6 +154,8 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
 }
 
 // ─── BotaoOuvirSerieCard ──────────────────────────────────────────────────────
+//
+// Problema 2: resolve o TTS de cada post da série antes de montar a fila.
 
 function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRequired: () => void }) {
   const {
@@ -163,6 +167,8 @@ function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRe
     contextType,
     current: currentAudio,
   } = useAudioPlayer();
+
+  const { resolveAudioUrl } = useTTS();
 
   const [carregandoPosts, setCarregandoPosts] = useState(false);
   const [postsCarregados, setPostsCarregados] = useState<any[] | null>(null);
@@ -200,17 +206,38 @@ function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRe
     try {
       const posts = await buscarPostsDaSerie();
       if (posts.length === 0) return;
-      const fila = posts.map((p: any) => ({
-        id: p.id,
-        tipo: p.tipo as "sermao" | "artigo" | "reflexao",
-        titulo: p.titulo,
-        autorNome: p.autorNome || "Autor",
-        autorFoto: p.autorFoto ?? null,
-        slug: p.slug,
-        autorSlug: p.autorSlug,
-        audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
-      }));
-      playQueue(fila[0], fila, "serie");
+
+      // ── Problema 2: resolve TTS para cada post antes de montar a fila ──
+      const filaResolvida = await Promise.all(
+        posts.map(async (p: any) => {
+          let audioUrl = p.audioUrl && p.audioStatus === "ready" ? p.audioUrl : undefined;
+          try {
+            audioUrl = await resolveAudioUrl({
+              postId: p.id,
+              tipo: p.tipo === "artigo" ? "estudo" : p.tipo,
+              titulo: p.titulo,
+              audioUrlExistente: audioUrl,
+            });
+          } catch {
+            audioUrl = audioUrl ?? FALLBACK_AUDIO;
+          }
+          return {
+            id: p.id,
+            tipo: p.tipo as "sermao" | "artigo" | "reflexao",
+            titulo: p.titulo,
+            autorNome: p.autorNome || "Autor",
+            autorFoto: p.autorFoto ?? null,
+            slug: p.slug,
+            autorSlug: p.autorSlug,
+            audioUrl,
+          };
+        })
+      );
+
+      const filaValida = filaResolvida.filter((p) => !!p.audioUrl && p.audioUrl !== FALLBACK_AUDIO);
+      if (filaValida.length === 0) return;
+
+      playQueue(filaValida[0], filaValida, "serie");
     } catch (err) {
       console.error("Erro ao carregar posts da série:", err);
     }
@@ -243,7 +270,7 @@ function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRe
       ) : (
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z" /></svg>
       )}
-      <span>{carregando ? "Carregando…" : tocando ? "Pausar" : serieAtiva ? "Continuar" : "Ouvir série"}</span>
+      <span>{carregando ? "Gerando áudios…" : tocando ? "Pausar" : serieAtiva ? "Continuar" : "Ouvir série"}</span>
       {tocando && <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>}
     </button>
   );
@@ -973,7 +1000,7 @@ function PerfilContent() {
     autorFoto: p.autorFoto ?? null,
     slug: p.slug,
     autorSlug: p.autorSlug,
-    audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+    audioUrl: p.audioUrl || FALLBACK_AUDIO,
   }));
 
   const filaReflexoesAudio = reflexoes
@@ -986,7 +1013,7 @@ function PerfilContent() {
       autorFoto: null,
       slug: r.slug,
       autorSlug: r.autorSlug,
-      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+      audioUrl: FALLBACK_AUDIO,
     }));
 
   return (

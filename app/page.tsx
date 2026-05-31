@@ -252,6 +252,9 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
 }
 
 // ─── BotaoOuvirSerieCard ──────────────────────────────────────────────────────
+//
+// Problema 2: resolve o TTS de cada post da série antes de montar a fila,
+// da mesma forma que BotaoOuvirCard faz para posts individuais.
 
 function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRequired?: () => void }) {
   const {
@@ -263,6 +266,8 @@ function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRe
     contextType,
     current: currentAudio,
   } = useAudioPlayer();
+
+  const { resolveAudioUrl } = useTTS();
 
   const [carregandoPosts, setCarregandoPosts] = useState(false);
   const [postsCarregados, setPostsCarregados] = useState<any[] | null>(null);
@@ -304,17 +309,40 @@ function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRe
     try {
       const posts = await buscarPostsDaSerie();
       if (posts.length === 0) return;
-      const fila = posts.map((p: any) => ({
-        id: p.id,
-        tipo: p.tipo as "sermao" | "artigo" | "reflexao",
-        titulo: p.titulo,
-        autorNome: p.autorNome || "Autor",
-        autorFoto: p.autorFoto ?? null,
-        slug: p.slug,
-        autorSlug: p.autorSlug,
-        audioUrl: p.audioUrl || FALLBACK_AUDIO,
-      }));
-      playQueue(fila[0], fila, "serie");
+
+      // ── Problema 2: resolve TTS para cada post antes de montar a fila ──
+      const filaResolvida = await Promise.all(
+        posts.map(async (p: any) => {
+          let audioUrl = p.audioUrl && p.audioStatus === "ready" ? p.audioUrl : undefined;
+          try {
+            audioUrl = await resolveAudioUrl({
+              postId: p.id,
+              tipo: p.tipo === "artigo" ? "estudo" : p.tipo,
+              titulo: p.titulo,
+              audioUrlExistente: audioUrl,
+            });
+          } catch {
+            // Falha silenciosa — usa FALLBACK para não bloquear a série inteira
+            audioUrl = audioUrl ?? FALLBACK_AUDIO;
+          }
+          return {
+            id: p.id,
+            tipo: p.tipo as "sermao" | "artigo" | "reflexao",
+            titulo: p.titulo,
+            autorNome: p.autorNome || "Autor",
+            autorFoto: p.autorFoto ?? null,
+            slug: p.slug,
+            autorSlug: p.autorSlug,
+            audioUrl,
+          };
+        })
+      );
+
+      // Filtra itens sem URL válida
+      const filaValida = filaResolvida.filter((p) => !!p.audioUrl && p.audioUrl !== FALLBACK_AUDIO);
+      if (filaValida.length === 0) return;
+
+      playQueue(filaValida[0], filaValida, "serie");
     } catch (err) {
       console.error("Erro ao carregar posts da série:", err);
     }
@@ -360,12 +388,10 @@ function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRe
         </svg>
       )}
       <span>
-        {carregando ? "Carregando…" : tocando ? "Pausar" : serieAtiva ? "Continuar" : "Ouvir série"}
+        {carregando ? "Gerando áudios…" : tocando ? "Pausar" : serieAtiva ? "Continuar" : "Ouvir série"}
       </span>
       {tocando && (
-        <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>
-          · agora
-        </span>
+        <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>
       )}
     </button>
   );
