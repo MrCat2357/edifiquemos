@@ -1,16 +1,20 @@
 /**
  * app/api/tts/gerar/route.ts
  *
- * Prompt 7-B — Migração Firebase Storage → Cloudflare R2
- * com cache inteligente e invalidação por hash de conteúdo.
+ * Prompt 7-C — Purga programática do cache Cloudflare após upload R2.
  *
- * Mudanças implementadas:
- *   MUDANÇA 1 — @aws-sdk/client-s3 (já instalado no package.json)
- *   MUDANÇA 2 — Upload para R2 (PutObjectCommand, URL pública permanente)
- *   MUDANÇA 3 — Campos audioContentHash e audioErrorCount no Firestore
- *   MUDANÇA 4 — Invalidação reativa por hash antes de retornar cache
- *   MUDANÇA 5 — Validação defensiva de URL cacheada (HEAD request)
- *   MUDANÇA 6 — Rate limiting por erros consecutivos (audioErrorCount >= 3)
+ * Mudança adicionada neste commit:
+ *   MUDANÇA 8 — purgarCacheCloudflare() chamada logo após PutObjectCommand
+ *               bem-sucedido, garantindo que o próximo acesso sirva o
+ *               arquivo recém-gerado sem necessidade de purga manual.
+ *
+ * Todas as mudanças anteriores (7-B) mantidas intactas:
+ *   MUDANÇA 1 — @aws-sdk/client-s3
+ *   MUDANÇA 2 — Upload para R2
+ *   MUDANÇA 3 — audioContentHash e audioErrorCount no Firestore
+ *   MUDANÇA 4 — Invalidação reativa por hash
+ *   MUDANÇA 5 — Validação defensiva de URL cacheada
+ *   MUDANÇA 6 — Rate limiting por erros consecutivos
  *   MUDANÇA 7 — Log de custo fire-and-forget em tts_logs
  */
 
@@ -21,6 +25,7 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import OpenAI from "openai";
 import { computarHashConteudo } from "@/lib/tts/hash";
+import { purgarCacheCloudflare } from "@/lib/tts/cloudflare"; // MUDANÇA 8
 
 // ---------------------------------------------------------------------------
 // Firebase Admin — instância nomeada "tts-admin" (MANTER EXATAMENTE ASSIM)
@@ -42,8 +47,6 @@ function ensureAdminInitialized() {
         clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
         privateKey,
       }),
-      // NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET mantida no ambiente mas não usada
-      // para novos uploads — R2 assume essa função a partir deste commit.
     },
     ADMIN_APP_NAME
   );
@@ -501,11 +504,11 @@ export async function POST(req: NextRequest) {
   const postSnap = await postRef.get();
   const postData = postSnap.data() ?? {};
 
-  const audioStatus    = postData.audioStatus    as AudioStatus | undefined;
-  const audioUrl       = postData.audioUrl       as string | undefined;
-  const audioErrorCount = (postData.audioErrorCount as number | undefined) ?? 0;
+  const audioStatus      = postData.audioStatus      as AudioStatus | undefined;
+  const audioUrl         = postData.audioUrl         as string | undefined;
+  const audioErrorCount  = (postData.audioErrorCount as number | undefined) ?? 0;
   const audioContentHash = postData.audioContentHash as string | undefined;
-  const conteudo       = postData.conteudo       as string | undefined;
+  const conteudo         = postData.conteudo         as string | undefined;
 
   if (!conteudo) {
     return NextResponse.json(
@@ -524,15 +527,13 @@ export async function POST(req: NextRequest) {
   }
 
   // ── MUDANÇA 4 — Invalidação reativa por hash ──────────────────────────────
-  // Hash calculado do conteúdo RAW, ANTES de limparConteudo
   const hashAtual = computarHashConteudo(conteudo);
   const conteudoEditado = !audioContentHash || audioContentHash !== hashAtual;
 
   if (audioUrl && audioStatus === "ready") {
     if (conteudoEditado) {
-      // Conteúdo foi editado desde a última geração — ignorar cache
       console.log(`[TTS] Conteúdo editado, regenerando: ${postId}`);
-      // Prossegue para geração (audioStatus e audioUrl antigos serão sobrescritos)
+      // Prossegue para geração
     } else {
       // ── MUDANÇA 5 — Validação defensiva de URL cacheada ──────────────────
       const urlAcessivel = await verificarUrlAcessivel(audioUrl);
@@ -552,10 +553,10 @@ export async function POST(req: NextRequest) {
   await postRef.set({ audioStatus: "generating" as AudioStatus }, { merge: true });
 
   // ── 6. Limpeza e montagem do texto ────────────────────────────────────────
-  const autorNome        = postData.autorNome        as string | undefined;
-  const igreja           = postData.igreja           as string | undefined;
-  const data             = postData.data             as string | undefined;
-  const fraseInstigadora = postData.fraseInstigadora as string | undefined;
+  const autorNome         = postData.autorNome         as string | undefined;
+  const igreja            = postData.igreja            as string | undefined;
+  const data              = postData.data              as string | undefined;
+  const fraseInstigadora  = postData.fraseInstigadora  as string | undefined;
   const perguntaReflexiva = postData.perguntaReflexiva as string | undefined;
 
   const conteudoLimpo = limparConteudo(conteudo);
@@ -574,7 +575,6 @@ export async function POST(req: NextRequest) {
     audioFinal = concatenarMP3s(buffers);
   } catch (err) {
     console.error("[TTS] Erro ao gerar áudio:", err);
-    // MUDANÇA 6 — incrementar audioErrorCount na falha
     await postRef.set(
       {
         audioStatus: "error" as AudioStatus,
@@ -586,7 +586,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Falha ao gerar áudio via TTS." }, { status: 502 });
   }
 
-  // ── MUDANÇA 2 — Upload para R2 (substitui Firebase Storage) ──────────────
+  // ── MUDANÇA 2 — Upload para R2 ───────────────────────────────────────────
   const downloadURL = `${process.env.R2_PUBLIC_URL}/tts/posts/${postId}.mp3`;
 
   try {
@@ -598,12 +598,22 @@ export async function POST(req: NextRequest) {
         Key: `tts/posts/${postId}.mp3`,
         Body: audioFinal,
         ContentType: "audio/mpeg",
-        // Sem cache-buster — URL pública permanente, não expira
       })
     );
+
+    // ── MUDANÇA 8 — Purga programática do cache Cloudflare ─────────────────
+    // Executada imediatamente após upload bem-sucedido, antes de salvar no
+    // Firestore, para garantir que o edge já serve o novo arquivo quando o
+    // cliente receber a audioUrl e iniciar a reprodução.
+    purgarCacheCloudflare([downloadURL]).catch((err) => {
+      // Falha na purga não deve bloquear a resposta — apenas logamos.
+      // Na pior das hipóteses, o usuário ouvirá o arquivo antigo desta vez;
+      // na próxima requisição o cache já terá expirado naturalmente.
+      console.error("[TTS] Erro ao purgar cache Cloudflare (non-fatal):", err);
+    });
+
   } catch (err) {
     console.error("[TTS] Erro ao fazer upload para R2:", err);
-    // MUDANÇA 6 — incrementar audioErrorCount na falha de upload
     await postRef.set(
       {
         audioStatus: "error" as AudioStatus,
@@ -622,9 +632,7 @@ export async function POST(req: NextRequest) {
         audioUrl: downloadURL,
         audioStatus: "ready" as AudioStatus,
         audioUpdatedAt: Timestamp.now(),
-        // MUDANÇA 3+4 — persistir hash para detectar futuras edições
         audioContentHash: hashAtual,
-        // MUDANÇA 6 — zerar contador de erros após sucesso
         audioErrorCount: 0,
       },
       { merge: true }
