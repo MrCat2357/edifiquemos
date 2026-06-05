@@ -162,6 +162,22 @@ export default function EditarReflexao() {
         perguntaReflexiva: perguntaReflexiva.trim(),
         editadoEm: new Date(),
       });
+
+      // Invalidação de cache de áudio — fire-and-forget, nunca bloqueia o save
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        if (token) {
+          fetch("/api/tts/invalidar", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ postId: id, tipo: "reflexao" }),
+          }).catch(() => {});
+        }
+      } catch { /* ignora */ }
+
       showToast("Reflexão salva com sucesso!");
       setTimeout(() => {
         router.back();

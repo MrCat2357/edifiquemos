@@ -365,6 +365,21 @@ export default function EditarPost() {
         imagemUrl: imagemUrl ?? null,
       });
 
+      // Invalidação de cache de áudio — fire-and-forget, nunca bloqueia o save
+      try {
+        const token = await auth.currentUser?.getIdToken();
+        if (token) {
+          fetch("/api/tts/invalidar", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ postId: id, tipo }),
+          }).catch(() => {});
+        }
+      } catch { /* ignora */ }
+
       router.push(`/posts/${tipo === "sermao" ? "sermoes" : "estudos"}/${slug}`);
     } catch (err) {
       console.error(err);
