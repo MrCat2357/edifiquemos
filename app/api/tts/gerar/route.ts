@@ -1,28 +1,36 @@
+/**
+ * app/api/tts/gerar/route.ts
+ *
+ * Prompt 7-B — Migração Firebase Storage → Cloudflare R2
+ * com cache inteligente e invalidação por hash de conteúdo.
+ *
+ * Mudanças implementadas:
+ *   MUDANÇA 1 — @aws-sdk/client-s3 (já instalado no package.json)
+ *   MUDANÇA 2 — Upload para R2 (PutObjectCommand, URL pública permanente)
+ *   MUDANÇA 3 — Campos audioContentHash e audioErrorCount no Firestore
+ *   MUDANÇA 4 — Invalidação reativa por hash antes de retornar cache
+ *   MUDANÇA 5 — Validação defensiva de URL cacheada (HEAD request)
+ *   MUDANÇA 6 — Rate limiting por erros consecutivos (audioErrorCount >= 3)
+ *   MUDANÇA 7 — Log de custo fire-and-forget em tts_logs
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "firebase-admin/auth";
 import { getApps, getApp, initializeApp, cert } from "firebase-admin/app";
 import { getFirestore, Timestamp } from "firebase-admin/firestore";
-import { getStorage } from "firebase-admin/storage";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import OpenAI from "openai";
+import { computarHashConteudo } from "@/lib/tts/hash";
 
 // ---------------------------------------------------------------------------
-// Firebase Admin — inicialização defensiva contra singleton com bucket vazio
-//
-// Problema: em cold starts na Vercel, se a instância [DEFAULT] for criada
-// antes de NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET estar disponível (bucket vazio),
-// o singleton fica "preso" sem bucket — mesmo após a env ser carregada.
-//
-// Solução: usar uma instância NOMEADA com o bucket como parte do nome.
-// Assim, a instância sem bucket ([DEFAULT]) nunca é reutilizada para Storage.
+// Firebase Admin — instância nomeada "tts-admin" (MANTER EXATAMENTE ASSIM)
 // ---------------------------------------------------------------------------
 
 const ADMIN_APP_NAME = "tts-admin";
 
 function ensureAdminInitialized() {
-  // Já existe instância nomeada válida — reutiliza
   if (getApps().find((a) => a.name === ADMIN_APP_NAME)) return;
 
-  const bucket = (process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? "").trim();
   const privateKey = (process.env.FIREBASE_ADMIN_PRIVATE_KEY ?? "")
     .replace(/^"|"$/g, "")
     .replace(/\\n/g, "\n");
@@ -34,7 +42,8 @@ function ensureAdminInitialized() {
         clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
         privateKey,
       }),
-      storageBucket: bucket || undefined,
+      // NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET mantida no ambiente mas não usada
+      // para novos uploads — R2 assume essa função a partir deste commit.
     },
     ADMIN_APP_NAME
   );
@@ -43,6 +52,21 @@ function ensureAdminInitialized() {
 function getAdminApp() {
   ensureAdminInitialized();
   return getApp(ADMIN_APP_NAME);
+}
+
+// ---------------------------------------------------------------------------
+// MUDANÇA 1 — S3Client apontando para o endpoint R2 da Cloudflare
+// ---------------------------------------------------------------------------
+
+function getS3Client(): S3Client {
+  return new S3Client({
+    region: "auto",
+    endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +79,27 @@ interface TTSRequestBody {
   postId: string;
   tipo: "sermao" | "estudo" | "reflexao";
   titulo: string;
+}
+
+// ---------------------------------------------------------------------------
+// MUDANÇA 5 — Validação defensiva de URL cacheada
+// ---------------------------------------------------------------------------
+
+async function verificarUrlAcessivel(url: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+
+    const res = await fetch(url, {
+      method: "HEAD",
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+    return res.status >= 200 && res.status <= 299;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +213,7 @@ function processarTermosEstrangeiros(texto: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Conversão de ordinais e porcentagens — Problema 1
+// Conversão de ordinais e porcentagens
 // ---------------------------------------------------------------------------
 
 const UNIDADES = [
@@ -237,7 +282,6 @@ function ordinalExtenso(n: number, feminino: boolean): string {
 }
 
 function converterOrdinaisEPorcentagens(texto: string): string {
-  // Porcentagens: "10%", "0,5%"
   texto = texto.replace(
     /(\d+(?:[.,]\d+)?)\s*%/g,
     (_match, num) => {
@@ -253,7 +297,6 @@ function converterOrdinaisEPorcentagens(texto: string): string {
     }
   );
 
-  // Temperatura: NNN°C ou NNN°F
   texto = texto.replace(
     /(\d+)\s*°\s*([CF])\b/gi,
     (_match, num, escala) => {
@@ -263,13 +306,11 @@ function converterOrdinaisEPorcentagens(texto: string): string {
     }
   );
 
-  // Ordinais masculinos: "1º" ou "1°"
   texto = texto.replace(
     /(\d+)\s*[º°]/g,
     (_match, num) => ordinalExtenso(parseInt(num, 10), false)
   );
 
-  // Ordinais femininos: "2ª"
   texto = texto.replace(
     /(\d+)\s*ª/g,
     (_match, num) => ordinalExtenso(parseInt(num, 10), true)
@@ -402,7 +443,6 @@ export async function POST(req: NextRequest) {
   const adminApp = getAdminApp();
   const adminAuth = getAuth(adminApp);
   const adminDb = getFirestore(adminApp);
-  const adminStorage = getStorage(adminApp);
 
   // ── 1. Autenticação ──────────────────────────────────────────────────────
   const authHeader = req.headers.get("authorization") ?? "";
@@ -443,10 +483,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Validação crítica: bucket configurado?
-  const bucket = (process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? "").trim();
-  if (!bucket) {
-    console.error("[TTS] NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET não configurado.");
+  // Validação das variáveis R2
+  if (!process.env.R2_ACCOUNT_ID || !process.env.R2_ACCESS_KEY_ID ||
+      !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET_NAME ||
+      !process.env.R2_PUBLIC_URL) {
+    console.error("[TTS] Variáveis de ambiente R2 ausentes.");
     return NextResponse.json(
       { error: "Configuração de storage ausente no servidor." },
       { status: 500 }
@@ -456,18 +497,16 @@ export async function POST(req: NextRequest) {
   // ── 3. Referência ao documento Firestore ─────────────────────────────────
   const postRef = adminDb.collection("posts").doc(postId);
 
-  // ── 4. Verificar cache e ler campos do Firestore ──────────────────────────
+  // ── 4. Ler campos do Firestore (cache + novos campos 7-B) ─────────────────
   const postSnap = await postRef.get();
   const postData = postSnap.data() ?? {};
 
-  const audioStatus = postData.audioStatus as AudioStatus | undefined;
-  const audioUrl = postData.audioUrl as string | undefined;
+  const audioStatus    = postData.audioStatus    as AudioStatus | undefined;
+  const audioUrl       = postData.audioUrl       as string | undefined;
+  const audioErrorCount = (postData.audioErrorCount as number | undefined) ?? 0;
+  const audioContentHash = postData.audioContentHash as string | undefined;
+  const conteudo       = postData.conteudo       as string | undefined;
 
-  if (audioUrl && audioStatus === "ready") {
-    return NextResponse.json({ audioUrl });
-  }
-
-  const conteudo = postData.conteudo as string | undefined;
   if (!conteudo) {
     return NextResponse.json(
       { error: "Campo 'conteudo' não encontrado no post." },
@@ -475,23 +514,57 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const autorNome = postData.autorNome as string | undefined;
-  const igreja = postData.igreja as string | undefined;
-  const data = postData.data as string | undefined;
-  const fraseInstigadora = postData.fraseInstigadora as string | undefined;
-  const perguntaReflexiva = postData.perguntaReflexiva as string | undefined;
+  // ── MUDANÇA 6 — Rate limiting por erros consecutivos ─────────────────────
+  if (audioStatus === "error" && audioErrorCount >= 3) {
+    console.warn(`[TTS] Rate limit atingido para post ${postId} (${audioErrorCount} erros consecutivos)`);
+    return NextResponse.json(
+      { error: "Limite de tentativas atingido." },
+      { status: 429 }
+    );
+  }
+
+  // ── MUDANÇA 4 — Invalidação reativa por hash ──────────────────────────────
+  // Hash calculado do conteúdo RAW, ANTES de limparConteudo
+  const hashAtual = computarHashConteudo(conteudo);
+  const conteudoEditado = !audioContentHash || audioContentHash !== hashAtual;
+
+  if (audioUrl && audioStatus === "ready") {
+    if (conteudoEditado) {
+      // Conteúdo foi editado desde a última geração — ignorar cache
+      console.log(`[TTS] Conteúdo editado, regenerando: ${postId}`);
+      // Prossegue para geração (audioStatus e audioUrl antigos serão sobrescritos)
+    } else {
+      // ── MUDANÇA 5 — Validação defensiva de URL cacheada ──────────────────
+      const urlAcessivel = await verificarUrlAcessivel(audioUrl);
+
+      if (!urlAcessivel) {
+        console.warn(`[TTS] URL cacheada inválida, regenerando: ${postId}`);
+        await postRef.set({ audioStatus: "none" as AudioStatus }, { merge: true });
+        // Prossegue para geração
+      } else {
+        console.log(`[TTS] Cache hit: ${postId}`);
+        return NextResponse.json({ audioUrl });
+      }
+    }
+  }
 
   // ── 5. Marcar como "generating" ───────────────────────────────────────────
   await postRef.set({ audioStatus: "generating" as AudioStatus }, { merge: true });
 
   // ── 6. Limpeza e montagem do texto ────────────────────────────────────────
+  const autorNome        = postData.autorNome        as string | undefined;
+  const igreja           = postData.igreja           as string | undefined;
+  const data             = postData.data             as string | undefined;
+  const fraseInstigadora = postData.fraseInstigadora as string | undefined;
+  const perguntaReflexiva = postData.perguntaReflexiva as string | undefined;
+
   const conteudoLimpo = limparConteudo(conteudo);
   const textoTTS = montarTextoTTS(
     titulo, conteudoLimpo, tipo,
     autorNome, igreja, data, fraseInstigadora, perguntaReflexiva,
   );
 
-  // ── 7. Geração de áudio ───────────────────────────────────────────────────
+  // ── 7. Geração de áudio via OpenAI TTS ───────────────────────────────────
   let audioFinal: Buffer;
 
   try {
@@ -501,50 +574,58 @@ export async function POST(req: NextRequest) {
     audioFinal = concatenarMP3s(buffers);
   } catch (err) {
     console.error("[TTS] Erro ao gerar áudio:", err);
+    // MUDANÇA 6 — incrementar audioErrorCount na falha
     await postRef.set(
-      { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now() },
+      {
+        audioStatus: "error" as AudioStatus,
+        audioUpdatedAt: Timestamp.now(),
+        audioErrorCount: audioErrorCount + 1,
+      },
       { merge: true }
     );
     return NextResponse.json({ error: "Falha ao gerar áudio via TTS." }, { status: 502 });
   }
 
-  // ── 8. Upload para Firebase Storage ──────────────────────────────────────
-  let downloadURL: string;
+  // ── MUDANÇA 2 — Upload para R2 (substitui Firebase Storage) ──────────────
+  const downloadURL = `${process.env.R2_PUBLIC_URL}/tts/posts/${postId}.mp3`;
 
   try {
-    const storageBucket = adminStorage.bucket(bucket);
-    const storagePath = `tts/posts/${postId}.mp3`;
-    const file = storageBucket.file(storagePath);
+    const s3 = getS3Client();
 
-    await file.save(audioFinal, {
-      metadata: {
-        contentType: "audio/mpeg",
-        cacheControl: "public, max-age=3600",
-      },
-    });
-
-    const [signedUrl] = await file.getSignedUrl({
-      action: "read",
-      expires: "03-01-2500",
-    });
-
-    downloadURL = `${signedUrl}&v=${Date.now()}`;
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.R2_BUCKET_NAME!,
+        Key: `tts/posts/${postId}.mp3`,
+        Body: audioFinal,
+        ContentType: "audio/mpeg",
+        // Sem cache-buster — URL pública permanente, não expira
+      })
+    );
   } catch (err) {
-    console.error("[TTS] Erro ao fazer upload para Storage:", err);
+    console.error("[TTS] Erro ao fazer upload para R2:", err);
+    // MUDANÇA 6 — incrementar audioErrorCount na falha de upload
     await postRef.set(
-      { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now() },
+      {
+        audioStatus: "error" as AudioStatus,
+        audioUpdatedAt: Timestamp.now(),
+        audioErrorCount: audioErrorCount + 1,
+      },
       { merge: true }
     );
     return NextResponse.json({ error: "Falha ao salvar arquivo de áudio." }, { status: 502 });
   }
 
-  // ── 9. Salvar URL no Firestore ────────────────────────────────────────────
+  // ── 9. Salvar URL + hash + zerar errorCount no Firestore ─────────────────
   try {
     await postRef.set(
       {
         audioUrl: downloadURL,
         audioStatus: "ready" as AudioStatus,
         audioUpdatedAt: Timestamp.now(),
+        // MUDANÇA 3+4 — persistir hash para detectar futuras edições
+        audioContentHash: hashAtual,
+        // MUDANÇA 6 — zerar contador de erros após sucesso
+        audioErrorCount: 0,
       },
       { merge: true }
     );
@@ -555,6 +636,16 @@ export async function POST(req: NextRequest) {
       { status: 207 }
     );
   }
+
+  // ── MUDANÇA 7 — Log de custo fire-and-forget ──────────────────────────────
+  adminDb.collection("tts_logs").add({
+    postId,
+    tipo,
+    charCount: textoTTS.length,
+    estimatedCostUSD: textoTTS.length / 1_000_000 * 15,
+    storage: "r2",
+    createdAt: Timestamp.now(),
+  }).catch(() => {});
 
   // ── 10. Resposta de sucesso ───────────────────────────────────────────────
   return NextResponse.json({ audioUrl: downloadURL });
