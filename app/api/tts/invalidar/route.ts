@@ -27,7 +27,6 @@ import { computarHashConteudo } from "@/lib/tts/hash";
 
 // ---------------------------------------------------------------------------
 // Firebase Admin — reutiliza a instância "tts-admin" se já inicializada
-// (mesmo nome que route.ts — o singleton é compartilhado no mesmo processo)
 // ---------------------------------------------------------------------------
 
 const ADMIN_APP_NAME = "tts-admin";
@@ -106,42 +105,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ invalidado: false, motivo: "post_nao_encontrado" });
   }
 
-  const postData        = postSnap.data() ?? {};
-  const conteudo        = postData.conteudo as string | undefined;
+  const postData         = postSnap.data() ?? {};
+  const conteudo         = postData.conteudo         as string | undefined;
   const audioContentHash = postData.audioContentHash as string | undefined;
 
-  // Sem conteúdo ou sem hash anterior → nada a invalidar
   if (!conteudo) {
     return NextResponse.json({ invalidado: false, motivo: "sem_conteudo" });
   }
 
   if (!audioContentHash) {
-    // Nunca teve áudio gerado — não precisa invalidar
     return NextResponse.json({ invalidado: false, motivo: "sem_hash_anterior" });
   }
 
-  // ── Comparar hash ─────────────────────────────────────────────────────────
-  const novoHash = computarHashConteudo(conteudo);
+  // ── MUDANÇA 9 — computarHashConteudo agora é async (SHA-256) ─────────────
+  const novoHash = await computarHashConteudo(conteudo);
 
   if (audioContentHash === novoHash) {
-    // Conteúdo não mudou (ex: só título ou campos opcionais foram editados)
     return NextResponse.json({ invalidado: false, motivo: "conteudo_inalterado" });
   }
 
-  // ── Invalidar cache — sem deletar arquivo do R2 ───────────────────────────
-  // O arquivo antigo no R2 será sobrescrito automaticamente na próxima geração.
+  // ── Invalidar cache ───────────────────────────────────────────────────────
   try {
     await postRef.update({
-      audioStatus:       "none",
-      audioUrl:          FieldValue.delete(),
-      audioContentHash:  FieldValue.delete(),
+      audioStatus:      "none",
+      audioUrl:         FieldValue.delete(),
+      audioContentHash: FieldValue.delete(),
     });
   } catch (err) {
     console.error(`[TTS] Erro ao invalidar cache do post ${postId}:`, err);
     return NextResponse.json({ error: "Falha ao invalidar cache." }, { status: 500 });
   }
 
-  // ── Log de invalidação fire-and-forget ────────────────────────────────────
+  // ── Log fire-and-forget ───────────────────────────────────────────────────
   adminDb.collection("tts_logs").add({
     postId,
     tipo,

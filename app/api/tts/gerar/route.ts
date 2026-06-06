@@ -1,14 +1,9 @@
 /**
  * app/api/tts/gerar/route.ts
  *
- * Prompt 7-C — Purga programática do cache Cloudflare após upload R2.
+ * Prompt 7-B (fix hash) — computarHashConteudo agora é async (SHA-256).
  *
- * Mudança adicionada neste commit:
- *   MUDANÇA 8 — purgarCacheCloudflare() chamada logo após PutObjectCommand
- *               bem-sucedido, garantindo que o próximo acesso sirva o
- *               arquivo recém-gerado sem necessidade de purga manual.
- *
- * Todas as mudanças anteriores (7-B) mantidas intactas:
+ * Histórico de mudanças:
  *   MUDANÇA 1 — @aws-sdk/client-s3
  *   MUDANÇA 2 — Upload para R2
  *   MUDANÇA 3 — audioContentHash e audioErrorCount no Firestore
@@ -16,6 +11,8 @@
  *   MUDANÇA 5 — Validação defensiva de URL cacheada
  *   MUDANÇA 6 — Rate limiting por erros consecutivos
  *   MUDANÇA 7 — Log de custo fire-and-forget em tts_logs
+ *   MUDANÇA 8 — Purga programática do cache Cloudflare após upload R2
+ *   MUDANÇA 9 — Hash trocado para SHA-256 (async) — fix cache hit falso
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -25,10 +22,10 @@ import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import OpenAI from "openai";
 import { computarHashConteudo } from "@/lib/tts/hash";
-import { purgarCacheCloudflare } from "@/lib/tts/cloudflare"; // MUDANÇA 8
+import { purgarCacheCloudflare } from "@/lib/tts/cloudflare";
 
 // ---------------------------------------------------------------------------
-// Firebase Admin — instância nomeada "tts-admin" (MANTER EXATAMENTE ASSIM)
+// Firebase Admin — instância nomeada "tts-admin"
 // ---------------------------------------------------------------------------
 
 const ADMIN_APP_NAME = "tts-admin";
@@ -92,12 +89,7 @@ async function verificarUrlAcessivel(url: string): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000);
-
-    const res = await fetch(url, {
-      method: "HEAD",
-      signal: controller.signal,
-    });
-
+    const res = await fetch(url, { method: "HEAD", signal: controller.signal });
     clearTimeout(timeoutId);
     return res.status >= 200 && res.status <= 299;
   } catch {
@@ -486,7 +478,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Validação das variáveis R2
   if (!process.env.R2_ACCOUNT_ID || !process.env.R2_ACCESS_KEY_ID ||
       !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET_NAME ||
       !process.env.R2_PUBLIC_URL) {
@@ -500,7 +491,7 @@ export async function POST(req: NextRequest) {
   // ── 3. Referência ao documento Firestore ─────────────────────────────────
   const postRef = adminDb.collection("posts").doc(postId);
 
-  // ── 4. Ler campos do Firestore (cache + novos campos 7-B) ─────────────────
+  // ── 4. Ler campos do Firestore ────────────────────────────────────────────
   const postSnap = await postRef.get();
   const postData = postSnap.data() ?? {};
 
@@ -526,13 +517,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── MUDANÇA 4 — Invalidação reativa por hash ──────────────────────────────
-  const hashAtual = computarHashConteudo(conteudo);
+  // ── MUDANÇA 4+9 — Invalidação reativa por hash (SHA-256, async) ──────────
+  const hashAtual = await computarHashConteudo(conteudo); // MUDANÇA 9: await
   const conteudoEditado = !audioContentHash || audioContentHash !== hashAtual;
 
   if (audioUrl && audioStatus === "ready") {
     if (conteudoEditado) {
-      console.log(`[TTS] Conteúdo editado, regenerando: ${postId}`);
+      console.log(`[TTS] Conteúdo editado (hash diverge), regenerando: ${postId}`);
       // Prossegue para geração
     } else {
       // ── MUDANÇA 5 — Validação defensiva de URL cacheada ──────────────────
@@ -541,7 +532,6 @@ export async function POST(req: NextRequest) {
       if (!urlAcessivel) {
         console.warn(`[TTS] URL cacheada inválida, regenerando: ${postId}`);
         await postRef.set({ audioStatus: "none" as AudioStatus }, { merge: true });
-        // Prossegue para geração
       } else {
         console.log(`[TTS] Cache hit: ${postId}`);
         return NextResponse.json({ audioUrl });
@@ -586,7 +576,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Falha ao gerar áudio via TTS." }, { status: 502 });
   }
 
-  // ── MUDANÇA 2 — Upload para R2 ───────────────────────────────────────────
+  // ── MUDANÇA 2+8 — Upload para R2 + purga Cloudflare ──────────────────────
   const downloadURL = `${process.env.R2_PUBLIC_URL}/tts/posts/${postId}.mp3`;
 
   try {
@@ -601,14 +591,8 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    // ── MUDANÇA 8 — Purga programática do cache Cloudflare ─────────────────
-    // Executada imediatamente após upload bem-sucedido, antes de salvar no
-    // Firestore, para garantir que o edge já serve o novo arquivo quando o
-    // cliente receber a audioUrl e iniciar a reprodução.
+    // MUDANÇA 8 — fire-and-forget: não bloqueia a resposta
     purgarCacheCloudflare([downloadURL]).catch((err) => {
-      // Falha na purga não deve bloquear a resposta — apenas logamos.
-      // Na pior das hipóteses, o usuário ouvirá o arquivo antigo desta vez;
-      // na próxima requisição o cache já terá expirado naturalmente.
       console.error("[TTS] Erro ao purgar cache Cloudflare (non-fatal):", err);
     });
 
