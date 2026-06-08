@@ -1,24 +1,26 @@
 /**
  * app/api/tts/gerar/route.ts
  *
- * Prompt 7-B (fix hash) — computarHashConteudo agora é async (SHA-256).
+ * Prompt 7-C1 — Auto-recovery de "stuck generating" + handler PATCH admin.
  *
  * Histórico de mudanças:
- *   MUDANÇA 1 — @aws-sdk/client-s3
- *   MUDANÇA 2 — Upload para R2
- *   MUDANÇA 3 — audioContentHash e audioErrorCount no Firestore
- *   MUDANÇA 4 — Invalidação reativa por hash
- *   MUDANÇA 5 — Validação defensiva de URL cacheada
- *   MUDANÇA 6 — Rate limiting por erros consecutivos
- *   MUDANÇA 7 — Log de custo fire-and-forget em tts_logs
- *   MUDANÇA 8 — Purga programática do cache Cloudflare após upload R2
- *   MUDANÇA 9 — Hash trocado para SHA-256 (async) — fix cache hit falso
+ *   MUDANÇA 1  — @aws-sdk/client-s3
+ *   MUDANÇA 2  — Upload para R2
+ *   MUDANÇA 3  — audioContentHash e audioErrorCount no Firestore
+ *   MUDANÇA 4  — Invalidação reativa por hash
+ *   MUDANÇA 5  — Validação defensiva de URL cacheada
+ *   MUDANÇA 6  — Rate limiting por erros consecutivos
+ *   MUDANÇA 7  — Log de custo fire-and-forget em tts_logs
+ *   MUDANÇA 8  — Purga programática do cache Cloudflare após upload R2
+ *   MUDANÇA 9  — Hash trocado para SHA-256 (async)
+ *   MUDANÇA 10 — Auto-recovery de posts travados em "generating" (7-C1.1)
+ *   MUDANÇA 11 — Handler PATCH para ações administrativas (7-C1.3)
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "firebase-admin/auth";
 import { getApps, getApp, initializeApp, cert } from "firebase-admin/app";
-import { getFirestore, Timestamp } from "firebase-admin/firestore";
+import { getFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import OpenAI from "openai";
 import { computarHashConteudo } from "@/lib/tts/hash";
@@ -55,7 +57,7 @@ function getAdminApp() {
 }
 
 // ---------------------------------------------------------------------------
-// MUDANÇA 1 — S3Client apontando para o endpoint R2 da Cloudflare
+// S3Client — endpoint R2 da Cloudflare
 // ---------------------------------------------------------------------------
 
 function getS3Client(): S3Client {
@@ -82,7 +84,13 @@ interface TTSRequestBody {
 }
 
 // ---------------------------------------------------------------------------
-// MUDANÇA 5 — Validação defensiva de URL cacheada
+// Constante de timeout para auto-recovery (10 minutos em ms)
+// ---------------------------------------------------------------------------
+
+const STUCK_GENERATING_TIMEOUT_MS = 10 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// Validação defensiva de URL cacheada
 // ---------------------------------------------------------------------------
 
 async function verificarUrlAcessivel(url: string): Promise<boolean> {
@@ -117,9 +125,7 @@ function transliterarGrego(palavra: string): string {
     "ᾆ": "a", "ᾇ": "a", "ᾲ": "a", "ᾳ": "a", "ᾴ": "a", "ᾷ": "a",
     "Α": "A", "Ά": "A", "Ὰ": "A", "Ἀ": "A", "Ἁ": "A", "Ἂ": "A",
     "Ἃ": "A", "Ἄ": "A", "Ἅ": "A", "Ἆ": "A", "Ἇ": "A",
-    "β": "b", "Β": "B",
-    "γ": "g", "Γ": "G",
-    "δ": "d", "Δ": "D",
+    "β": "b", "Β": "B", "γ": "g", "Γ": "G", "δ": "d", "Δ": "D",
     "ε": "e", "έ": "e", "ὲ": "e", "ἐ": "e", "ἑ": "e", "ἒ": "e",
     "ἓ": "e", "ἔ": "e", "ἕ": "e",
     "Ε": "E", "Έ": "E", "Ὲ": "E", "Ἐ": "E", "Ἑ": "E", "Ἒ": "E",
@@ -136,26 +142,20 @@ function transliterarGrego(palavra: string): string {
     "ϊ": "i", "ΐ": "i",
     "Ι": "I", "Ί": "I", "Ὶ": "I", "Ἰ": "I", "Ἱ": "I", "Ἲ": "I",
     "Ἳ": "I", "Ἴ": "I", "Ἵ": "I", "Ἶ": "I", "Ἷ": "I",
-    "κ": "k", "Κ": "K",
-    "λ": "l", "Λ": "L",
-    "μ": "m", "Μ": "M",
-    "ν": "n", "Ν": "N",
-    "ξ": "x", "Ξ": "X",
+    "κ": "k", "Κ": "K", "λ": "l", "Λ": "L", "μ": "m", "Μ": "M",
+    "ν": "n", "Ν": "N", "ξ": "x", "Ξ": "X",
     "ο": "o", "ό": "o", "ὸ": "o", "ὀ": "o", "ὁ": "o", "ὂ": "o",
     "ὃ": "o", "ὄ": "o", "ὅ": "o",
     "Ο": "O", "Ό": "O", "Ὸ": "O", "Ὀ": "O", "Ὁ": "O", "Ὂ": "O",
     "Ὃ": "O", "Ὄ": "O", "Ὅ": "O",
     "π": "p", "Π": "P",
     "ρ": "r", "ῥ": "rh", "ῤ": "r", "Ρ": "R", "Ῥ": "Rh",
-    "σ": "s", "ς": "s", "Σ": "S",
-    "τ": "t", "Τ": "T",
+    "σ": "s", "ς": "s", "Σ": "S", "τ": "t", "Τ": "T",
     "υ": "y", "ύ": "y", "ὺ": "y", "ῦ": "y", "ὐ": "y", "ὑ": "y",
     "ὒ": "y", "ὓ": "y", "ὔ": "y", "ὕ": "y", "ὖ": "y", "ὗ": "y",
     "ϋ": "y", "ΰ": "y",
     "Υ": "Y", "Ύ": "Y", "Ὺ": "Y", "Ὑ": "Y", "Ὓ": "Y", "Ὕ": "Y", "Ὗ": "Y",
-    "φ": "ph", "Φ": "Ph",
-    "χ": "ch", "Χ": "Ch",
-    "ψ": "ps", "Ψ": "Ps",
+    "φ": "ph", "Φ": "Ph", "χ": "ch", "Χ": "Ch", "ψ": "ps", "Ψ": "Ps",
     "ω": "ō", "ώ": "ō", "ὼ": "ō", "ῶ": "ō", "ὠ": "ō", "ὡ": "ō",
     "ὢ": "ō", "ὣ": "ō", "ὤ": "ō", "ὥ": "ō", "ὦ": "ō", "ὧ": "ō",
     "ῲ": "ō", "ῳ": "ō", "ῴ": "ō", "ῷ": "ō",
@@ -206,10 +206,6 @@ function processarTermosEstrangeiros(texto: string): string {
   texto = texto.replace(/[\u0590-\u05FF]+/g, (match) => transliterarHebraico(match));
   return texto;
 }
-
-// ---------------------------------------------------------------------------
-// Conversão de ordinais e porcentagens
-// ---------------------------------------------------------------------------
 
 const UNIDADES = [
   "", "um", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove",
@@ -291,26 +287,15 @@ function converterOrdinaisEPorcentagens(texto: string): string {
       return `${inteiroExtenso(inteiro)} por cento`;
     }
   );
-
   texto = texto.replace(
     /(\d+)\s*°\s*([CF])\b/gi,
     (_match, num, escala) => {
       const n = parseInt(num, 10);
-      const nome = escala.toUpperCase() === "C" ? "Celsius" : "Fahrenheit";
-      return `${inteiroExtenso(n)} graus ${nome}`;
+      return `${inteiroExtenso(n)} graus ${escala.toUpperCase() === "C" ? "Celsius" : "Fahrenheit"}`;
     }
   );
-
-  texto = texto.replace(
-    /(\d+)\s*[º°]/g,
-    (_match, num) => ordinalExtenso(parseInt(num, 10), false)
-  );
-
-  texto = texto.replace(
-    /(\d+)\s*ª/g,
-    (_match, num) => ordinalExtenso(parseInt(num, 10), true)
-  );
-
+  texto = texto.replace(/(\d+)\s*[º°]/g, (_match, num) => ordinalExtenso(parseInt(num, 10), false));
+  texto = texto.replace(/(\d+)\s*ª/g, (_match, num) => ordinalExtenso(parseInt(num, 10), true));
   return texto;
 }
 
@@ -332,10 +317,6 @@ function limparConteudo(raw: string): string {
     .replace(/\s{2,}/g, " ")
     .trim();
 }
-
-// ---------------------------------------------------------------------------
-// Montagem do texto para TTS
-// ---------------------------------------------------------------------------
 
 function montarTextoTTS(
   titulo: string,
@@ -363,10 +344,6 @@ function montarTextoTTS(
   return partes.join(". ");
 }
 
-// ---------------------------------------------------------------------------
-// Chunking
-// ---------------------------------------------------------------------------
-
 const TTS_MAX_CHARS = 4096;
 
 function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
@@ -384,36 +361,22 @@ function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
   return chunks;
 }
 
-// ---------------------------------------------------------------------------
-// Geração de áudio via OpenAI TTS
-// ---------------------------------------------------------------------------
-
 async function gerarBuffersAudio(openai: OpenAI, chunks: string[]): Promise<Buffer[]> {
   const buffers: Buffer[] = [];
   for (const chunk of chunks) {
     const response = await openai.audio.speech.create({
-      model: "tts-1",
-      voice: "onyx",
-      input: chunk,
-      response_format: "mp3",
+      model: "tts-1", voice: "onyx", input: chunk, response_format: "mp3",
     });
-    const arrayBuffer = await response.arrayBuffer();
-    buffers.push(Buffer.from(arrayBuffer));
+    buffers.push(Buffer.from(await response.arrayBuffer()));
   }
   return buffers;
 }
 
-// ---------------------------------------------------------------------------
-// Concatenação de MP3s
-// ---------------------------------------------------------------------------
-
 function removerHeaderID3(buffer: Buffer): Buffer {
   if (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) {
     const tamanho =
-      ((buffer[6] & 0x7f) << 21) |
-      ((buffer[7] & 0x7f) << 14) |
-      ((buffer[8] & 0x7f) << 7) |
-      (buffer[9] & 0x7f);
+      ((buffer[6] & 0x7f) << 21) | ((buffer[7] & 0x7f) << 14) |
+      ((buffer[8] & 0x7f) << 7)  | (buffer[9] & 0x7f);
     return buffer.slice(10 + tamanho);
   }
   return buffer;
@@ -421,27 +384,123 @@ function removerHeaderID3(buffer: Buffer): Buffer {
 
 function concatenarMP3s(buffers: Buffer[]): Buffer {
   if (buffers.length === 1) return buffers[0];
-  const partes: Buffer[] = [];
-  for (let i = 0; i < buffers.length; i++) {
-    partes.push(i === 0 ? buffers[i] : removerHeaderID3(buffers[i]));
-  }
-  return Buffer.concat(partes);
+  return Buffer.concat(buffers.map((b, i) => i === 0 ? b : removerHeaderID3(b)));
 }
 
 // ---------------------------------------------------------------------------
-// Handler principal
+// MUDANÇA 11 — Handler PATCH (ações administrativas)
+// ---------------------------------------------------------------------------
+
+export async function PATCH(req: NextRequest) {
+  ensureAdminInitialized();
+
+  const adminApp  = getAdminApp();
+  const adminAuth = getAuth(adminApp);
+  const adminDb   = getFirestore(adminApp);
+
+  // ── Autenticação Firebase ─────────────────────────────────────────────────
+  const authHeader = req.headers.get("authorization") ?? "";
+  const idToken    = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+
+  if (!idToken) {
+    return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
+  }
+
+  let uid: string;
+  try {
+    const decoded = await adminAuth.verifyIdToken(idToken);
+    uid = decoded.uid;
+  } catch {
+    return NextResponse.json({ error: "Token inválido ou expirado." }, { status: 401 });
+  }
+
+  // ── Verificar se UID está em TTS_ADMIN_UIDS ───────────────────────────────
+  const adminUids = (process.env.TTS_ADMIN_UIDS ?? "")
+    .split(",")
+    .map((u) => u.trim())
+    .filter(Boolean);
+
+  if (!adminUids.includes(uid)) {
+    return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
+  }
+
+  // ── Parse do body ─────────────────────────────────────────────────────────
+  let body: { postId?: string; action?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Body inválido." }, { status: 400 });
+  }
+
+  const { postId, action } = body;
+
+  if (!postId || !action) {
+    return NextResponse.json(
+      { error: "Campos obrigatórios ausentes: postId, action." },
+      { status: 400 }
+    );
+  }
+
+  if (!["reset", "reset_errors"].includes(action)) {
+    return NextResponse.json(
+      { error: "action inválido. Valores aceitos: reset, reset_errors." },
+      { status: 400 }
+    );
+  }
+
+  const postRef = adminDb.collection("posts").doc(postId);
+  const postSnap = await postRef.get();
+
+  if (!postSnap.exists) {
+    return NextResponse.json({ error: "Post não encontrado." }, { status: 404 });
+  }
+
+  try {
+    if (action === "reset") {
+      // Apaga audioUrl, audioContentHash, zera errorCount, status "none"
+      // Forçará regeneração completa na próxima vez que alguém clicar Ouvir
+      await postRef.update({
+        audioStatus:      "none",
+        audioErrorCount:  0,
+        audioUrl:         FieldValue.delete(),
+        audioContentHash: FieldValue.delete(),
+        audioUpdatedAt:   Timestamp.now(),
+      });
+      console.log(`[TTS Admin] Reset completo do post ${postId} por UID ${uid}`);
+      return NextResponse.json({ ok: true, action: "reset", postId });
+    }
+
+    if (action === "reset_errors") {
+      // Zera apenas o contador de erros — mantém audioStatus e audioUrl intactos
+      await postRef.update({
+        audioErrorCount: 0,
+        audioUpdatedAt:  Timestamp.now(),
+      });
+      console.log(`[TTS Admin] Reset de erros do post ${postId} por UID ${uid}`);
+      return NextResponse.json({ ok: true, action: "reset_errors", postId });
+    }
+  } catch (err) {
+    console.error(`[TTS Admin] Erro ao executar ${action} no post ${postId}:`, err);
+    return NextResponse.json({ error: "Falha ao atualizar post." }, { status: 500 });
+  }
+
+  return NextResponse.json({ error: "Ação não executada." }, { status: 500 });
+}
+
+// ---------------------------------------------------------------------------
+// Handler principal POST
 // ---------------------------------------------------------------------------
 
 export async function POST(req: NextRequest) {
   ensureAdminInitialized();
 
-  const adminApp = getAdminApp();
+  const adminApp  = getAdminApp();
   const adminAuth = getAuth(adminApp);
-  const adminDb = getFirestore(adminApp);
+  const adminDb   = getFirestore(adminApp);
 
   // ── 1. Autenticação ──────────────────────────────────────────────────────
   const authHeader = req.headers.get("authorization") ?? "";
-  const idToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  const idToken    = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
   if (!idToken) {
     return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
@@ -470,10 +529,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const tiposValidos = ["sermao", "estudo", "reflexao"];
-  if (!tiposValidos.includes(tipo)) {
+  if (!["sermao", "estudo", "reflexao"].includes(tipo)) {
     return NextResponse.json(
-      { error: `Tipo inválido. Valores aceitos: ${tiposValidos.join(", ")}.` },
+      { error: "Tipo inválido. Valores aceitos: sermao, estudo, reflexao." },
       { status: 400 }
     );
   }
@@ -482,16 +540,11 @@ export async function POST(req: NextRequest) {
       !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET_NAME ||
       !process.env.R2_PUBLIC_URL) {
     console.error("[TTS] Variáveis de ambiente R2 ausentes.");
-    return NextResponse.json(
-      { error: "Configuração de storage ausente no servidor." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Configuração de storage ausente." }, { status: 500 });
   }
 
   // ── 3. Referência ao documento Firestore ─────────────────────────────────
-  const postRef = adminDb.collection("posts").doc(postId);
-
-  // ── 4. Ler campos do Firestore ────────────────────────────────────────────
+  const postRef  = adminDb.collection("posts").doc(postId);
   const postSnap = await postRef.get();
   const postData = postSnap.data() ?? {};
 
@@ -499,36 +552,42 @@ export async function POST(req: NextRequest) {
   const audioUrl         = postData.audioUrl         as string | undefined;
   const audioErrorCount  = (postData.audioErrorCount as number | undefined) ?? 0;
   const audioContentHash = postData.audioContentHash as string | undefined;
+  const audioUpdatedAt   = postData.audioUpdatedAt   as Timestamp | undefined;
   const conteudo         = postData.conteudo         as string | undefined;
 
   if (!conteudo) {
-    return NextResponse.json(
-      { error: "Campo 'conteudo' não encontrado no post." },
-      { status: 422 }
-    );
+    return NextResponse.json({ error: "Campo 'conteudo' não encontrado." }, { status: 422 });
   }
 
-  // ── MUDANÇA 6 — Rate limiting por erros consecutivos ─────────────────────
+  // ── MUDANÇA 10 — Auto-recovery de posts travados em "generating" ──────────
+  // Se a Vercel Function crashou durante geração anterior, o post fica preso.
+  // Detectamos pelo audioUpdatedAt > 10min atrás e resetamos sem penalizar erros.
+  if (audioStatus === "generating" && audioUpdatedAt) {
+    const idadeMs = Date.now() - audioUpdatedAt.toMillis();
+    if (idadeMs > STUCK_GENERATING_TIMEOUT_MS) {
+      console.log(
+        `[TTS] Post travado em generating há ${Math.round(idadeMs / 60000)}min, resetando: ${postId}`
+      );
+      await postRef.set({ audioStatus: "none" as AudioStatus }, { merge: true });
+      // Continua o fluxo normalmente — o audioStatus efetivo agora é "none"
+    }
+  }
+
+  // ── Rate limiting por erros consecutivos ─────────────────────────────────
   if (audioStatus === "error" && audioErrorCount >= 3) {
     console.warn(`[TTS] Rate limit atingido para post ${postId} (${audioErrorCount} erros consecutivos)`);
-    return NextResponse.json(
-      { error: "Limite de tentativas atingido." },
-      { status: 429 }
-    );
+    return NextResponse.json({ error: "Limite de tentativas atingido." }, { status: 429 });
   }
 
-  // ── MUDANÇA 4+9 — Invalidação reativa por hash (SHA-256, async) ──────────
-  const hashAtual = await computarHashConteudo(conteudo); // MUDANÇA 9: await
+  // ── Invalidação reativa por hash (SHA-256) ────────────────────────────────
+  const hashAtual      = await computarHashConteudo(conteudo);
   const conteudoEditado = !audioContentHash || audioContentHash !== hashAtual;
 
   if (audioUrl && audioStatus === "ready") {
     if (conteudoEditado) {
       console.log(`[TTS] Conteúdo editado (hash diverge), regenerando: ${postId}`);
-      // Prossegue para geração
     } else {
-      // ── MUDANÇA 5 — Validação defensiva de URL cacheada ──────────────────
       const urlAcessivel = await verificarUrlAcessivel(audioUrl);
-
       if (!urlAcessivel) {
         console.warn(`[TTS] URL cacheada inválida, regenerando: ${postId}`);
         await postRef.set({ audioStatus: "none" as AudioStatus }, { merge: true });
@@ -539,10 +598,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── 5. Marcar como "generating" ───────────────────────────────────────────
-  await postRef.set({ audioStatus: "generating" as AudioStatus }, { merge: true });
+  // ── Marcar como "generating" ──────────────────────────────────────────────
+  await postRef.set(
+    { audioStatus: "generating" as AudioStatus, audioUpdatedAt: Timestamp.now() },
+    { merge: true }
+  );
 
-  // ── 6. Limpeza e montagem do texto ────────────────────────────────────────
+  // ── Limpeza e montagem do texto ───────────────────────────────────────────
   const autorNome         = postData.autorNome         as string | undefined;
   const igreja            = postData.igreja            as string | undefined;
   const data              = postData.data              as string | undefined;
@@ -555,90 +617,68 @@ export async function POST(req: NextRequest) {
     autorNome, igreja, data, fraseInstigadora, perguntaReflexiva,
   );
 
-  // ── 7. Geração de áudio via OpenAI TTS ───────────────────────────────────
+  // ── Geração de áudio via OpenAI TTS ──────────────────────────────────────
   let audioFinal: Buffer;
-
   try {
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const chunks = dividirEmChunks(textoTTS);
+    const openai  = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const chunks  = dividirEmChunks(textoTTS);
     const buffers = await gerarBuffersAudio(openai, chunks);
-    audioFinal = concatenarMP3s(buffers);
+    audioFinal    = concatenarMP3s(buffers);
   } catch (err) {
     console.error("[TTS] Erro ao gerar áudio:", err);
     await postRef.set(
-      {
-        audioStatus: "error" as AudioStatus,
-        audioUpdatedAt: Timestamp.now(),
-        audioErrorCount: audioErrorCount + 1,
-      },
+      { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now(), audioErrorCount: audioErrorCount + 1 },
       { merge: true }
     );
     return NextResponse.json({ error: "Falha ao gerar áudio via TTS." }, { status: 502 });
   }
 
-  // ── MUDANÇA 2+8 — Upload para R2 + purga Cloudflare ──────────────────────
+  // ── Upload para R2 + purga Cloudflare ─────────────────────────────────────
   const downloadURL = `${process.env.R2_PUBLIC_URL}/tts/posts/${postId}.mp3`;
-
   try {
-    const s3 = getS3Client();
-
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.R2_BUCKET_NAME!,
-        Key: `tts/posts/${postId}.mp3`,
-        Body: audioFinal,
-        ContentType: "audio/mpeg",
-      })
-    );
-
-    // MUDANÇA 8 — fire-and-forget: não bloqueia a resposta
+    await getS3Client().send(new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME!,
+      Key: `tts/posts/${postId}.mp3`,
+      Body: audioFinal,
+      ContentType: "audio/mpeg",
+    }));
     purgarCacheCloudflare([downloadURL]).catch((err) => {
       console.error("[TTS] Erro ao purgar cache Cloudflare (non-fatal):", err);
     });
-
   } catch (err) {
     console.error("[TTS] Erro ao fazer upload para R2:", err);
     await postRef.set(
-      {
-        audioStatus: "error" as AudioStatus,
-        audioUpdatedAt: Timestamp.now(),
-        audioErrorCount: audioErrorCount + 1,
-      },
+      { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now(), audioErrorCount: audioErrorCount + 1 },
       { merge: true }
     );
     return NextResponse.json({ error: "Falha ao salvar arquivo de áudio." }, { status: 502 });
   }
 
-  // ── 9. Salvar URL + hash + zerar errorCount no Firestore ─────────────────
+  // ── Salvar metadados no Firestore ─────────────────────────────────────────
   try {
     await postRef.set(
       {
-        audioUrl: downloadURL,
-        audioStatus: "ready" as AudioStatus,
-        audioUpdatedAt: Timestamp.now(),
-        audioContentHash: hashAtual,
-        audioErrorCount: 0,
+        audioUrl:          downloadURL,
+        audioStatus:       "ready" as AudioStatus,
+        audioUpdatedAt:    Timestamp.now(),
+        audioContentHash:  hashAtual,
+        audioErrorCount:   0,
       },
       { merge: true }
     );
   } catch (err) {
     console.error("[TTS] Erro ao salvar no Firestore:", err);
-    return NextResponse.json(
-      { error: "Áudio gerado, mas falha ao salvar metadados." },
-      { status: 207 }
-    );
+    return NextResponse.json({ error: "Áudio gerado, mas falha ao salvar metadados." }, { status: 207 });
   }
 
-  // ── MUDANÇA 7 — Log de custo fire-and-forget ──────────────────────────────
+  // ── Log de custo fire-and-forget ──────────────────────────────────────────
   adminDb.collection("tts_logs").add({
-    postId,
-    tipo,
-    charCount: textoTTS.length,
+    postId, tipo,
+    charCount:        textoTTS.length,
     estimatedCostUSD: textoTTS.length / 1_000_000 * 15,
-    storage: "r2",
-    createdAt: Timestamp.now(),
+    storage:          "r2",
+    createdAt:        Timestamp.now(),
   }).catch(() => {});
 
-  // ── 10. Resposta de sucesso ───────────────────────────────────────────────
   return NextResponse.json({ audioUrl: downloadURL });
 }
