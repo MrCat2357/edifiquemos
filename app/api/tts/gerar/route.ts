@@ -15,6 +15,7 @@
  *   MUDANÇA 9  — Hash trocado para SHA-256 (async)
  *   MUDANÇA 10 — Auto-recovery de posts travados em "generating" (7-C1.1)
  *   MUDANÇA 11 — Handler PATCH para ações administrativas (7-C1.3)
+ *   MUDANÇA 12 — Fase 9: usa voz clonada do autor quando disponível
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -76,6 +77,7 @@ function getS3Client(): S3Client {
 // ---------------------------------------------------------------------------
 
 type AudioStatus = "none" | "generating" | "ready" | "error";
+type VoiceStatus = "none" | "processing" | "ready" | "error";
 
 interface TTSRequestBody {
   postId: string;
@@ -346,6 +348,9 @@ function montarTextoTTS(
 
 const TTS_MAX_CHARS = 4096;
 
+// ElevenLabs suporta até 5000 chars por request
+const ELEVENLABS_MAX_CHARS = 4500;
+
 function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
   if (texto.length <= maxChars) return [texto];
   const chunks: string[] = [];
@@ -360,6 +365,56 @@ function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
   }
   return chunks;
 }
+
+// ---------------------------------------------------------------------------
+// MUDANÇA 12 — Geração de áudio via ElevenLabs (voz clonada)
+// ---------------------------------------------------------------------------
+
+async function gerarBufferElevenLabs(voiceId: string, texto: string): Promise<Buffer> {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) throw new Error("ELEVENLABS_API_KEY não configurada.");
+
+  const res = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text: texto,
+        model_id: "eleven_multilingual_v2",
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.0,
+          use_speaker_boost: true,
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
+    throw new Error(`ElevenLabs TTS ${res.status}: ${errBody}`);
+  }
+
+  return Buffer.from(await res.arrayBuffer());
+}
+
+async function gerarBuffersElevenLabs(voiceId: string, chunks: string[]): Promise<Buffer[]> {
+  const buffers: Buffer[] = [];
+  for (const chunk of chunks) {
+    buffers.push(await gerarBufferElevenLabs(voiceId, chunk));
+  }
+  return buffers;
+}
+
+// ---------------------------------------------------------------------------
+// Geração de áudio via OpenAI TTS (voz padrão)
+// ---------------------------------------------------------------------------
 
 async function gerarBuffersAudio(openai: OpenAI, chunks: string[]): Promise<Buffer[]> {
   const buffers: Buffer[] = [];
@@ -398,7 +453,6 @@ export async function PATCH(req: NextRequest) {
   const adminAuth = getAuth(adminApp);
   const adminDb   = getFirestore(adminApp);
 
-  // ── Autenticação Firebase ─────────────────────────────────────────────────
   const authHeader = req.headers.get("authorization") ?? "";
   const idToken    = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
@@ -414,7 +468,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Token inválido ou expirado." }, { status: 401 });
   }
 
-  // ── Verificar se UID está em TTS_ADMIN_UIDS ───────────────────────────────
   const adminUids = (process.env.TTS_ADMIN_UIDS ?? "")
     .split(",")
     .map((u) => u.trim())
@@ -424,7 +477,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Acesso negado." }, { status: 403 });
   }
 
-  // ── Parse do body ─────────────────────────────────────────────────────────
   let body: { postId?: string; action?: string };
   try {
     body = await req.json();
@@ -457,8 +509,6 @@ export async function PATCH(req: NextRequest) {
 
   try {
     if (action === "reset") {
-      // Apaga audioUrl, audioContentHash, zera errorCount, status "none"
-      // Forçará regeneração completa na próxima vez que alguém clicar Ouvir
       await postRef.update({
         audioStatus:      "none",
         audioErrorCount:  0,
@@ -471,7 +521,6 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (action === "reset_errors") {
-      // Zera apenas o contador de erros — mantém audioStatus e audioUrl intactos
       await postRef.update({
         audioErrorCount: 0,
         audioUpdatedAt:  Timestamp.now(),
@@ -554,14 +603,39 @@ export async function POST(req: NextRequest) {
   const audioContentHash = postData.audioContentHash as string | undefined;
   const audioUpdatedAt   = postData.audioUpdatedAt   as Timestamp | undefined;
   const conteudo         = postData.conteudo         as string | undefined;
+  const autorId          = postData.autorId          as string | undefined;
 
   if (!conteudo) {
     return NextResponse.json({ error: "Campo 'conteudo' não encontrado." }, { status: 422 });
   }
 
+  // ── MUDANÇA 12 — Buscar voiceId do autor ─────────────────────────────────
+  // Se o post tem um autorId, busca a voz clonada do autor no Firestore.
+  // Em caso de falha (doc não existe, campo ausente), silencia e usa voz padrão.
+  let autorVoiceId: string | null = null;
+
+  if (autorId) {
+    try {
+      const autorSnap = await adminDb.collection("users").doc(autorId).get();
+      if (autorSnap.exists) {
+        const autorData = autorSnap.data() ?? {};
+        const voiceStatus = autorData.voiceStatus as VoiceStatus | undefined;
+        const voiceId     = autorData.voiceId     as string | undefined;
+
+        if (voiceId && voiceStatus === "ready") {
+          autorVoiceId = voiceId;
+          console.log(`[TTS] Usando voz clonada do autor ${autorId}: ${voiceId}`);
+        } else {
+          console.log(`[TTS] Autor ${autorId} sem voz clonada ativa (status: ${voiceStatus ?? "none"}), usando padrão.`);
+        }
+      }
+    } catch (err) {
+      // Non-fatal: se não conseguir buscar a voz, usa padrão
+      console.warn("[TTS] Falha ao buscar voiceId do autor (non-fatal):", err);
+    }
+  }
+
   // ── MUDANÇA 10 — Auto-recovery de posts travados em "generating" ──────────
-  // Se a Vercel Function crashou durante geração anterior, o post fica preso.
-  // Detectamos pelo audioUpdatedAt > 10min atrás e resetamos sem penalizar erros.
   if (audioStatus === "generating" && audioUpdatedAt) {
     const idadeMs = Date.now() - audioUpdatedAt.toMillis();
     if (idadeMs > STUCK_GENERATING_TIMEOUT_MS) {
@@ -569,7 +643,6 @@ export async function POST(req: NextRequest) {
         `[TTS] Post travado em generating há ${Math.round(idadeMs / 60000)}min, resetando: ${postId}`
       );
       await postRef.set({ audioStatus: "none" as AudioStatus }, { merge: true });
-      // Continua o fluxo normalmente — o audioStatus efetivo agora é "none"
     }
   }
 
@@ -617,20 +690,55 @@ export async function POST(req: NextRequest) {
     autorNome, igreja, data, fraseInstigadora, perguntaReflexiva,
   );
 
-  // ── Geração de áudio via OpenAI TTS ──────────────────────────────────────
+  // ── MUDANÇA 12 — Geração de áudio: voz clonada ou padrão ─────────────────
   let audioFinal: Buffer;
+  let provedorUsado: "elevenlabs" | "openai";
+
   try {
-    const openai  = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const chunks  = dividirEmChunks(textoTTS);
-    const buffers = await gerarBuffersAudio(openai, chunks);
-    audioFinal    = concatenarMP3s(buffers);
+    if (autorVoiceId && process.env.ELEVENLABS_API_KEY) {
+      // ── Caminho 1: voz clonada via ElevenLabs ──────────────────────────
+      const chunks  = dividirEmChunks(textoTTS, ELEVENLABS_MAX_CHARS);
+      const buffers = await gerarBuffersElevenLabs(autorVoiceId, chunks);
+      audioFinal    = concatenarMP3s(buffers);
+      provedorUsado = "elevenlabs";
+      console.log(`[TTS] Áudio gerado via ElevenLabs (voz ${autorVoiceId}) para post ${postId}`);
+    } else {
+      // ── Caminho 2: voz padrão via OpenAI TTS ──────────────────────────
+      const openai  = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const chunks  = dividirEmChunks(textoTTS);
+      const buffers = await gerarBuffersAudio(openai, chunks);
+      audioFinal    = concatenarMP3s(buffers);
+      provedorUsado = "openai";
+      console.log(`[TTS] Áudio gerado via OpenAI TTS (voz padrão) para post ${postId}`);
+    }
   } catch (err) {
     console.error("[TTS] Erro ao gerar áudio:", err);
-    await postRef.set(
-      { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now(), audioErrorCount: audioErrorCount + 1 },
-      { merge: true }
-    );
-    return NextResponse.json({ error: "Falha ao gerar áudio via TTS." }, { status: 502 });
+
+    // Se ElevenLabs falhou, tenta fallback para OpenAI antes de desistir
+    if (autorVoiceId && process.env.OPENAI_API_KEY) {
+      console.warn("[TTS] ElevenLabs falhou, tentando fallback para OpenAI...");
+      try {
+        const openai  = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const chunks  = dividirEmChunks(textoTTS);
+        const buffers = await gerarBuffersAudio(openai, chunks);
+        audioFinal    = concatenarMP3s(buffers);
+        provedorUsado = "openai";
+        console.log(`[TTS] Fallback OpenAI bem-sucedido para post ${postId}`);
+      } catch (fallbackErr) {
+        console.error("[TTS] Fallback OpenAI também falhou:", fallbackErr);
+        await postRef.set(
+          { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now(), audioErrorCount: audioErrorCount + 1 },
+          { merge: true }
+        );
+        return NextResponse.json({ error: "Falha ao gerar áudio via TTS." }, { status: 502 });
+      }
+    } else {
+      await postRef.set(
+        { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now(), audioErrorCount: audioErrorCount + 1 },
+        { merge: true }
+      );
+      return NextResponse.json({ error: "Falha ao gerar áudio via TTS." }, { status: 502 });
+    }
   }
 
   // ── Upload para R2 + purga Cloudflare ─────────────────────────────────────
@@ -675,7 +783,12 @@ export async function POST(req: NextRequest) {
   adminDb.collection("tts_logs").add({
     postId, tipo,
     charCount:        textoTTS.length,
-    estimatedCostUSD: textoTTS.length / 1_000_000 * 15,
+    // Custo estimado: ElevenLabs ~$0.30/1k chars, OpenAI ~$15/1M chars
+    estimatedCostUSD: provedorUsado === "elevenlabs"
+      ? textoTTS.length / 1000 * 0.30
+      : textoTTS.length / 1_000_000 * 15,
+    provedor:         provedorUsado,
+    voiceId:          autorVoiceId ?? null,
     storage:          "r2",
     createdAt:        Timestamp.now(),
   }).catch(() => {});
