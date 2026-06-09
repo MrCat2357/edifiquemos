@@ -167,8 +167,29 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
-// SecaoMinhaVoz — Fase 9
+// SecaoMinhaVoz — Fase 9 (com gravador inline estilo WhatsApp)
 // ---------------------------------------------------------------------------
+
+const SALMO_1 = [
+  { num: "¹", texto: "Bem-aventurado o homem que não anda no conselho dos ímpios, não se detém no caminho dos pecadores, nem se assenta na roda dos escarnecedores." },
+  { num: "²", texto: "Antes, o seu prazer está na lei do Senhor, e na sua lei medita de dia e de noite." },
+  { num: "³", texto: "Ele é como árvore plantada junto a corrente de águas, que, no devido tempo, dá o seu fruto, e cuja folhagem não murcha; e tudo quanto ele faz será bem-sucedido." },
+  { num: "⁴", texto: "Os ímpios não são assim; são, porém, como a palha que o vento dispersa." },
+  { num: "⁵", texto: "Por isso, os perversos não prevalecerão no juízo, nem os pecadores, na congregação dos justos." },
+  { num: "⁶", texto: "Pois o Senhor conhece o caminho dos justos, mas o caminho dos ímpios perecerá." },
+];
+
+const MAX_GRAVACAO_MS = 120_000; // 2 minutos
+
+type ModoEntrada = "idle" | "gravando" | "revisando" | "arquivo";
+type EstadoGravacao = "parado" | "gravando";
+
+function formatarTempo(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return `${m}:${ss}`;
+}
 
 function SecaoMinhaVoz({
   uid,
@@ -182,42 +203,214 @@ function SecaoMinhaVoz({
   onToast: (msg: string) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  const [uploading, setUploading] = useState(false);
-  const [removendo, setRemovendo] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
+  // ── estado geral ──────────────────────────────────────────────────────────
+  const [uploading, setUploading]     = useState(false);
+  const [removendo, setRemovendo]     = useState(false);
+  const [previewing, setPreviewing]   = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
+  const [erroEnvio, setErroEnvio]     = useState<string | null>(null);
 
-  // Arquivo selecionado pelo usuário (ainda não enviado)
-  const [arquivoSelecionado, setArquivoSelecionado] = useState<File | null>(null);
-  const [erroArquivo, setErroArquivo] = useState<string | null>(null);
+  // ── modo de entrada: gravador ou arquivo ─────────────────────────────────
+  const [modoEntrada, setModoEntrada] = useState<ModoEntrada>("idle");
+
+  // ── estado do gravador ────────────────────────────────────────────────────
+  const [estadoGravacao, setEstadoGravacao]   = useState<EstadoGravacao>("parado");
+  const [tempoMs, setTempoMs]                 = useState(0);
+  const [amplitude, setAmplitude]             = useState(0);       // 0–1
+  const [erroGravador, setErroGravador]       = useState<string | null>(null);
+  const [avisoTempoMax, setAvisoTempoMax]     = useState(false);
+
+  // ── arquivo / blob prontos para enviar ───────────────────────────────────
+  const [arquivoSelecionado, setArquivoSelecionado] = useState<File | null>(null);  // upload
+  const [blobGravado, setBlobGravado]               = useState<Blob | null>(null);  // gravador
+  const [urlPreviewGravacao, setUrlPreviewGravacao] = useState<string | null>(null);
+
+  // ── refs do gravador ──────────────────────────────────────────────────────
+  const mediaRecorderRef  = useRef<MediaRecorder | null>(null);
+  const chunksRef         = useRef<BlobPart[]>([]);
+  const streamRef         = useRef<MediaStream | null>(null);
+  const audioCtxRef       = useRef<AudioContext | null>(null);
+  const analyserRef       = useRef<AnalyserNode | null>(null);
+  const animFrameRef      = useRef<number | null>(null);
+  const timerIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const inicioGravacaoRef = useRef<number>(0);
+  const autoStopRef       = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const voiceStatus = voiceData.voiceStatus ?? "none";
+  const MAX_FILE_SIZE = 10 * 1024 * 1024;
+  const ALLOWED_TYPES = ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave", "audio/mp4", "audio/x-m4a", "audio/webm", "audio/ogg"];
 
-  const ALLOWED_TYPES = ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave", "audio/mp4", "audio/x-m4a"];
-  const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+  // ── limpeza ao desmontar ──────────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      pararRecursos();
+      if (urlPreviewGravacao) URL.revokeObjectURL(urlPreviewGravacao);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  function pararRecursos() {
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    if (autoStopRef.current) clearTimeout(autoStopRef.current);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    audioCtxRef.current?.close().catch(() => {});
+    animFrameRef.current = null;
+    timerIntervalRef.current = null;
+    autoStopRef.current = null;
+    streamRef.current = null;
+    audioCtxRef.current = null;
+    analyserRef.current = null;
+  }
+
+  // ── iniciar gravação ──────────────────────────────────────────────────────
+  async function iniciarGravacao() {
+    setErroGravador(null);
+    setAvisoTempoMax(false);
+
+    if (!window.MediaRecorder) {
+      setErroGravador("Seu navegador não suporta gravação. Use a opção 'Escolher arquivo'.");
+      return;
+    }
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setErroGravador("Permissão de microfone negada. Verifique as configurações do seu navegador.");
+      return;
+    }
+
+    streamRef.current = stream;
+    chunksRef.current = [];
+
+    // Escolhe o melhor formato suportado
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : MediaRecorder.isTypeSupported("audio/webm")
+      ? "audio/webm"
+      : "";
+
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    mediaRecorderRef.current = recorder;
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+      const url  = URL.createObjectURL(blob);
+      setBlobGravado(blob);
+      setUrlPreviewGravacao(url);
+      setModoEntrada("revisando");
+      setEstadoGravacao("parado");
+      pararRecursos();
+    };
+
+    recorder.start(100); // coleta chunks a cada 100ms
+
+    // ── amplitude via AnalyserNode ──────────────────────────────────────────
+    try {
+      const ctx      = new AudioContext();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      audioCtxRef.current = ctx;
+      analyserRef.current = analyser;
+
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      function tick() {
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((s, v) => s + v, 0) / data.length;
+        setAmplitude(Math.min(avg / 80, 1)); // normaliza ~0-1
+        animFrameRef.current = requestAnimationFrame(tick);
+      }
+      tick();
+    } catch { /* amplitude opcional — não bloqueia gravação */ }
+
+    // ── timer ──────────────────────────────────────────────────────────────
+    inicioGravacaoRef.current = Date.now();
+    setTempoMs(0);
+    timerIntervalRef.current = setInterval(() => {
+      setTempoMs(Date.now() - inicioGravacaoRef.current);
+    }, 200);
+
+    // ── auto-stop aos 120s ─────────────────────────────────────────────────
+    autoStopRef.current = setTimeout(() => {
+      setAvisoTempoMax(true);
+      pararGravacao();
+    }, MAX_GRAVACAO_MS);
+
+    setEstadoGravacao("gravando");
+  }
+
+  function pararGravacao() {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    if (autoStopRef.current) clearTimeout(autoStopRef.current);
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    setAmplitude(0);
+  }
+
+  function descartarGravacao() {
+    if (urlPreviewGravacao) URL.revokeObjectURL(urlPreviewGravacao);
+    setBlobGravado(null);
+    setUrlPreviewGravacao(null);
+    setTempoMs(0);
+    setAvisoTempoMax(false);
+    setErroGravador(null);
+    setEstadoGravacao("parado");
+    setModoEntrada("gravando"); // volta para o painel com o botão de gravar
+  }
+
+  function fecharPainel() {
+    pararRecursos();
+    if (urlPreviewGravacao) URL.revokeObjectURL(urlPreviewGravacao);
+    setBlobGravado(null);
+    setUrlPreviewGravacao(null);
+    setArquivoSelecionado(null);
+    setTempoMs(0);
+    setAvisoTempoMax(false);
+    setErroGravador(null);
+    setErroEnvio(null);
+    setEstadoGravacao("parado");
+    setModoEntrada("idle");
+  }
+
+  // ── escolher arquivo ──────────────────────────────────────────────────────
   function onEscolherArquivo(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setErroArquivo(null);
-
+    setErroEnvio(null);
     if (!ALLOWED_TYPES.includes(file.type)) {
-      setErroArquivo("Formato inválido. Use MP3, WAV ou M4A.");
+      setErroEnvio("Formato inválido. Use MP3, WAV ou M4A.");
       return;
     }
-    if (file.size > MAX_SIZE) {
-      setErroArquivo("Arquivo muito grande. Máximo: 10 MB.");
+    if (file.size > MAX_FILE_SIZE) {
+      setErroEnvio("Arquivo muito grande. Máximo: 10 MB.");
       return;
     }
     setArquivoSelecionado(file);
   }
 
-  async function handleCriarVoz() {
-    if (!arquivoSelecionado) return;
+  // ── enviar para a API (reutilizado por gravação e upload) ─────────────────
+  async function handleCriarVoz(origem: "arquivo" | "gravacao") {
+    const payload =
+      origem === "arquivo"
+        ? arquivoSelecionado
+        : blobGravado
+        ? new File([blobGravado], "gravacao.webm", { type: blobGravado.type || "audio/webm" })
+        : null;
+
+    if (!payload) return;
     setUploading(true);
-    setErroArquivo(null);
+    setErroEnvio(null);
 
     try {
       const user = auth.currentUser;
@@ -225,7 +418,7 @@ function SecaoMinhaVoz({
       const token = await user.getIdToken();
 
       const formData = new FormData();
-      formData.append("audio", arquivoSelecionado, arquivoSelecionado.name);
+      formData.append("audio", payload, (payload as File).name ?? "gravacao.webm");
 
       const res = await fetch("/api/voice/create", {
         method: "POST",
@@ -234,10 +427,7 @@ function SecaoMinhaVoz({
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data?.error ?? `Erro ${res.status}`);
-      }
+      if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
 
       onVoiceChange({
         voiceId: data.voiceId,
@@ -245,17 +435,18 @@ function SecaoMinhaVoz({
         voiceStatus: "ready",
         voiceProvider: "elevenlabs",
       });
-      setArquivoSelecionado(null);
+      fecharPainel();
       onToast("Voz criada com sucesso!");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Erro ao criar voz.";
-      setErroArquivo(msg);
+      setErroEnvio(msg);
       onToast("Erro ao criar voz.");
     } finally {
       setUploading(false);
     }
   }
 
+  // ── remover voz ───────────────────────────────────────────────────────────
   async function handleRemoverVoz() {
     if (!confirm("Remover sua voz clonada? Próximas gerações usarão a voz padrão.")) return;
     setRemovendo(true);
@@ -263,81 +454,60 @@ function SecaoMinhaVoz({
       const user = auth.currentUser;
       if (!user) throw new Error("Não autenticado.");
       const token = await user.getIdToken();
-
       const res = await fetch("/api/voice/create", {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
-
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data?.error ?? `Erro ${res.status}`);
       }
-
       onVoiceChange({ voiceStatus: "none" });
       onToast("Voz removida. Voltando para voz padrão.");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Erro ao remover voz.";
-      onToast(msg);
+      onToast(err instanceof Error ? err.message : "Erro ao remover voz.");
     } finally {
       setRemovendo(false);
     }
   }
 
+  // ── preview da voz pronta ─────────────────────────────────────────────────
   async function handlePreview() {
     if (previewing || audioPlaying) {
-      // Para o áudio se estiver tocando
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-        setAudioPlaying(false);
-      }
+      previewAudioRef.current?.pause();
+      previewAudioRef.current = null;
+      setAudioPlaying(false);
       return;
     }
-
     setPreviewing(true);
     try {
       const user = auth.currentUser;
       if (!user) throw new Error("Não autenticado.");
       const token = await user.getIdToken();
-
       const res = await fetch("/api/voice/preview", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data?.error ?? `Erro ${res.status}`);
       }
-
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const url  = URL.createObjectURL(blob);
       const audio = new Audio(url);
-      audioRef.current = audio;
-
-      audio.onended = () => {
-        setAudioPlaying(false);
-        URL.revokeObjectURL(url);
-        audioRef.current = null;
-      };
-      audio.onerror = () => {
-        setAudioPlaying(false);
-        URL.revokeObjectURL(url);
-        audioRef.current = null;
-      };
-
+      previewAudioRef.current = audio;
+      audio.onended = () => { setAudioPlaying(false); URL.revokeObjectURL(url); previewAudioRef.current = null; };
+      audio.onerror = () => { setAudioPlaying(false); URL.revokeObjectURL(url); previewAudioRef.current = null; };
       await audio.play();
       setAudioPlaying(true);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Erro ao gerar preview.";
-      onToast(msg);
+      onToast(err instanceof Error ? err.message : "Erro ao gerar preview.");
     } finally {
       setPreviewing(false);
     }
   }
 
-  // Labels e cores por status
+  // ── helpers visuais ───────────────────────────────────────────────────────
   const statusConfig: Record<VoiceStatus, { label: string; color: string; bg: string; icon: string }> = {
     none:       { label: "Sem voz configurada", color: "var(--text-3)",          bg: "var(--bg-card)",      icon: "🎙️" },
     processing: { label: "Processando…",        color: "var(--amber, #f59e0b)",  bg: "rgba(245,158,11,.1)", icon: "⏳" },
@@ -346,64 +516,56 @@ function SecaoMinhaVoz({
   };
   const sc = statusConfig[voiceStatus];
 
+  const btnBase: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", gap: "6px",
+    padding: "8px 16px", borderRadius: "var(--radius-full)",
+    fontSize: "0.82rem", fontWeight: 600, cursor: "pointer",
+    transition: "all 0.15s", fontFamily: "inherit",
+  };
+
+  // Barras de amplitude — 5 barras com alturas variadas
+  const barHeights = [0.5, 0.75, 1, 0.75, 0.5];
+
   return (
     <div style={{
-      background: "var(--bg-card)",
-      border: "1px solid var(--border)",
-      borderRadius: "var(--radius-lg)",
-      padding: "1.5rem",
-      marginBottom: "1.5rem",
+      background: "var(--bg-card)", border: "1px solid var(--border)",
+      borderRadius: "var(--radius-lg)", padding: "1.5rem", marginBottom: "1.5rem",
     }}>
       {/* Cabeçalho */}
       <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", marginBottom: "1rem" }}>
         <span style={{ fontSize: "1.1rem" }}>🎙️</span>
-        <h2 style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--text-1)", margin: 0 }}>
-          Minha Voz
-        </h2>
+        <h2 style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--text-1)", margin: 0 }}>Minha Voz</h2>
       </div>
 
       {/* Badge de status */}
       <div style={{
         display: "inline-flex", alignItems: "center", gap: "6px",
         padding: "5px 12px", borderRadius: "var(--radius-full)",
-        background: sc.bg, color: sc.color,
-        fontSize: "0.78rem", fontWeight: 600,
-        marginBottom: "1.125rem",
-        border: `1px solid ${sc.color}22`,
+        background: sc.bg, color: sc.color, fontSize: "0.78rem", fontWeight: 600,
+        marginBottom: "1.125rem", border: `1px solid ${sc.color}22`,
       }}>
-        <span>{sc.icon}</span>
-        <span>{sc.label}</span>
+        <span>{sc.icon}</span><span>{sc.label}</span>
       </div>
 
       {/* Descrição */}
       <p style={{ fontSize: "0.82rem", color: "var(--text-3)", lineHeight: 1.6, marginBottom: "1.25rem" }}>
         {voiceStatus === "ready"
-          ? "Seus próximos sermões e estudos serão narrados com a sua voz. Para atualizar, envie uma nova amostra."
-          : "Envie uma amostra de 30 a 120 segundos da sua voz para que seus sermões e estudos sejam narrados com ela."}
+          ? "Seus próximos sermões e estudos serão narrados com a sua voz. Para atualizar, grave ou envie uma nova amostra."
+          : "Grave sua voz agora ou envie um arquivo de 30 a 120 segundos de fala limpa."}
       </p>
 
-      {/* Ações quando a voz está pronta */}
+      {/* Botões "Ouvir minha voz" + "Remover" quando voz está pronta */}
       {voiceStatus === "ready" && (
         <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap", marginBottom: "1.25rem" }}>
-          <button
-            onClick={handlePreview}
-            disabled={previewing}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: "6px",
-              padding: "7px 16px", borderRadius: "var(--radius-full)",
-              border: "1px solid var(--emerald-dim)",
-              background: audioPlaying ? "var(--emerald-dim)" : "transparent",
-              color: "var(--emerald)",
-              fontSize: "0.82rem", fontWeight: 600,
-              cursor: previewing ? "default" : "pointer",
-              opacity: previewing ? 0.7 : 1,
-              transition: "all 0.15s",
-            }}
-          >
+          <button onClick={handlePreview} disabled={previewing} style={{
+            ...btnBase,
+            border: "1px solid var(--emerald-dim)",
+            background: audioPlaying ? "var(--emerald-dim)" : "transparent",
+            color: "var(--emerald)", opacity: previewing ? 0.7 : 1,
+            cursor: previewing ? "default" : "pointer",
+          }}>
             {previewing ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-              </svg>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
             ) : audioPlaying ? (
               <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
             ) : (
@@ -411,106 +573,298 @@ function SecaoMinhaVoz({
             )}
             {previewing ? "Gerando preview…" : audioPlaying ? "Parar" : "Ouvir minha voz"}
           </button>
-
-          <button
-            onClick={handleRemoverVoz}
-            disabled={removendo}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: "6px",
-              padding: "7px 16px", borderRadius: "var(--radius-full)",
-              border: "1px solid var(--border)",
-              background: "transparent",
-              color: "var(--text-3)",
-              fontSize: "0.82rem", fontWeight: 600,
-              cursor: removendo ? "default" : "pointer",
-              opacity: removendo ? 0.6 : 1,
-              transition: "all 0.15s",
-            }}
-          >
+          <button onClick={handleRemoverVoz} disabled={removendo} style={{
+            ...btnBase, border: "1px solid var(--border)", background: "transparent",
+            color: "var(--text-3)", opacity: removendo ? 0.6 : 1, cursor: removendo ? "default" : "pointer",
+          }}>
             {removendo ? "Removendo…" : "🗑 Remover voz"}
           </button>
         </div>
       )}
 
-      {/* Upload de amostra — visível em todos os estados exceto "processing" */}
+      {/* ── Seção de amostra — visível exceto em "processing" ── */}
       {voiceStatus !== "processing" && (
         <div>
-          <div style={{ marginBottom: "0.625rem" }}>
-            <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-2)" }}>
-              {voiceStatus === "ready" ? "Atualizar amostra" : "Enviar amostra de voz"}
-            </label>
-            <p style={{ fontSize: "0.75rem", color: "var(--text-3)", marginTop: "2px" }}>
-              MP3, WAV ou M4A · 30–120 s de fala limpa · máx. 10 MB
-            </p>
-          </div>
+          <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-2)", display: "block", marginBottom: "0.75rem" }}>
+            {voiceStatus === "ready" ? "Atualizar amostra de voz" : "Criar amostra de voz"}
+          </label>
 
-          <div style={{ display: "flex", gap: "0.625rem", alignItems: "center", flexWrap: "wrap" }}>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              style={{
-                padding: "7px 16px", borderRadius: "var(--radius-full)",
-                border: "1px dashed var(--border)",
-                background: "transparent",
-                color: arquivoSelecionado ? "var(--emerald)" : "var(--text-3)",
-                fontSize: "0.82rem", fontWeight: 600,
-                cursor: uploading ? "default" : "pointer",
-                transition: "all 0.15s",
-              }}
-            >
-              {arquivoSelecionado
-                ? `📎 ${arquivoSelecionado.name}`
-                : "📂 Escolher arquivo"}
-            </button>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".mp3,.wav,.m4a,audio/mpeg,audio/wav,audio/mp4,audio/x-m4a"
-              style={{ display: "none" }}
-              onChange={onEscolherArquivo}
-            />
-
-            {arquivoSelecionado && (
+          {/* Dois botões de entrada — visíveis só quando não há painel aberto */}
+          {modoEntrada === "idle" && (
+            <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap" }}>
               <button
-                onClick={handleCriarVoz}
-                disabled={uploading}
+                onClick={() => { setErroEnvio(null); setModoEntrada("gravando"); setEstadoGravacao("parado"); }}
                 style={{
-                  padding: "7px 20px", borderRadius: "var(--radius-full)",
-                  border: "none",
-                  background: "var(--emerald)",
-                  color: "#fff",
-                  fontSize: "0.82rem", fontWeight: 700,
-                  cursor: uploading ? "default" : "pointer",
-                  opacity: uploading ? 0.7 : 1,
-                  transition: "all 0.15s",
+                  ...btnBase,
+                  border: "1px solid var(--emerald-dim)",
+                  background: "var(--emerald-dim)",
+                  color: "var(--emerald)",
                 }}
               >
-                {uploading ? "Criando voz…" : voiceStatus === "ready" ? "Atualizar voz" : "Criar minha voz"}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
+                  <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+                Gravar agora
               </button>
-            )}
-          </div>
 
-          {erroArquivo && (
+              <button
+                onClick={() => { setErroEnvio(null); setModoEntrada("arquivo"); fileInputRef.current?.click(); }}
+                style={{
+                  ...btnBase,
+                  border: "1px dashed var(--border)",
+                  background: "transparent",
+                  color: "var(--text-3)",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                Escolher arquivo
+              </button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".mp3,.wav,.m4a,.webm,.ogg,audio/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  onEscolherArquivo(e);
+                  // Se arquivo válido foi selecionado, permanece em "arquivo"
+                  // para mostrar botão de confirmar
+                }}
+              />
+            </div>
+          )}
+
+          {/* ── Painel: arquivo selecionado ── */}
+          {modoEntrada === "arquivo" && (
+            <div style={{
+              marginTop: "0.875rem", padding: "1.125rem",
+              background: "var(--bg-elevated)", borderRadius: "var(--radius-lg)",
+              border: "1px solid var(--border)",
+            }}>
+              {arquivoSelecionado ? (
+                <>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-2)", marginBottom: "0.875rem" }}>
+                    📎 <strong>{arquivoSelecionado.name}</strong>
+                    <span style={{ color: "var(--text-3)", marginLeft: "6px" }}>
+                      ({(arquivoSelecionado.size / 1024 / 1024).toFixed(1)} MB)
+                    </span>
+                  </p>
+                  <div style={{ display: "flex", gap: "0.625rem" }}>
+                    <button
+                      onClick={() => handleCriarVoz("arquivo")} disabled={uploading}
+                      style={{
+                        ...btnBase, border: "none", background: "var(--emerald)", color: "#fff",
+                        opacity: uploading ? 0.7 : 1, cursor: uploading ? "default" : "pointer",
+                      }}
+                    >
+                      {uploading ? "Enviando…" : voiceStatus === "ready" ? "Atualizar voz" : "Criar minha voz"}
+                    </button>
+                    <button onClick={fecharPainel} disabled={uploading} style={{
+                      ...btnBase, border: "1px solid var(--border)", background: "transparent",
+                      color: "var(--text-3)", cursor: uploading ? "default" : "pointer",
+                    }}>
+                      Cancelar
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-3)" }}>Nenhum arquivo selecionado.</p>
+                  <button onClick={fecharPainel} style={{ ...btnBase, border: "none", background: "none", color: "var(--text-3)", padding: "4px 8px" }}>✕</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Painel: gravador ── */}
+          {(modoEntrada === "gravando" || modoEntrada === "revisando") && (
+            <div style={{
+              marginTop: "0.875rem", padding: "1.25rem",
+              background: "var(--bg-elevated)", borderRadius: "var(--radius-lg)",
+              border: "1px solid var(--border)",
+            }}>
+
+              {/* Sugestão de leitura — visível antes e durante a gravação */}
+              {modoEntrada === "gravando" && (
+                <div style={{
+                  marginBottom: "1.25rem", padding: "1rem",
+                  background: "var(--bg-card)", borderRadius: "var(--radius-lg)",
+                  border: "1px solid var(--border)",
+                }}>
+                  <p style={{ fontSize: "0.72rem", color: "var(--emerald)", fontWeight: 600, marginBottom: "0.625rem", letterSpacing: "0.03em", textTransform: "uppercase" }}>
+                    Sugestão de leitura — leia em voz natural, no seu próprio ritmo
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    {SALMO_1.map((v) => (
+                      <p key={v.num} style={{ fontSize: "0.85rem", lineHeight: 1.7, color: "var(--text-2)", margin: 0 }}>
+                        <span style={{ color: "var(--emerald)", fontWeight: 700, marginRight: "4px" }}>{v.num}</span>
+                        {v.texto}
+                      </p>
+                    ))}
+                  </div>
+                  <p style={{ fontSize: "0.72rem", color: "var(--text-3)", marginTop: "0.75rem", fontStyle: "italic" }}>
+                    Salmos 1:1-6
+                  </p>
+                </div>
+              )}
+
+              {/* Controles do gravador */}
+              {modoEntrada === "gravando" && estadoGravacao === "parado" && (
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+                  <button
+                    onClick={iniciarGravacao}
+                    style={{
+                      width: "52px", height: "52px", borderRadius: "50%",
+                      border: "none", background: "var(--emerald)", color: "#fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      cursor: "pointer", flexShrink: 0,
+                      boxShadow: "0 0 0 4px var(--emerald-dim)",
+                      transition: "transform 0.15s",
+                    }}
+                    title="Iniciar gravação"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
+                      <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                  </button>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-3)", margin: 0 }}>
+                    Toque no microfone para começar a gravar
+                  </p>
+                  <button onClick={fecharPainel} style={{ marginLeft: "auto", ...btnBase, border: "none", background: "none", color: "var(--text-3)", padding: "4px 8px" }}>✕</button>
+                </div>
+              )}
+
+              {modoEntrada === "gravando" && estadoGravacao === "gravando" && (
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+                  {/* Botão parar */}
+                  <button
+                    onClick={pararGravacao}
+                    style={{
+                      width: "52px", height: "52px", borderRadius: "50%",
+                      border: "none", background: "#ef4444", color: "#fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      cursor: "pointer", flexShrink: 0,
+                      boxShadow: "0 0 0 4px rgba(239,68,68,0.2)",
+                      animation: "pulse-red 1.4s ease-in-out infinite",
+                    }}
+                    title="Parar gravação"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                  </button>
+
+                  {/* Barras de amplitude */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "3px", height: "32px" }}>
+                    {barHeights.map((h, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          width: "4px",
+                          height: `${Math.max(6, amplitude * h * 32)}px`,
+                          background: "var(--emerald)",
+                          borderRadius: "2px",
+                          transition: "height 0.1s ease",
+                          opacity: 0.6 + amplitude * 0.4,
+                        }}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Timer */}
+                  <span style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text-1)", fontVariantNumeric: "tabular-nums", minWidth: "36px" }}>
+                    {formatarTempo(tempoMs)}
+                  </span>
+
+                  <span style={{ fontSize: "0.72rem", color: "var(--text-3)", marginLeft: "auto" }}>
+                    máx. 2:00
+                  </span>
+                </div>
+              )}
+
+              {/* Aviso de tempo máximo */}
+              {avisoTempoMax && (
+                <p style={{ fontSize: "0.78rem", color: "var(--amber, #f59e0b)", marginTop: "0.5rem" }}>
+                  ⏱ Tempo máximo atingido. Ouça e confirme abaixo.
+                </p>
+              )}
+
+              {/* ── Estado de revisão: mini-player ── */}
+              {modoEntrada === "revisando" && urlPreviewGravacao && (
+                <div>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-2)", marginBottom: "0.75rem", fontWeight: 600 }}>
+                    ✅ Gravação concluída — ouça antes de enviar:
+                  </p>
+                  <audio
+                    src={urlPreviewGravacao}
+                    controls
+                    style={{ width: "100%", marginBottom: "1rem", borderRadius: "var(--radius-full)", accentColor: "var(--emerald)" }}
+                  />
+                  <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap" }}>
+                    <button
+                      onClick={() => handleCriarVoz("gravacao")} disabled={uploading}
+                      style={{
+                        ...btnBase, border: "none", background: "var(--emerald)", color: "#fff",
+                        opacity: uploading ? 0.7 : 1, cursor: uploading ? "default" : "pointer",
+                      }}
+                    >
+                      {uploading ? "Enviando…" : voiceStatus === "ready" ? "Atualizar voz" : "Usar esta gravação"}
+                    </button>
+                    <button onClick={descartarGravacao} disabled={uploading} style={{
+                      ...btnBase, border: "1px solid var(--border)", background: "transparent",
+                      color: "var(--text-3)", cursor: uploading ? "default" : "pointer",
+                    }}>
+                      🔄 Gravar novamente
+                    </button>
+                    <button onClick={fecharPainel} disabled={uploading} style={{
+                      ...btnBase, border: "none", background: "none",
+                      color: "var(--text-3)", cursor: uploading ? "default" : "pointer",
+                    }}>
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Erro do gravador */}
+              {erroGravador && (
+                <p style={{ fontSize: "0.78rem", color: "var(--red, #ef4444)", marginTop: "0.75rem" }}>
+                  ⚠️ {erroGravador}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Erro de envio */}
+          {erroEnvio && (
             <p style={{ fontSize: "0.78rem", color: "var(--red, #ef4444)", marginTop: "0.5rem" }}>
-              ⚠️ {erroArquivo}
+              ⚠️ {erroEnvio}
             </p>
           )}
         </div>
       )}
 
-      {/* Estado "processing" — feedback visual */}
+      {/* Estado "processing" */}
       {voiceStatus === "processing" && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: "8px",
-          color: "var(--amber, #f59e0b)", fontSize: "0.82rem",
-        }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--amber, #f59e0b)", fontSize: "0.82rem" }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
           </svg>
           Sua voz está sendo processada pelo provedor. Isso pode levar alguns instantes.
         </div>
       )}
+
+      <style>{`
+        @keyframes pulse-red {
+          0%, 100% { box-shadow: 0 0 0 4px rgba(239,68,68,0.2); }
+          50%       { box-shadow: 0 0 0 8px rgba(239,68,68,0.08); }
+        }
+      `}</style>
     </div>
   );
 }
