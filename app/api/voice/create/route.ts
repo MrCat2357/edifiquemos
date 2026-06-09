@@ -1,10 +1,12 @@
 /**
  * app/api/voice/create/route.ts
  *
- * Fase 9 — Clonagem de voz por autor
+ * Fase 10 — após criar ou remover voz, dispara invalidação dos posts do autor.
  *
- * POST  → cria a voz clonada a partir de uma amostra de áudio
- * DELETE → remove a voz do provedor e limpa o Firestore
+ * Mudança desta fase:
+ *   MUDANÇA F10 — ao final do POST (voz criada) e do DELETE (voz removida),
+ *                 chama /api/tts/invalidar-autor passando o Bearer token
+ *                 original para que a rota autentique o autor corretamente.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -29,7 +31,7 @@ function ensureAdminInitialized() {
   initializeApp(
     {
       credential: cert({
-        projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
+        projectId:   process.env.FIREBASE_ADMIN_PROJECT_ID,
         clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
         privateKey,
       }),
@@ -52,7 +54,7 @@ function getS3Client(): S3Client {
     region: "auto",
     endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
     credentials: {
-      accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+      accessKeyId:     process.env.R2_ACCESS_KEY_ID!,
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
     },
   });
@@ -63,34 +65,25 @@ function getS3Client(): S3Client {
 // ---------------------------------------------------------------------------
 
 const ALLOWED_AUDIO_TYPES = [
-  "audio/mpeg",       // .mp3
-  "audio/mp3",
-  "audio/wav",        // .wav
-  "audio/x-wav",
-  "audio/wave",
-  "audio/mp4",        // .m4a
-  "audio/x-m4a",
-  "audio/aac",
-  "audio/ogg",
-  "audio/webm",
+  "audio/mpeg", "audio/mp3",
+  "audio/wav", "audio/x-wav", "audio/wave",
+  "audio/mp4", "audio/x-m4a",
+  "audio/aac", "audio/ogg", "audio/webm",
 ];
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
 // ---------------------------------------------------------------------------
-// ElevenLabs — criação de voz clonada
+// ElevenLabs — criação / remoção de voz clonada
 // ---------------------------------------------------------------------------
 
-interface ElevenLabsVoice {
-  voice_id: string;
-  name: string;
-}
+interface ElevenLabsVoice { voice_id: string; name: string; }
 
 async function criarVozElevenLabs(
-  nomeVoz: string,
+  nomeVoz:     string,
   audioBuffer: Buffer,
-  mimeType: string,
-  fileName: string
+  mimeType:    string,
+  fileName:    string,
 ): Promise<string> {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) throw new Error("ELEVENLABS_API_KEY não configurada.");
@@ -103,14 +96,13 @@ async function criarVozElevenLabs(
   formData.append("files", blob, fileName);
 
   const res = await fetch("https://api.elevenlabs.io/v1/voices/add", {
-    method: "POST",
+    method:  "POST",
     headers: { "xi-api-key": apiKey },
-    body: formData,
+    body:    formData,
   });
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => "");
-    console.error("[Voice] ElevenLabs error:", res.status, errorBody);
     throw new Error(`ElevenLabs retornou ${res.status}: ${errorBody}`);
   }
 
@@ -123,14 +115,13 @@ async function removerVozElevenLabs(voiceId: string): Promise<void> {
   if (!apiKey) return;
 
   const res = await fetch(`https://api.elevenlabs.io/v1/voices/${voiceId}`, {
-    method: "DELETE",
+    method:  "DELETE",
     headers: { "xi-api-key": apiKey },
   });
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => "");
     console.warn("[Voice] ElevenLabs DELETE error:", res.status, errorBody);
-    // Não lança erro — prossegue mesmo que o provider falhe
   }
 }
 
@@ -141,13 +132,41 @@ async function removerVozElevenLabs(voiceId: string): Promise<void> {
 function extensaoPorMime(mime: string): string {
   const map: Record<string, string> = {
     "audio/mpeg": "mp3", "audio/mp3": "mp3",
-    "audio/wav": "wav", "audio/x-wav": "wav", "audio/wave": "wav",
-    "audio/mp4": "m4a", "audio/x-m4a": "m4a",
-    "audio/aac": "aac",
-    "audio/ogg": "ogg",
+    "audio/wav":  "wav", "audio/x-wav": "wav", "audio/wave": "wav",
+    "audio/mp4":  "m4a", "audio/x-m4a": "m4a",
+    "audio/aac":  "aac",
+    "audio/ogg":  "ogg",
     "audio/webm": "webm",
   };
   return map[mime] ?? "bin";
+}
+
+// ---------------------------------------------------------------------------
+// MUDANÇA F10 — Disparar invalidação dos posts do autor (fire-and-forget)
+// ---------------------------------------------------------------------------
+
+function dispararInvalidacao(idToken: string): void {
+  const baseUrl = process.env.NEXTAUTH_URL
+    ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+
+  fetch(`${baseUrl}/api/tts/invalidar-autor`, {
+    method:  "POST",
+    headers: {
+      "Content-Type":  "application/json",
+      Authorization:   `Bearer ${idToken}`,
+    },
+  })
+    .then(async (res) => {
+      if (res.ok) {
+        const data = await res.json() as { invalidados?: number };
+        console.log(`[Voice] Invalidação disparada: ${data.invalidados ?? 0} posts marcados como stale.`);
+      } else {
+        console.warn("[Voice] Invalidação retornou status:", res.status);
+      }
+    })
+    .catch((err) => {
+      console.error("[Voice] Falha ao disparar invalidação (non-fatal):", err);
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -179,10 +198,8 @@ export async function POST(req: NextRequest) {
 
   // ── Validação de variáveis de ambiente ────────────────────────────────────
   if (
-    !process.env.R2_ACCOUNT_ID ||
-    !process.env.R2_ACCESS_KEY_ID ||
-    !process.env.R2_SECRET_ACCESS_KEY ||
-    !process.env.R2_BUCKET_NAME ||
+    !process.env.R2_ACCOUNT_ID || !process.env.R2_ACCESS_KEY_ID ||
+    !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET_NAME ||
     !process.env.R2_PUBLIC_URL
   ) {
     return NextResponse.json({ error: "Configuração de storage ausente." }, { status: 500 });
@@ -194,11 +211,8 @@ export async function POST(req: NextRequest) {
 
   // ── Parse multipart ───────────────────────────────────────────────────────
   let formData: FormData;
-  try {
-    formData = await req.formData();
-  } catch {
-    return NextResponse.json({ error: "Corpo da requisição inválido." }, { status: 400 });
-  }
+  try { formData = await req.formData(); }
+  catch { return NextResponse.json({ error: "Corpo da requisição inválido." }, { status: 400 }); }
 
   const file = formData.get("audio");
   if (!file || !(file instanceof File)) {
@@ -206,9 +220,9 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Validação do arquivo ──────────────────────────────────────────────────
-  const mimeType   = file.type || "audio/mpeg";
-  const fileSize   = file.size;
-  const fileName   = file.name || `amostra.${extensaoPorMime(mimeType)}`;
+  const mimeType = file.type || "audio/mpeg";
+  const fileSize = file.size;
+  const fileName = file.name || `amostra.${extensaoPorMime(mimeType)}`;
 
   if (!ALLOWED_AUDIO_TYPES.includes(mimeType)) {
     return NextResponse.json(
@@ -236,7 +250,6 @@ export async function POST(req: NextRequest) {
       ? `${userData.titulo} ${userData.nome}`
       : userData.nome || "Autor";
 
-  // Se já existe uma voz anterior, remove do provedor (mas não bloqueia em caso de falha)
   const voiceIdAnterior = userData.voiceId as string | undefined;
   if (voiceIdAnterior) {
     removerVozElevenLabs(voiceIdAnterior).catch((err) =>
@@ -244,26 +257,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── Marcar como "processing" no Firestore ─────────────────────────────────
+  // ── Marcar como "processing" ──────────────────────────────────────────────
   await userRef.set(
     { voiceStatus: "processing", voiceUpdatedAt: Timestamp.now() },
     { merge: true }
   );
 
   // ── Upload da amostra para R2 ─────────────────────────────────────────────
-  const ext         = extensaoPorMime(mimeType);
-  const r2Key       = `voice-samples/${uid}/amostra.${ext}`;
-  const sampleUrl   = `${process.env.R2_PUBLIC_URL}/${r2Key}`;
+  const ext       = extensaoPorMime(mimeType);
+  const r2Key     = `voice-samples/${uid}/amostra.${ext}`;
+  const sampleUrl = `${process.env.R2_PUBLIC_URL}/${r2Key}`;
 
   try {
-    await getS3Client().send(
-      new PutObjectCommand({
-        Bucket:      process.env.R2_BUCKET_NAME!,
-        Key:         r2Key,
-        Body:        audioBuffer,
-        ContentType: mimeType,
-      })
-    );
+    await getS3Client().send(new PutObjectCommand({
+      Bucket:      process.env.R2_BUCKET_NAME!,
+      Key:         r2Key,
+      Body:        audioBuffer,
+      ContentType: mimeType,
+    }));
   } catch (err) {
     console.error("[Voice] Erro ao fazer upload da amostra para R2:", err);
     await userRef.set(
@@ -309,6 +320,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ── MUDANÇA F10 — Invalidar posts com voz anterior (fire-and-forget) ──────
+  dispararInvalidacao(idToken);
+
   console.log(`[Voice] Voz criada com sucesso para uid=${uid}, voiceId=${voiceId}`);
   return NextResponse.json({ voiceId, voiceSampleUrl: sampleUrl });
 }
@@ -344,9 +358,9 @@ export async function DELETE(req: NextRequest) {
   const userSnap = await userRef.get();
   const userData = userSnap.data() ?? {};
 
-  const voiceId      = userData.voiceId      as string | undefined;
-  const voiceProvider = userData.voiceProvider as string | undefined;
-  const ext          = (userData.voiceSampleUrl as string | undefined)?.split(".").pop() ?? "mp3";
+  const voiceId       = userData.voiceId       as string | undefined;
+  const voiceProvider = userData.voiceProvider  as string | undefined;
+  const ext           = (userData.voiceSampleUrl as string | undefined)?.split(".").pop() ?? "mp3";
 
   // ── Remover do provedor TTS ───────────────────────────────────────────────
   if (voiceId && voiceProvider === "elevenlabs") {
@@ -357,10 +371,8 @@ export async function DELETE(req: NextRequest) {
 
   // ── Remover amostra do R2 ─────────────────────────────────────────────────
   if (
-    process.env.R2_BUCKET_NAME &&
-    process.env.R2_ACCOUNT_ID &&
-    process.env.R2_ACCESS_KEY_ID &&
-    process.env.R2_SECRET_ACCESS_KEY
+    process.env.R2_BUCKET_NAME && process.env.R2_ACCOUNT_ID &&
+    process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY
   ) {
     const r2Key = `voice-samples/${uid}/amostra.${ext}`;
     await getS3Client()
@@ -385,6 +397,13 @@ export async function DELETE(req: NextRequest) {
     console.error("[Voice] Erro ao limpar Firestore:", err);
     return NextResponse.json({ error: "Falha ao remover configuração de voz." }, { status: 500 });
   }
+
+  // ── MUDANÇA F10 — Invalidar posts que usavam a voz removida (fire-and-forget)
+  // Nota: idToken ainda é válido pois o usuário está autenticado nesta request.
+  // A rota /api/tts/invalidar-autor compara audioVoiceId dos posts com o
+  // voiceId atual (agora null, pois acabamos de remover), então todos os
+  // posts gerados com a voz anterior serão marcados como stale.
+  dispararInvalidacao(idToken);
 
   console.log(`[Voice] Voz removida para uid=${uid}`);
   return NextResponse.json({ ok: true });

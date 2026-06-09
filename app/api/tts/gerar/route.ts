@@ -1,21 +1,11 @@
 /**
  * app/api/tts/gerar/route.ts
  *
- * Prompt 7-C1 — Auto-recovery de "stuck generating" + handler PATCH admin.
+ * Fase 10 — Suporte a audioStatus "stale" + gravação de audioVoiceId.
  *
- * Histórico de mudanças:
- *   MUDANÇA 1  — @aws-sdk/client-s3
- *   MUDANÇA 2  — Upload para R2
- *   MUDANÇA 3  — audioContentHash e audioErrorCount no Firestore
- *   MUDANÇA 4  — Invalidação reativa por hash
- *   MUDANÇA 5  — Validação defensiva de URL cacheada
- *   MUDANÇA 6  — Rate limiting por erros consecutivos
- *   MUDANÇA 7  — Log de custo fire-and-forget em tts_logs
- *   MUDANÇA 8  — Purga programática do cache Cloudflare após upload R2
- *   MUDANÇA 9  — Hash trocado para SHA-256 (async)
- *   MUDANÇA 10 — Auto-recovery de posts travados em "generating" (7-C1.1)
- *   MUDANÇA 11 — Handler PATCH para ações administrativas (7-C1.3)
- *   MUDANÇA 12 — Fase 9: usa voz clonada do autor quando disponível
+ * Mudanças desta fase em relação à Fase 9:
+ *   MUDANÇA 13 — Status "stale" tratado como "none" (força regeneração lazy)
+ *   MUDANÇA 14 — Campo audioVoiceId salvo junto com audioUrl após geração
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -43,7 +33,7 @@ function ensureAdminInitialized() {
   initializeApp(
     {
       credential: cert({
-        projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
+        projectId:   process.env.FIREBASE_ADMIN_PROJECT_ID,
         clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
         privateKey,
       }),
@@ -66,7 +56,7 @@ function getS3Client(): S3Client {
     region: "auto",
     endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
     credentials: {
-      accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+      accessKeyId:     process.env.R2_ACCESS_KEY_ID!,
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
     },
   });
@@ -76,12 +66,13 @@ function getS3Client(): S3Client {
 // Tipos
 // ---------------------------------------------------------------------------
 
-type AudioStatus = "none" | "generating" | "ready" | "error";
+// MUDANÇA 13 — "stale" adicionado ao tipo AudioStatus
+type AudioStatus = "none" | "generating" | "ready" | "error" | "stale";
 type VoiceStatus = "none" | "processing" | "ready" | "error";
 
 interface TTSRequestBody {
   postId: string;
-  tipo: "sermao" | "estudo" | "reflexao";
+  tipo:   "sermao" | "estudo" | "reflexao";
   titulo: string;
 }
 
@@ -98,7 +89,7 @@ const STUCK_GENERATING_TIMEOUT_MS = 10 * 60 * 1000;
 async function verificarUrlAcessivel(url: string): Promise<boolean> {
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const timeoutId  = setTimeout(() => controller.abort(), 2000);
     const res = await fetch(url, { method: "HEAD", signal: controller.signal });
     clearTimeout(timeoutId);
     return res.status >= 200 && res.status <= 299;
@@ -232,7 +223,7 @@ function inteiroExtenso(n: number): string {
     return u === 0 ? DEZENAS[d] : `${DEZENAS[d]} e ${UNIDADES[u]}`;
   }
   if (n < 1000) {
-    const c = Math.floor(n / 100);
+    const c    = Math.floor(n / 100);
     const resto = n % 100;
     if (resto === 0) return CENTENAS[c];
     const centena = c === 1 ? "cento" : CENTENAS[c];
@@ -266,11 +257,11 @@ const ORDINAIS_FEM: Record<number, string> = {
 function ordinalExtenso(n: number, feminino: boolean): string {
   const tabela = feminino ? ORDINAIS_FEM : ORDINAIS_MASC;
   if (tabela[n]) return tabela[n];
-  const dezena = Math.floor(n / 10) * 10;
+  const dezena  = Math.floor(n / 10) * 10;
   const unidade = n % 10;
   if (unidade === 0) return tabela[dezena] ?? String(n);
   const base = tabela[dezena] ?? inteiroExtenso(dezena);
-  const uni = (feminino ? ORDINAIS_FEM : ORDINAIS_MASC)[unidade] ?? inteiroExtenso(unidade);
+  const uni  = (feminino ? ORDINAIS_FEM : ORDINAIS_MASC)[unidade] ?? inteiroExtenso(unidade);
   return `${base} ${uni}`;
 }
 
@@ -278,12 +269,12 @@ function converterOrdinaisEPorcentagens(texto: string): string {
   texto = texto.replace(
     /(\d+(?:[.,]\d+)?)\s*%/g,
     (_match, num) => {
-      const partes = num.replace(",", ".").split(".");
+      const partes  = num.replace(",", ".").split(".");
       const inteiro = parseInt(partes[0], 10);
       const temDecimal = partes.length > 1 && parseInt(partes[1], 10) !== 0;
       if (temDecimal) {
         const decStr = partes[1].replace(/0+$/, "");
-        const dec = parseInt(decStr, 10);
+        const dec    = parseInt(decStr, 10);
         return `${inteiroExtenso(inteiro)} vírgula ${inteiroExtenso(dec)} por cento`;
       }
       return `${inteiroExtenso(inteiro)} por cento`;
@@ -297,7 +288,7 @@ function converterOrdinaisEPorcentagens(texto: string): string {
     }
   );
   texto = texto.replace(/(\d+)\s*[º°]/g, (_match, num) => ordinalExtenso(parseInt(num, 10), false));
-  texto = texto.replace(/(\d+)\s*ª/g, (_match, num) => ordinalExtenso(parseInt(num, 10), true));
+  texto = texto.replace(/(\d+)\s*ª/g,    (_match, num) => ordinalExtenso(parseInt(num, 10), true));
   return texto;
 }
 
@@ -321,34 +312,32 @@ function limparConteudo(raw: string): string {
 }
 
 function montarTextoTTS(
-  titulo: string,
-  conteudo: string,
-  tipo: "sermao" | "estudo" | "reflexao",
-  autorNome?: string,
-  igreja?: string,
-  data?: string,
-  fraseInstigadora?: string,
+  titulo:           string,
+  conteudo:         string,
+  tipo:             "sermao" | "estudo" | "reflexao",
+  autorNome?:       string,
+  igreja?:          string,
+  data?:            string,
+  fraseInstigadora?:  string,
   perguntaReflexiva?: string,
 ): string {
   if (tipo === "reflexao") {
     const partes: string[] = [titulo.trim()];
-    if (autorNome?.trim()) partes.push(autorNome.trim());
-    if (fraseInstigadora?.trim()) partes.push(fraseInstigadora.trim());
+    if (autorNome?.trim())          partes.push(autorNome.trim());
+    if (fraseInstigadora?.trim())   partes.push(fraseInstigadora.trim());
     partes.push(conteudo);
-    if (perguntaReflexiva?.trim()) partes.push(perguntaReflexiva.trim());
+    if (perguntaReflexiva?.trim())  partes.push(perguntaReflexiva.trim());
     return partes.join(". ");
   }
   const partes: string[] = [titulo.trim()];
   if (autorNome?.trim()) partes.push(autorNome.trim());
-  if (igreja?.trim()) partes.push(igreja.trim());
-  if (data?.trim()) partes.push(data.trim());
+  if (igreja?.trim())    partes.push(igreja.trim());
+  if (data?.trim())      partes.push(data.trim());
   partes.push(conteudo);
   return partes.join(". ");
 }
 
-const TTS_MAX_CHARS = 4096;
-
-// ElevenLabs suporta até 5000 chars por request
+const TTS_MAX_CHARS        = 4096;
 const ELEVENLABS_MAX_CHARS = 4500;
 
 function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
@@ -357,9 +346,9 @@ function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
   let restante = texto;
   while (restante.length > 0) {
     if (restante.length <= maxChars) { chunks.push(restante); break; }
-    const fatia = restante.slice(0, maxChars);
+    const fatia      = restante.slice(0, maxChars);
     const ultimoPonto = fatia.lastIndexOf(". ");
-    const corte = ultimoPonto > maxChars * 0.5 ? ultimoPonto + 2 : maxChars;
+    const corte      = ultimoPonto > maxChars * 0.5 ? ultimoPonto + 2 : maxChars;
     chunks.push(restante.slice(0, corte).trim());
     restante = restante.slice(corte).trim();
   }
@@ -367,7 +356,7 @@ function dividirEmChunks(texto: string, maxChars = TTS_MAX_CHARS): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// MUDANÇA 12 — Geração de áudio via ElevenLabs (voz clonada)
+// Geração de áudio via ElevenLabs (voz clonada)
 // ---------------------------------------------------------------------------
 
 async function gerarBufferElevenLabs(voiceId: string, texto: string): Promise<Buffer> {
@@ -379,17 +368,17 @@ async function gerarBufferElevenLabs(voiceId: string, texto: string): Promise<Bu
     {
       method: "POST",
       headers: {
-        "xi-api-key": apiKey,
+        "xi-api-key":   apiKey,
         "Content-Type": "application/json",
-        Accept: "audio/mpeg",
+        Accept:         "audio/mpeg",
       },
       body: JSON.stringify({
-        text: texto,
+        text:     texto,
         model_id: "eleven_multilingual_v2",
         voice_settings: {
-          stability: 0.5,
+          stability:       0.5,
           similarity_boost: 0.75,
-          style: 0.0,
+          style:           0.0,
           use_speaker_boost: true,
         },
       }),
@@ -443,7 +432,7 @@ function concatenarMP3s(buffers: Buffer[]): Buffer {
 }
 
 // ---------------------------------------------------------------------------
-// MUDANÇA 11 — Handler PATCH (ações administrativas)
+// Handler PATCH (ações administrativas) — inalterado da Fase 9
 // ---------------------------------------------------------------------------
 
 export async function PATCH(req: NextRequest) {
@@ -456,9 +445,7 @@ export async function PATCH(req: NextRequest) {
   const authHeader = req.headers.get("authorization") ?? "";
   const idToken    = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
-  if (!idToken) {
-    return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
-  }
+  if (!idToken) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
 
   let uid: string;
   try {
@@ -478,11 +465,8 @@ export async function PATCH(req: NextRequest) {
   }
 
   let body: { postId?: string; action?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Body inválido." }, { status: 400 });
-  }
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: "Body inválido." }, { status: 400 }); }
 
   const { postId, action } = body;
 
@@ -500,12 +484,10 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  const postRef = adminDb.collection("posts").doc(postId);
+  const postRef  = adminDb.collection("posts").doc(postId);
   const postSnap = await postRef.get();
 
-  if (!postSnap.exists) {
-    return NextResponse.json({ error: "Post não encontrado." }, { status: 404 });
-  }
+  if (!postSnap.exists) return NextResponse.json({ error: "Post não encontrado." }, { status: 404 });
 
   try {
     if (action === "reset") {
@@ -514,18 +496,13 @@ export async function PATCH(req: NextRequest) {
         audioErrorCount:  0,
         audioUrl:         FieldValue.delete(),
         audioContentHash: FieldValue.delete(),
+        audioVoiceId:     FieldValue.delete(), // MUDANÇA 14 — limpa também o voiceId
         audioUpdatedAt:   Timestamp.now(),
       });
-      console.log(`[TTS Admin] Reset completo do post ${postId} por UID ${uid}`);
       return NextResponse.json({ ok: true, action: "reset", postId });
     }
-
     if (action === "reset_errors") {
-      await postRef.update({
-        audioErrorCount: 0,
-        audioUpdatedAt:  Timestamp.now(),
-      });
-      console.log(`[TTS Admin] Reset de erros do post ${postId} por UID ${uid}`);
+      await postRef.update({ audioErrorCount: 0, audioUpdatedAt: Timestamp.now() });
       return NextResponse.json({ ok: true, action: "reset_errors", postId });
     }
   } catch (err) {
@@ -551,9 +528,7 @@ export async function POST(req: NextRequest) {
   const authHeader = req.headers.get("authorization") ?? "";
   const idToken    = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
-  if (!idToken) {
-    return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
-  }
+  if (!idToken) return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
 
   try {
     await adminAuth.verifyIdToken(idToken);
@@ -563,11 +538,8 @@ export async function POST(req: NextRequest) {
 
   // ── 2. Parse e validação do body ─────────────────────────────────────────
   let body: TTSRequestBody;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Body inválido." }, { status: 400 });
-  }
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: "Body inválido." }, { status: 400 }); }
 
   const { postId, tipo, titulo } = body;
 
@@ -585,9 +557,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!process.env.R2_ACCOUNT_ID || !process.env.R2_ACCESS_KEY_ID ||
-      !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET_NAME ||
-      !process.env.R2_PUBLIC_URL) {
+  if (
+    !process.env.R2_ACCOUNT_ID || !process.env.R2_ACCESS_KEY_ID ||
+    !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET_NAME ||
+    !process.env.R2_PUBLIC_URL
+  ) {
     console.error("[TTS] Variáveis de ambiente R2 ausentes.");
     return NextResponse.json({ error: "Configuração de storage ausente." }, { status: 500 });
   }
@@ -609,16 +583,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Campo 'conteudo' não encontrado." }, { status: 422 });
   }
 
-  // ── MUDANÇA 12 — Buscar voiceId do autor ─────────────────────────────────
-  // Se o post tem um autorId, busca a voz clonada do autor no Firestore.
-  // Em caso de falha (doc não existe, campo ausente), silencia e usa voz padrão.
+  // ── Buscar voiceId do autor ───────────────────────────────────────────────
   let autorVoiceId: string | null = null;
 
   if (autorId) {
     try {
       const autorSnap = await adminDb.collection("users").doc(autorId).get();
       if (autorSnap.exists) {
-        const autorData = autorSnap.data() ?? {};
+        const autorData   = autorSnap.data() ?? {};
         const voiceStatus = autorData.voiceStatus as VoiceStatus | undefined;
         const voiceId     = autorData.voiceId     as string | undefined;
 
@@ -626,37 +598,47 @@ export async function POST(req: NextRequest) {
           autorVoiceId = voiceId;
           console.log(`[TTS] Usando voz clonada do autor ${autorId}: ${voiceId}`);
         } else {
-          console.log(`[TTS] Autor ${autorId} sem voz clonada ativa (status: ${voiceStatus ?? "none"}), usando padrão.`);
+          console.log(`[TTS] Autor ${autorId} sem voz ativa (status: ${voiceStatus ?? "none"}), usando padrão.`);
         }
       }
     } catch (err) {
-      // Non-fatal: se não conseguir buscar a voz, usa padrão
       console.warn("[TTS] Falha ao buscar voiceId do autor (non-fatal):", err);
     }
   }
 
-  // ── MUDANÇA 10 — Auto-recovery de posts travados em "generating" ──────────
+  // ── Auto-recovery de posts travados em "generating" ───────────────────────
   if (audioStatus === "generating" && audioUpdatedAt) {
     const idadeMs = Date.now() - audioUpdatedAt.toMillis();
     if (idadeMs > STUCK_GENERATING_TIMEOUT_MS) {
-      console.log(
-        `[TTS] Post travado em generating há ${Math.round(idadeMs / 60000)}min, resetando: ${postId}`
-      );
+      console.log(`[TTS] Post travado há ${Math.round(idadeMs / 60000)}min, resetando: ${postId}`);
       await postRef.set({ audioStatus: "none" as AudioStatus }, { merge: true });
     }
   }
 
   // ── Rate limiting por erros consecutivos ─────────────────────────────────
   if (audioStatus === "error" && audioErrorCount >= 3) {
-    console.warn(`[TTS] Rate limit atingido para post ${postId} (${audioErrorCount} erros consecutivos)`);
+    console.warn(`[TTS] Rate limit atingido para post ${postId} (${audioErrorCount} erros)`);
     return NextResponse.json({ error: "Limite de tentativas atingido." }, { status: 429 });
   }
 
+  // ── MUDANÇA 13 — Tratar "stale" como "none" (regeneração lazy) ───────────
+  // Se o post está stale, ignoramos o cache existente e forçamos nova geração.
+  // O guard abaixo impede que a lógica de cache-hit seja atingida nesse caso.
+  const statusEfetivo: AudioStatus =
+    audioStatus === "stale" ? "none" : (audioStatus ?? "none");
+
+  if (statusEfetivo === "generating") {
+    // Já está sendo gerado por outra instância — evitar duplicação
+    console.log(`[TTS] Post ${postId} já em geração, ignorando requisição duplicada.`);
+    return NextResponse.json({ gerando: true });
+  }
+
   // ── Invalidação reativa por hash (SHA-256) ────────────────────────────────
-  const hashAtual      = await computarHashConteudo(conteudo);
+  const hashAtual       = await computarHashConteudo(conteudo);
   const conteudoEditado = !audioContentHash || audioContentHash !== hashAtual;
 
-  if (audioUrl && audioStatus === "ready") {
+  // Cache hit: só válido se status for "ready" (stale nunca chega aqui)
+  if (audioUrl && statusEfetivo === "ready") {
     if (conteudoEditado) {
       console.log(`[TTS] Conteúdo editado (hash diverge), regenerando: ${postId}`);
     } else {
@@ -690,31 +672,28 @@ export async function POST(req: NextRequest) {
     autorNome, igreja, data, fraseInstigadora, perguntaReflexiva,
   );
 
-  // ── MUDANÇA 12 — Geração de áudio: voz clonada ou padrão ─────────────────
+  // ── Geração de áudio: voz clonada ou padrão ───────────────────────────────
   let audioFinal: Buffer;
   let provedorUsado: "elevenlabs" | "openai";
 
   try {
     if (autorVoiceId && process.env.ELEVENLABS_API_KEY) {
-      // ── Caminho 1: voz clonada via ElevenLabs ──────────────────────────
       const chunks  = dividirEmChunks(textoTTS, ELEVENLABS_MAX_CHARS);
       const buffers = await gerarBuffersElevenLabs(autorVoiceId, chunks);
       audioFinal    = concatenarMP3s(buffers);
       provedorUsado = "elevenlabs";
-      console.log(`[TTS] Áudio gerado via ElevenLabs (voz ${autorVoiceId}) para post ${postId}`);
+      console.log(`[TTS] Gerado via ElevenLabs (voz ${autorVoiceId}) para post ${postId}`);
     } else {
-      // ── Caminho 2: voz padrão via OpenAI TTS ──────────────────────────
       const openai  = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       const chunks  = dividirEmChunks(textoTTS);
       const buffers = await gerarBuffersAudio(openai, chunks);
       audioFinal    = concatenarMP3s(buffers);
       provedorUsado = "openai";
-      console.log(`[TTS] Áudio gerado via OpenAI TTS (voz padrão) para post ${postId}`);
+      console.log(`[TTS] Gerado via OpenAI TTS (voz padrão) para post ${postId}`);
     }
   } catch (err) {
     console.error("[TTS] Erro ao gerar áudio:", err);
 
-    // Se ElevenLabs falhou, tenta fallback para OpenAI antes de desistir
     if (autorVoiceId && process.env.OPENAI_API_KEY) {
       console.warn("[TTS] ElevenLabs falhou, tentando fallback para OpenAI...");
       try {
@@ -723,18 +702,28 @@ export async function POST(req: NextRequest) {
         const buffers = await gerarBuffersAudio(openai, chunks);
         audioFinal    = concatenarMP3s(buffers);
         provedorUsado = "openai";
+        // Fallback usou voz padrão — registra como null para manter rastreabilidade
+        autorVoiceId  = null;
         console.log(`[TTS] Fallback OpenAI bem-sucedido para post ${postId}`);
       } catch (fallbackErr) {
         console.error("[TTS] Fallback OpenAI também falhou:", fallbackErr);
         await postRef.set(
-          { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now(), audioErrorCount: audioErrorCount + 1 },
+          {
+            audioStatus:     "error" as AudioStatus,
+            audioUpdatedAt:  Timestamp.now(),
+            audioErrorCount: audioErrorCount + 1,
+          },
           { merge: true }
         );
         return NextResponse.json({ error: "Falha ao gerar áudio via TTS." }, { status: 502 });
       }
     } else {
       await postRef.set(
-        { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now(), audioErrorCount: audioErrorCount + 1 },
+        {
+          audioStatus:     "error" as AudioStatus,
+          audioUpdatedAt:  Timestamp.now(),
+          audioErrorCount: audioErrorCount + 1,
+        },
         { merge: true }
       );
       return NextResponse.json({ error: "Falha ao gerar áudio via TTS." }, { status: 502 });
@@ -745,9 +734,9 @@ export async function POST(req: NextRequest) {
   const downloadURL = `${process.env.R2_PUBLIC_URL}/tts/posts/${postId}.mp3`;
   try {
     await getS3Client().send(new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET_NAME!,
-      Key: `tts/posts/${postId}.mp3`,
-      Body: audioFinal,
+      Bucket:      process.env.R2_BUCKET_NAME!,
+      Key:         `tts/posts/${postId}.mp3`,
+      Body:        audioFinal!,
       ContentType: "audio/mpeg",
     }));
     purgarCacheCloudflare([downloadURL]).catch((err) => {
@@ -756,34 +745,43 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error("[TTS] Erro ao fazer upload para R2:", err);
     await postRef.set(
-      { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now(), audioErrorCount: audioErrorCount + 1 },
+      {
+        audioStatus:     "error" as AudioStatus,
+        audioUpdatedAt:  Timestamp.now(),
+        audioErrorCount: audioErrorCount + 1,
+      },
       { merge: true }
     );
     return NextResponse.json({ error: "Falha ao salvar arquivo de áudio." }, { status: 502 });
   }
 
-  // ── Salvar metadados no Firestore ─────────────────────────────────────────
+  // ── MUDANÇA 14 — Salvar metadados incluindo audioVoiceId ─────────────────
   try {
     await postRef.set(
       {
-        audioUrl:          downloadURL,
-        audioStatus:       "ready" as AudioStatus,
-        audioUpdatedAt:    Timestamp.now(),
-        audioContentHash:  hashAtual,
-        audioErrorCount:   0,
+        audioUrl:         downloadURL,
+        audioStatus:      "ready" as AudioStatus,
+        audioUpdatedAt:   Timestamp.now(),
+        audioContentHash: hashAtual,
+        audioErrorCount:  0,
+        // Registra qual voz foi usada (null = voz padrão OpenAI)
+        audioVoiceId:     autorVoiceId,
       },
       { merge: true }
     );
   } catch (err) {
     console.error("[TTS] Erro ao salvar no Firestore:", err);
-    return NextResponse.json({ error: "Áudio gerado, mas falha ao salvar metadados." }, { status: 207 });
+    return NextResponse.json(
+      { error: "Áudio gerado, mas falha ao salvar metadados." },
+      { status: 207 }
+    );
   }
 
   // ── Log de custo fire-and-forget ──────────────────────────────────────────
   adminDb.collection("tts_logs").add({
-    postId, tipo,
+    postId,
+    tipo,
     charCount:        textoTTS.length,
-    // Custo estimado: ElevenLabs ~$0.30/1k chars, OpenAI ~$15/1M chars
     estimatedCostUSD: provedorUsado === "elevenlabs"
       ? textoTTS.length / 1000 * 0.30
       : textoTTS.length / 1_000_000 * 15,
