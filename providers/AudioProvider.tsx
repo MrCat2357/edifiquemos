@@ -121,6 +121,45 @@ async function resolverAudioUrlDireta(pub: AudioPublication): Promise<string | n
   }
 }
 
+// ---------------------------------------------------------------------------
+// 7-C2.2 — Preload do próximo item da fila
+// ---------------------------------------------------------------------------
+
+/**
+ * Dispara GET /api/tts/preload para o item seguinte na fila, de forma
+ * completamente fire-and-forget — nunca lança, nunca bloqueia a reprodução atual.
+ *
+ * Segue exatamente o mesmo padrão de auth de resolverAudioUrlDireta:
+ *   auth.currentUser → user.getIdToken()
+ *
+ * Só dispara se:
+ *   - há um item seguinte na fila
+ *   - esse item ainda não tem audioUrl válida (evita chamadas redundantes)
+ */
+async function preloadProximo(queue: AudioPublication[], index: number): Promise<void> {
+  const proximo = queue[index + 1];
+  if (!proximo) return;
+  // Já tem URL válida (não é o fallback) — não precisa pré-carregar
+  if (proximo.audioUrl && proximo.audioUrl !== FALLBACK_AUDIO) return;
+
+  try {
+    const user = auth.currentUser;
+    if (!user) return;
+    const token = await user.getIdToken();
+    const tipo = proximo.tipo === "artigo" ? "estudo" : proximo.tipo;
+
+    // Fire-and-forget — o .catch(() => {}) garante que erros não propagam
+    fetch(
+      `/api/tts/preload?postId=${proximo.id}&tipo=${tipo}&titulo=${encodeURIComponent(proximo.titulo)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    ).catch(() => {});
+
+    console.log(`[AudioProvider] Preload iniciado para: ${proximo.titulo}`);
+  } catch {
+    // Silencioso — preload nunca deve interromper a reprodução atual
+  }
+}
+
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 export function AudioProvider({ children }: { children: React.ReactNode }) {
@@ -192,13 +231,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     });
 
     // ── Autoplay ao terminar a faixa — com resolução TTS ──────────────────
-    //
-    // Problema 3: quando o próximo item da fila usa FALLBACK_AUDIO (sem TTS
-    // gerado), o autoplay tocava o MP3 mockado. Agora:
-    //   1. Tenta resolver a audioUrl do próximo item via /api/tts/gerar.
-    //   2. Se conseguir, usa a URL real; se falhar, pula para o item seguinte
-    //      silenciosamente (sem interromper o fluxo).
-    //   3. Só depois chama onEndedCallbackRef para navegação de página.
     audio.addEventListener("ended", () => {
       setIsPlaying(false);
 
@@ -212,8 +244,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       if (resolvingNextRef.current) return;
       resolvingNextRef.current = true;
 
-      // Busca o próximo item com URL válida, resolvendo TTS se necessário.
-      // Itera a partir do próximo índice e pula quem falhar.
       (async () => {
         let tentativa = idx + 1;
 
@@ -222,7 +252,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
           const url = await resolverAudioUrlDireta(candidato);
 
           if (url) {
-            // Atualiza a URL na fila em memória para futuras navegações
             const novaFila = [...queueRef.current];
             novaFila[tentativa] = { ...candidato, audioUrl: url };
             setQueue(novaFila);
@@ -243,7 +272,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
               playPromiseRef.current?.catch(() => {});
             }
 
-            // Navega a página depois de iniciar o áudio
             if (onEndedCallbackRef.current) {
               onEndedCallbackRef.current();
             }
@@ -251,7 +279,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
             break;
           }
 
-          // Esta faixa falhou — pula para a próxima
           tentativa += 1;
         }
 
@@ -384,14 +411,15 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       setContextType(context);
 
       _playAudio(pub);
+
+      // 7-C2.2 — Preload do próximo item logo após iniciar reprodução
+      // Fire-and-forget: nunca await aqui para não bloquear o playQueue
+      preloadProximo(filaLimpa, idx >= 0 ? idx : 0);
     },
     [_playAudio]
   );
 
   // ── playNext — com resolução TTS ──────────────────────────────────────────
-  //
-  // Problema 3 (navegação manual): quando o usuário aperta "próximo" no player
-  // e o item ainda não tem TTS gerado, resolve antes de tocar.
 
   const playNext = useCallback(() => {
     const idx = currentIndexRef.current;
@@ -408,6 +436,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       if (navigationCallbackRef.current) {
         navigationCallbackRef.current("next", nextPub);
       }
+      // 7-C2.2 — Preload do item após o que acabou de ser selecionado
+      // Fire-and-forget: nunca await aqui
+      preloadProximo(q, nextIdx);
       return;
     }
 
@@ -422,7 +453,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
 
     resolverAudioUrlDireta(nextPub).then((url) => {
       if (!url) {
-        // Falhou — tenta o próximo item recursivamente se houver
         setIsLoading(false);
         const novoIdx = nextIdx + 1;
         if (novoIdx < queueRef.current.length) {
@@ -433,13 +463,16 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Atualiza URL na fila
       const novaFila = [...queueRef.current];
       novaFila[nextIdx] = { ...nextPub, audioUrl: url };
       setQueue(novaFila);
 
       const pubComUrl = { ...nextPub, audioUrl: url };
       _playAudio(pubComUrl);
+
+      // 7-C2.2 — Preload do próximo após confirmar que a reprodução iniciou
+      // Fire-and-forget: nunca await aqui
+      preloadProximo(novaFila, nextIdx);
     });
   }, [_playAudio]);
 
