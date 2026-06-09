@@ -1,6 +1,6 @@
 "use client";
 
-import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import { useAudioContext } from "@/providers/AudioProvider";
 import { useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 
@@ -152,6 +152,50 @@ function IconVolumeOn({ size = 16 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
     </svg>
+  );
+}
+
+// ─── 8.2 — Indicador de preload ───────────────────────────────────────────────
+
+function PreloadIndicator() {
+  return (
+    <div
+      aria-live="polite"
+      aria-label="Preparando próximo"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "0.4rem",
+        padding: "0.25rem 0.6rem",
+        background: "rgba(255,255,255,0.05)",
+        borderRadius: 99,
+        alignSelf: "flex-start",
+      }}
+    >
+      {/* Bolinha pulsante */}
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: "rgba(255,255,255,0.35)",
+          display: "inline-block",
+          animation: "preload-pulse 1.4s ease-in-out infinite",
+          flexShrink: 0,
+        }}
+      />
+      <span
+        style={{
+          fontSize: "0.62rem",
+          fontWeight: 500,
+          letterSpacing: "0.04em",
+          color: "var(--text-3, rgba(255,255,255,0.4))",
+          whiteSpace: "nowrap",
+        }}
+      >
+        Preparando próximo...
+      </span>
+    </div>
   );
 }
 
@@ -318,6 +362,8 @@ export const SIDEBAR_WIDTH = 280;
 
 export default function NowPlayingSidebar() {
   const router = useRouter();
+
+  // ✅ FIX: usa useAudioContext (que expõe preloadStatus) em vez de useAudioPlayer
   const {
     current,
     isPlaying,
@@ -325,23 +371,28 @@ export default function NowPlayingSidebar() {
     currentTime,
     duration,
     volume,
-    hasNext,
-    hasPrevious,
+    queue,
+    currentIndex,
     toggle,
     seek,
     setVolume,
     close,
     playNext,
     playPrevious,
-  } = useAudioPlayer();
+    preloadStatus,   // ✅ disponível via AudioContextValue
+  } = useAudioContext();
+
+  // Derivados de navegação (equivalentes ao hasNext/hasPrevious do useAudioPlayer)
+  const hasNext     = currentIndex >= 0 && currentIndex < queue.length - 1;
+  const hasPrevious = currentIndex > 0;
 
   const handleVolumeToggle = useCallback(() => {
     setVolume(volume > 0 ? 0 : 1);
   }, [volume, setVolume]);
 
   const visible = !!current;
-  const badge = current ? typeBadge(current.tipo) : null;
-  const accent = current ? accentColor(current.tipo) : "var(--emerald, #10b981)";
+  const badge   = current ? typeBadge(current.tipo) : null;
+  const accent  = current ? accentColor(current.tipo) : "var(--emerald, #10b981)";
 
   return (
     <>
@@ -388,20 +439,12 @@ export default function NowPlayingSidebar() {
                 flex: 1,
               }}
             >
-              {/*
-                ── Header: "Tocando agora" label + botão fechar (×) ──────────
-                
-                O layout é: [label "TOCANDO AGORA"] [flex-gap] [botão ×]
-                
-                NÃO há botão "▶ Ouvir" aqui. Se você ver esse botão, é porque
-                está usando um arquivo antigo. Substitua pelo arquivo atual.
-              */}
+              {/* Header: "Tocando agora" label + botão fechar (×) */}
               <div
                 style={{
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  // Padding horizontal extra para o × não ficar colado na borda
                   paddingRight: "0.25rem",
                 }}
               >
@@ -417,7 +460,6 @@ export default function NowPlayingSidebar() {
                   Tocando agora
                 </span>
 
-                {/* Botão × — fechar o player */}
                 <button
                   onClick={close}
                   aria-label="Fechar player"
@@ -667,6 +709,11 @@ export default function NowPlayingSidebar() {
                 onChange={setVolume}
                 accent={accent}
               />
+
+              {/* 8.2 — Indicador de preload (visível apenas quando loading e há próximo) */}
+              {preloadStatus === "loading" && hasNext && (
+                <PreloadIndicator />
+              )}
             </div>
           </>
         )}
@@ -675,6 +722,10 @@ export default function NowPlayingSidebar() {
       <style>{`
         @keyframes sidebar-spin {
           to { transform: rotate(360deg); }
+        }
+        @keyframes preload-pulse {
+          0%, 100% { opacity: 0.3; transform: scale(0.85); }
+          50%       { opacity: 1;   transform: scale(1.15); }
         }
       `}</style>
     </>

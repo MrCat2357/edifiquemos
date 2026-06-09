@@ -25,6 +25,9 @@ export type AudioPublication = {
 
 export type AudioContextType = "home" | "perfil" | "reflexoes" | "serie" | null;
 
+// 8.2 — Status do preload do próximo item
+export type PreloadStatus = "idle" | "loading" | "ready";
+
 // ─── Estado e ações ──────────────────────────────────────────────────────────
 
 type AudioState = {
@@ -37,6 +40,8 @@ type AudioState = {
   queue: AudioPublication[];
   currentIndex: number;
   contextType: AudioContextType;
+  /** 8.2 — Estado do preload do próximo item da fila */
+  preloadStatus: PreloadStatus;
 };
 
 type AudioActions = {
@@ -86,7 +91,6 @@ const FALLBACK_AUDIO = "https://archive.org/download/testmp3testfile/mpthreetest
  * Não lança — falhas são silenciosas para não interromper o autoplay.
  */
 async function resolverAudioUrlDireta(pub: AudioPublication): Promise<string | null> {
-  // Se já tem URL válida (não é o fallback), retorna direto
   if (pub.audioUrl && pub.audioUrl !== FALLBACK_AUDIO) {
     return pub.audioUrl;
   }
@@ -96,7 +100,6 @@ async function resolverAudioUrlDireta(pub: AudioPublication): Promise<string | n
     if (!user) return null;
 
     const token = await user.getIdToken();
-
     const tipo = pub.tipo === "artigo" ? "estudo" : pub.tipo;
 
     const response = await fetch("/api/tts/gerar", {
@@ -121,6 +124,106 @@ async function resolverAudioUrlDireta(pub: AudioPublication): Promise<string | n
   }
 }
 
+// ---------------------------------------------------------------------------
+// 8.3 — Verificação de conexão lenta (Network Information API)
+// ---------------------------------------------------------------------------
+
+/**
+ * Retorna true se a conexão for lenta demais para preload.
+ * Silencioso em browsers sem suporte (Firefox, Safari) — retorna false.
+ */
+function isSlowConnection(): boolean {
+  try {
+    const conn = (navigator as any).connection;
+    if (!conn) return false;
+    return ["slow-2g", "2g"].includes(conn.effectiveType);
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Preload do próximo item da fila — Fase 8 (adaptativo)
+// ---------------------------------------------------------------------------
+
+/**
+ * Dispara GET /api/tts/preload para o próximo item.
+ *
+ * Fase 8 — Guards adicionais:
+ *   8.1 — Não dispara se pausado há mais de 2 minutos
+ *   8.1 — Não dispara se fila tem só 1 item
+ *   8.3 — Não dispara em conexões slow-2g ou 2g
+ *
+ * Recebe setPreloadStatus para atualizar o indicador visual (8.2).
+ * Retorna void — sempre fire-and-forget para o chamador.
+ */
+async function preloadProximo(
+  queue: AudioPublication[],
+  index: number,
+  pausedSinceMs: number | null,
+  setPreloadStatus: (s: PreloadStatus) => void
+): Promise<void> {
+  // 8.1 — Fila com só 1 item (ou menos): nada a pré-carregar
+  if (queue.length <= 1) return;
+
+  const proximo = queue[index + 1];
+  if (!proximo) return;
+
+  // Já tem URL válida — não precisa pré-carregar
+  if (proximo.audioUrl && proximo.audioUrl !== FALLBACK_AUDIO) return;
+
+  // 8.1 — Pausado há mais de 2 minutos: não desperdiçar recursos
+  if (pausedSinceMs !== null) {
+    const pausedDuration = Date.now() - pausedSinceMs;
+    if (pausedDuration > 2 * 60 * 1000) {
+      console.log("[AudioProvider] Preload ignorado: pausado há mais de 2 minutos.");
+      return;
+    }
+  }
+
+  // 8.3 — Conexão lenta: ignorar silenciosamente
+  if (isSlowConnection()) {
+    console.log("[AudioProvider] Preload ignorado: conexão lenta detectada.");
+    return;
+  }
+
+  try {
+    const user = auth.currentUser;
+    if (!user) return;
+    const token = await user.getIdToken();
+    const tipo = proximo.tipo === "artigo" ? "estudo" : proximo.tipo;
+
+    // 8.2 — Sinaliza que preload está em andamento
+    setPreloadStatus("loading");
+
+    console.log(`[AudioProvider] Preload iniciado para: ${proximo.titulo}`);
+
+    const response = await fetch(
+      `/api/tts/preload?postId=${proximo.id}&tipo=${tipo}&titulo=${encodeURIComponent(proximo.titulo)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    if (response.ok) {
+      // 8.2 — HTTP 200 = cached: true → já está pronto
+      const data = await response.json().catch(() => ({}));
+      if (data?.cached === true) {
+        setPreloadStatus("ready");
+      } else {
+        // HTTP 200 mas sem cached:true (improvável) → idle
+        setPreloadStatus("idle");
+      }
+    } else if (response.status === 202) {
+      // 8.2 — Em geração ou enfileirado → idle (não mostrar indicador)
+      setPreloadStatus("idle");
+    } else {
+      setPreloadStatus("idle");
+    }
+  } catch {
+    // Silencioso — preload nunca deve interromper a reprodução atual
+    setPreloadStatus("idle");
+  }
+}
+
 // ─── Provider ────────────────────────────────────────────────────────────────
 
 export function AudioProvider({ children }: { children: React.ReactNode }) {
@@ -138,11 +241,21 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [contextType, setContextType] = useState<AudioContextType>(null);
 
+  // 8.2 — Estado do preload
+  const [preloadStatus, setPreloadStatus] = useState<PreloadStatus>("idle");
+
   // Refs para closures estáveis nos event listeners
   const queueRef = useRef<AudioPublication[]>([]);
   const currentIndexRef = useRef(-1);
   queueRef.current = queue;
   currentIndexRef.current = currentIndex;
+
+  // 8.1 — Ref que registra quando o áudio pausou (timestamp em ms, ou null se tocando)
+  const pausedSinceRef = useRef<number | null>(null);
+
+  // Ref estável para setPreloadStatus (evita recrear closures)
+  const setPreloadStatusRef = useRef(setPreloadStatus);
+  setPreloadStatusRef.current = setPreloadStatus;
 
   const onEndedCallbackRef = useRef<(() => void) | null>(null);
   const navigationCallbackRef = useRef<
@@ -170,6 +283,19 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  // Helper estável para chamar preloadProximo com os guards da Fase 8
+  const triggerPreload = useCallback(
+    (q: AudioPublication[], idx: number) => {
+      preloadProximo(
+        q,
+        idx,
+        pausedSinceRef.current,
+        setPreloadStatusRef.current
+      );
+    },
+    []
+  );
+
   // Cria o elemento <audio> uma única vez
   useEffect(() => {
     const audio = new Audio();
@@ -184,23 +310,31 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     audio.addEventListener("timeupdate", () =>
       setCurrentTime(audio.currentTime)
     );
-    audio.addEventListener("play", () => setIsPlaying(true));
-    audio.addEventListener("pause", () => setIsPlaying(false));
+
+    // 8.1 — Atualiza pausedSinceRef nos eventos play/pause
+    audio.addEventListener("play", () => {
+      setIsPlaying(true);
+      pausedSinceRef.current = null; // tocando — reseta o contador de pausa
+    });
+    audio.addEventListener("pause", () => {
+      setIsPlaying(false);
+      if (pausedSinceRef.current === null) {
+        pausedSinceRef.current = Date.now(); // registra início da pausa
+      }
+    });
+
     audio.addEventListener("error", () => {
       setIsLoading(false);
       setIsPlaying(false);
     });
 
     // ── Autoplay ao terminar a faixa — com resolução TTS ──────────────────
-    //
-    // Problema 3: quando o próximo item da fila usa FALLBACK_AUDIO (sem TTS
-    // gerado), o autoplay tocava o MP3 mockado. Agora:
-    //   1. Tenta resolver a audioUrl do próximo item via /api/tts/gerar.
-    //   2. Se conseguir, usa a URL real; se falhar, pula para o item seguinte
-    //      silenciosamente (sem interromper o fluxo).
-    //   3. Só depois chama onEndedCallbackRef para navegação de página.
     audio.addEventListener("ended", () => {
       setIsPlaying(false);
+      // ended = pausa natural; registra como início de pausa
+      if (pausedSinceRef.current === null) {
+        pausedSinceRef.current = Date.now();
+      }
 
       const idx = currentIndexRef.current;
       const q = queueRef.current;
@@ -208,12 +342,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
 
       if (!hasNext) return;
 
-      // Evita disparar múltiplas resoluções simultâneas
       if (resolvingNextRef.current) return;
       resolvingNextRef.current = true;
 
-      // Busca o próximo item com URL válida, resolvendo TTS se necessário.
-      // Itera a partir do próximo índice e pula quem falhar.
       (async () => {
         let tentativa = idx + 1;
 
@@ -222,7 +353,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
           const url = await resolverAudioUrlDireta(candidato);
 
           if (url) {
-            // Atualiza a URL na fila em memória para futuras navegações
             const novaFila = [...queueRef.current];
             novaFila[tentativa] = { ...candidato, audioUrl: url };
             setQueue(novaFila);
@@ -234,6 +364,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
             setCurrentTime(0);
             setDuration(0);
             setIsLoading(true);
+            setPreloadStatusRef.current("idle");
 
             const a = audioRef.current;
             if (a) {
@@ -243,15 +374,16 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
               playPromiseRef.current?.catch(() => {});
             }
 
-            // Navega a página depois de iniciar o áudio
             if (onEndedCallbackRef.current) {
               onEndedCallbackRef.current();
             }
 
+            // Preload do próximo após avançar
+            preloadProximo(novaFila, tentativa, null, setPreloadStatusRef.current);
+
             break;
           }
 
-          // Esta faixa falhou — pula para a próxima
           tentativa += 1;
         }
 
@@ -287,6 +419,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       setDuration(0);
       setCurrent(pub);
       setIsLoading(true);
+      setPreloadStatus("idle");
       playPromiseRef.current = audio.play();
       playPromiseRef.current?.catch(() => {});
     },
@@ -363,6 +496,8 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     setQueue([]);
     setCurrentIndex(-1);
     setContextType(null);
+    setPreloadStatus("idle");
+    pausedSinceRef.current = null;
     onEndedCallbackRef.current = null;
     navigationCallbackRef.current = null;
     resolvingNextRef.current = false;
@@ -382,16 +517,18 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       setQueue(filaLimpa);
       setCurrentIndex(idx >= 0 ? idx : 0);
       setContextType(context);
+      setPreloadStatus("idle");
 
       _playAudio(pub);
+
+      // Preload do próximo item — com guards da Fase 8
+      // pausedSinceRef.current é null aqui (reprodução acabou de iniciar)
+      triggerPreload(filaLimpa, idx >= 0 ? idx : 0);
     },
-    [_playAudio]
+    [_playAudio, triggerPreload]
   );
 
   // ── playNext — com resolução TTS ──────────────────────────────────────────
-  //
-  // Problema 3 (navegação manual): quando o usuário aperta "próximo" no player
-  // e o item ainda não tem TTS gerado, resolve antes de tocar.
 
   const playNext = useCallback(() => {
     const idx = currentIndexRef.current;
@@ -401,17 +538,18 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     const nextIdx = idx + 1;
     const nextPub = q[nextIdx];
 
-    // Se já tem URL válida, toca imediatamente
+    setPreloadStatus("idle");
+
     if (nextPub.audioUrl && nextPub.audioUrl !== FALLBACK_AUDIO) {
       setCurrentIndex(nextIdx);
       _playAudio(nextPub);
       if (navigationCallbackRef.current) {
         navigationCallbackRef.current("next", nextPub);
       }
+      triggerPreload(q, nextIdx);
       return;
     }
 
-    // Precisa gerar TTS — mostra loading e resolve assincronamente
     setCurrentIndex(nextIdx);
     setCurrent(nextPub);
     setIsLoading(true);
@@ -422,7 +560,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
 
     resolverAudioUrlDireta(nextPub).then((url) => {
       if (!url) {
-        // Falhou — tenta o próximo item recursivamente se houver
         setIsLoading(false);
         const novoIdx = nextIdx + 1;
         if (novoIdx < queueRef.current.length) {
@@ -433,15 +570,16 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Atualiza URL na fila
       const novaFila = [...queueRef.current];
       novaFila[nextIdx] = { ...nextPub, audioUrl: url };
       setQueue(novaFila);
 
       const pubComUrl = { ...nextPub, audioUrl: url };
       _playAudio(pubComUrl);
+
+      triggerPreload(novaFila, nextIdx);
     });
-  }, [_playAudio]);
+  }, [_playAudio, triggerPreload]);
 
   // ── playPrevious ──────────────────────────────────────────────────────────
 
@@ -450,7 +588,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     const idx = currentIndexRef.current;
     const q = queueRef.current;
 
-    // Se passou mais de 3s na faixa atual, apenas reinicia (sem navegar)
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0;
       setCurrentTime(0);
@@ -463,6 +600,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     const prevPub = q[prevIdx];
 
     setCurrentIndex(prevIdx);
+    setPreloadStatus("idle");
     _playAudio(prevPub);
 
     if (navigationCallbackRef.current) {
@@ -482,6 +620,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     queue,
     currentIndex,
     contextType,
+    preloadStatus,
     play,
     pause,
     resume,
