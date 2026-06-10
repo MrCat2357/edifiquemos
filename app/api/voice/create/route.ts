@@ -220,7 +220,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Validação do arquivo ──────────────────────────────────────────────────
-  const mimeType = file.type || "audio/mpeg";
+  const mimeType = (file.type || "audio/mpeg").split(";")[0].trim();
   const fileSize = file.size;
   const fileName = file.name || `amostra.${extensaoPorMime(mimeType)}`;
 
