@@ -21,6 +21,8 @@ import { gerarPDF } from "@/lib/gerarPDF";
 import { getReflexoesPorAutor } from "@/lib/reflexoes";
 import type { Reflexao } from "@/lib/reflexoes";
 import CardReflexao from "@/components/reflexoes/CardReflexao";
+import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import { useTTS } from "@/hooks/useTTS";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
 
@@ -127,7 +129,7 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   );
 }
 
-/* ── resolverUid ────────────────────────────────────── */
+// ─── resolverUid ─────────────────────────────────────── */
 
 async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: User } | null> {
   const qSlug = query(collection(db, "users"), where("slug", "==", idOuSlug));
@@ -140,6 +142,340 @@ async function resolverUid(idOuSlug: string): Promise<{ uid: string; userData: U
   const docSnap = await getDoc(docRef);
   if (docSnap.exists()) return { uid: docSnap.id, userData: docSnap.data() as User };
   return null;
+}
+
+// ─── BotaoOuvirSerieCard ──────────────────────────────────────────────────────
+
+function BotaoOuvirSerieCard({
+  serie,
+  onLoginRequired,
+}: {
+  serie: any;
+  onLoginRequired: () => void;
+}) {
+  const {
+    playQueue,
+    pause,
+    resume,
+    isPlaying,
+    isLoading: audioLoading,
+    contextType,
+    current: currentAudio,
+  } = useAudioPlayer();
+
+  const [carregandoPosts, setCarregandoPosts] = useState(false);
+  const [postsCarregados, setPostsCarregados] = useState<any[] | null>(null);
+
+  const serieAtiva =
+    contextType === "serie" &&
+    currentAudio !== null &&
+    postsCarregados !== null &&
+    postsCarregados.some((p: any) => p.id === currentAudio.id);
+
+  const tocando = serieAtiva && isPlaying;
+  const carregando = (serieAtiva && audioLoading) || carregandoPosts;
+
+  async function buscarPostsDaSerie(): Promise<any[]> {
+    if (postsCarregados !== null) return postsCarregados;
+    const postIds: string[] = serie.postIds ?? [];
+    if (postIds.length === 0) return [];
+    const snaps = await Promise.all(
+      postIds.map((id: string) => getDoc(doc(db, "posts", id)))
+    );
+    const lista = snaps.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() }));
+    setPostsCarregados(lista);
+    return lista;
+  }
+
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+
+    if (!auth.currentUser) {
+      onLoginRequired();
+      return;
+    }
+
+    if (serieAtiva) {
+      tocando ? pause() : resume();
+      return;
+    }
+
+    setCarregandoPosts(true);
+    try {
+      const posts = await buscarPostsDaSerie();
+      if (posts.length === 0) return;
+      const fila = posts.map((p: any) => ({
+        id: p.id,
+        tipo: p.tipo as "sermao" | "artigo" | "reflexao",
+        titulo: p.titulo,
+        autorNome: p.autorNome || "Autor",
+        autorFoto: p.autorFoto ?? null,
+        slug: p.slug,
+        autorSlug: p.autorSlug,
+        audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+      }));
+      playQueue(fila[0], fila, "serie");
+    } catch (err) {
+      console.error("Erro ao carregar posts da série:", err);
+    }
+    setCarregandoPosts(false);
+  }
+
+  if (!serie.postIds || serie.postIds.length === 0) return null;
+
+  return (
+    <button
+      onClick={handleClick}
+      title={tocando ? "Pausar série" : serieAtiva ? "Continuar série" : "Ouvir série completa"}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
+        padding: "4px 8px",
+        borderRadius: "var(--radius-full)",
+        border: "1px solid",
+        borderColor: serieAtiva ? "var(--emerald-dim)" : "transparent",
+        background: serieAtiva ? "var(--emerald-dim)" : "transparent",
+        color: serieAtiva ? "var(--emerald)" : "var(--text-3)",
+        fontSize: "0.72rem",
+        fontWeight: 600,
+        cursor: "pointer",
+        transition: "all 0.15s",
+        fontFamily: "inherit",
+        flexShrink: 0,
+        boxShadow: tocando ? "0 0 0 2px var(--emerald-dim)" : "none",
+      }}
+    >
+      {carregando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+        </svg>
+      ) : tocando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+        </svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M8 5.14v14l11-7-11-7z" />
+        </svg>
+      )}
+      <span>
+        {carregando ? "Carregando…" : tocando ? "Pausar" : serieAtiva ? "Continuar" : "Ouvir série"}
+      </span>
+      {tocando && (
+        <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>
+      )}
+    </button>
+  );
+}
+
+// ─── BotaoOuvirPerfil ─────────────────────────────────────────────────────────
+
+function BotaoOuvirPerfil({
+  post,
+  filaAudio = [],
+  onLoginRequired,
+}: {
+  post: any;
+  filaAudio?: any[];
+  onLoginRequired: () => void;
+}) {
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { resolveAudioUrl, isGenerating: ttsGenerating, error: ttsError } = useTTS();
+
+  const audioAtivo = isCurrentPublication(post.id);
+  const audioTocando = isCurrentlyPlaying(post.id);
+  const audioCarregando = audioAtivo && audioLoading;
+  const ocupado = ttsGenerating || audioCarregando;
+
+  const label =
+    ttsGenerating   ? "Gerando…"         :
+    audioCarregando ? "Carregando…"      :
+    ttsError        ? "Tentar novamente" :
+    audioTocando    ? "Pausar"           :
+    audioAtivo      ? "Continuar"        :
+    "Ouvir";
+
+  const btnColor       = ttsError ? "var(--red, #ef4444)"     : audioAtivo ? "var(--emerald)"     : "var(--text-3)";
+  const btnBorderColor = ttsError ? "var(--red-dim, #fecaca)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+  const btnBg          = ttsError ? "var(--red-dim, #fef2f2)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!auth.currentUser) {
+      onLoginRequired();
+      return;
+    }
+    try {
+      const audioUrl = await resolveAudioUrl({
+        postId: post.id,
+        tipo: post.tipo === "artigo" ? "estudo" : post.tipo,
+        titulo: post.titulo,
+        audioUrlExistente: post.audioUrl && post.audioStatus === "ready" ? post.audioUrl : undefined,
+      });
+      const pub = {
+        id: post.id,
+        tipo: post.tipo,
+        titulo: post.titulo,
+        autorNome: post.autorNome || "Autor",
+        autorFoto: post.autorFoto ?? null,
+        slug: post.slug,
+        autorSlug: post.autorSlug,
+        audioUrl,
+      };
+      if (filaAudio.length > 0) {
+        const filaAtualizada = filaAudio.map((item) =>
+          item.id === post.id ? { ...item, audioUrl } : item
+        );
+        playQueue(pub, filaAtualizada, "perfil");
+      } else {
+        playOrToggle(pub);
+      }
+    } catch {
+      // ttsError já setado pelo hook
+    }
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      disabled={ocupado}
+      title={ttsError ? "Clique para tentar novamente" : audioTocando ? "Pausar" : "Ouvir este conteúdo"}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: "4px",
+        padding: "4px 8px", borderRadius: "var(--radius-full)",
+        border: "1px solid",
+        borderColor: btnBorderColor,
+        background: btnBg,
+        color: btnColor,
+        fontSize: "0.72rem", fontWeight: 600,
+        cursor: ocupado ? "default" : "pointer",
+        opacity: ocupado ? 0.7 : 1,
+        transition: "all 0.15s",
+        fontFamily: "inherit", flexShrink: 0,
+        boxShadow: audioTocando ? "0 0 0 2px var(--emerald-dim)" : "none",
+      }}
+    >
+      {ttsGenerating ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+      ) : ttsError ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      ) : audioTocando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+      )}
+      <span>{label}</span>
+      {audioTocando && (
+        <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>
+      )}
+    </button>
+  );
+}
+
+// ─── CardReflexaoComOuvir ─────────────────────────────────────────────────────
+
+function CardReflexaoComOuvir({
+  reflexao,
+  filaAudio = [],
+  onLoginRequired,
+}: {
+  reflexao: Reflexao;
+  filaAudio?: any[];
+  onLoginRequired: () => void;
+}) {
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { resolveAudioUrl, isGenerating: ttsGenerating, error: ttsError } = useTTS();
+
+  const audioAtivo = isCurrentPublication(reflexao.id ?? "");
+  const audioTocando = isCurrentlyPlaying(reflexao.id ?? "");
+  const audioCarregando = audioAtivo && audioLoading;
+  const ocupado = ttsGenerating || audioCarregando;
+
+  const label =
+    ttsGenerating   ? "Gerando…"         :
+    audioCarregando ? "Carregando…"      :
+    ttsError        ? "Tentar novamente" :
+    audioTocando    ? "Pausar"           :
+    audioAtivo      ? "Continuar"        :
+    "Ouvir";
+
+  const btnColor       = ttsError ? "var(--red, #ef4444)"     : audioAtivo ? "var(--emerald)"     : "var(--text-3)";
+  const btnBorderColor = ttsError ? "var(--red-dim, #fecaca)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+  const btnBg          = ttsError ? "var(--red-dim, #fef2f2)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+
+  async function handleOuvir(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!auth.currentUser) {
+      onLoginRequired();
+      return;
+    }
+    if (!reflexao.id) return;
+    try {
+      const audioUrl = await resolveAudioUrl({
+        postId: reflexao.id,
+        tipo: "reflexao",
+        titulo: reflexao.titulo,
+        audioUrlExistente: (reflexao as any).audioUrl && (reflexao as any).audioStatus === "ready"
+          ? (reflexao as any).audioUrl
+          : undefined,
+      });
+      const pub = {
+        id: reflexao.id,
+        tipo: "reflexao" as const,
+        titulo: reflexao.titulo,
+        autorNome: reflexao.autorNome,
+        autorFoto: null,
+        slug: reflexao.slug,
+        autorSlug: reflexao.autorSlug,
+        audioUrl,
+      };
+      if (filaAudio.length > 0) {
+        const filaAtualizada = filaAudio.map((item) =>
+          item.id === reflexao.id ? { ...item, audioUrl } : item
+        );
+        playQueue(pub, filaAtualizada, "perfil");
+      } else {
+        playOrToggle(pub);
+      }
+    } catch {
+      // ttsError já setado pelo hook
+    }
+  }
+
+  return (
+    <CardReflexao
+      reflexao={reflexao}
+      botaoOuvir={
+        <button
+          onClick={handleOuvir}
+          disabled={ocupado}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "0.3rem",
+            padding: "4px 10px", borderRadius: "var(--radius-full)", border: "1px solid",
+            borderColor: btnBorderColor,
+            background: btnBg,
+            color: btnColor,
+            fontSize: "0.75rem", fontWeight: 600,
+            cursor: ocupado ? "default" : "pointer",
+            opacity: ocupado ? 0.7 : 1,
+            transition: "all 0.18s ease", fontFamily: "inherit",
+          }}
+        >
+          {ttsGenerating ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          ) : ttsError ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          ) : audioTocando ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+          )}
+          <span>{label}</span>
+        </button>
+      }
+    />
+  );
 }
 
 /* ── SerieCardPublico ────────────────────────────────── */
@@ -160,13 +496,18 @@ function SerieCardPublico({
   const [likeCount, setLikeCount] = useState<number>(serie.likes ?? 0);
   const [loadingLike, setLoadingLike] = useState(false);
   const [showLoginBanner, setShowLoginBanner] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [commentCount, setCommentCount] = useState<number>(serie.commentCount ?? 0);
+
+  const currentPath = typeof window !== "undefined"
+    ? window.location.pathname + window.location.search
+    : "/";
 
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      setShowLoginBanner(true);
+      setShowLoginModal(true);
       return;
     }
     if (loadingLike) return;
@@ -191,7 +532,7 @@ function SerieCardPublico({
   function handleToggleComments(e: React.MouseEvent) {
     e.stopPropagation();
     if (!uid) {
-      setShowLoginBanner(true);
+      setShowLoginModal(true);
       return;
     }
     setShowComments((v) => !v);
@@ -211,151 +552,166 @@ function SerieCardPublico({
   }
 
   return (
-    <article
-      className="post-card serie-card"
-      style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
-      onClick={() => router.push(`/series/${serie.slug}`)}
-    >
-      {serie.imagemUrl && (
-        <div className="card-cover-wrapper">
-          <img src={serie.imagemUrl} alt={serie.titulo} className="card-cover-img" />
-          <span className="cat-badge card-cover-badge" style={{
-            background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)",
-            color: "var(--emerald)", borderColor: "var(--emerald-dim)",
-          }}>
-            📚 Série
-          </span>
-        </div>
+    <>
+      {showLoginModal && (
+        <BannerLogin
+          modal
+          onClose={() => setShowLoginModal(false)}
+          redirectTo={currentPath}
+        />
       )}
-
-      <div style={{ padding: serie.imagemUrl ? "0.875rem 1.125rem 0.875rem" : undefined }}>
-        {!serie.imagemUrl && (
-          <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ flex: 1 }}>
-              <span className="card-meta">{postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
-            </div>
-            <span className="cat-badge" style={{
-              color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)",
+      <article
+        className="post-card serie-card"
+        style={{ animationDelay: `${index * 60}ms`, cursor: "pointer" }}
+        onClick={() => router.push(`/series/${serie.slug}`)}
+      >
+        {serie.imagemUrl && (
+          <div className="card-cover-wrapper">
+            <img src={serie.imagemUrl} alt={serie.titulo} className="card-cover-img" />
+            <span className="cat-badge card-cover-badge" style={{
+              background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)",
+              color: "var(--emerald)", borderColor: "var(--emerald-dim)",
             }}>
               📚 Série
             </span>
           </div>
         )}
 
-        <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
-          {serie.imagemUrl && (
-            <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
-              {postCount} publicação{postCount !== 1 ? "ões" : ""}
-            </p>
+        <div style={{ padding: serie.imagemUrl ? "0.875rem 1.125rem 0.875rem" : undefined }}>
+          {!serie.imagemUrl && (
+            <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ flex: 1 }}>
+                <span className="card-meta">{postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
+              </div>
+              <span className="cat-badge" style={{
+                color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)",
+              }}>
+                📚 Série
+              </span>
+            </div>
           )}
-          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>
-            {serie.titulo}
-          </h2>
-          {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
+
+          <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
+            {serie.imagemUrl && (
+              <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
+                {postCount} publicação{postCount !== 1 ? "ões" : ""}
+              </p>
+            )}
+            <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>
+              {serie.titulo}
+            </h2>
+            {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
+          </div>
+
+          {showLoginBanner && (
+            <div style={{ padding: "0 0 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+              <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
+            </div>
+          )}
+
+          <div
+            className="card-footer-row"
+            style={{ display: "flex", alignItems: "center", gap: "0" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+              {isOwner && (
+                <div style={{ display: "flex", gap: "0.5rem", marginRight: "4px" }}>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
+                    className="post-btn-edit"
+                    style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+                  >
+                    ✏ Editar
+                  </button>
+                  <button
+                    onClick={handleDeletar}
+                    className="post-btn-delete"
+                    style={{ fontSize: "0.78rem", padding: "5px 12px" }}
+                  >
+                    🗑 Apagar
+                  </button>
+                </div>
+              )}
+
+              <button
+                className={`action-btn ${liked ? "liked" : ""}`}
+                onClick={handleLike}
+                disabled={loadingLike}
+                title={uid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
+                style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
+              >
+                <IconHeart size={13} filled={liked} />
+                Amei
+                {likeCount > 0 && (
+                  <span style={{ fontSize: "0.72rem", color: liked ? "inherit" : "var(--emerald)", fontWeight: 700 }}>
+                    {likeCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={handleToggleComments}
+                title="Ver comentários"
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: "4px",
+                  padding: 0, background: "none", border: "none",
+                  color: showComments ? "var(--emerald)" : "var(--text-3)",
+                  cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
+                  transition: "color 0.15s",
+                }}
+              >
+                <IconComment size={13} active={showComments} />
+                Comentários
+                {commentCount > 0 && (
+                  <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>
+                    {commentCount}
+                  </span>
+                )}
+              </button>
+
+              <BotaoOuvirSerieCard
+                serie={serie}
+                onLoginRequired={() => setShowLoginModal(true)}
+              />
+            </div>
+
+            <span
+              className="read-link"
+              style={{ marginLeft: "auto" }}
+              onClick={() => router.push(`/series/${serie.slug}`)}
+            >
+              Ver série →
+            </span>
+          </div>
         </div>
 
-        {showLoginBanner && (
-          <div style={{ padding: "0 0 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-            <BannerLogin onClose={() => setShowLoginBanner(false)} />
+        {showComments && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              borderTop: "1px solid var(--border-light)",
+              padding: "1.25rem 1.125rem 1.5rem",
+              background: "var(--bg-elevated)",
+              borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
+            }}
+          >
+            <CommentSection postId={serie.id} onCountChange={setCommentCount} />
           </div>
         )}
-
-        <div
-          className="card-footer-row"
-          style={{ display: "flex", alignItems: "center", gap: "0" }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-            {isOwner && (
-              <div style={{ display: "flex", gap: "0.5rem", marginRight: "4px" }}>
-                <button
-                  onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
-                  className="post-btn-edit"
-                  style={{ fontSize: "0.78rem", padding: "5px 12px" }}
-                >
-                  ✏ Editar
-                </button>
-                <button
-                  onClick={handleDeletar}
-                  className="post-btn-delete"
-                  style={{ fontSize: "0.78rem", padding: "5px 12px" }}
-                >
-                  🗑 Apagar
-                </button>
-              </div>
-            )}
-
-            <button
-              className={`action-btn ${liked ? "liked" : ""}`}
-              onClick={handleLike}
-              disabled={loadingLike}
-              title={uid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
-              style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}
-            >
-              <IconHeart size={13} filled={liked} />
-              Amei
-              {likeCount > 0 && (
-                <span style={{ fontSize: "0.72rem", color: liked ? "inherit" : "var(--emerald)", fontWeight: 700 }}>
-                  {likeCount}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={handleToggleComments}
-              title="Ver comentários"
-              style={{
-                display: "inline-flex", alignItems: "center", gap: "4px",
-                padding: 0, background: "none", border: "none",
-                color: showComments ? "var(--emerald)" : "var(--text-3)",
-                cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
-                transition: "color 0.15s",
-              }}
-            >
-              <IconComment size={13} active={showComments} />
-              Comentários
-              {commentCount > 0 && (
-                <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>
-                  {commentCount}
-                </span>
-              )}
-            </button>
-          </div>
-
-          <span
-            className="read-link"
-            style={{ marginLeft: "auto" }}
-            onClick={() => router.push(`/series/${serie.slug}`)}
-          >
-            Ver série →
-          </span>
-        </div>
-      </div>
-
-      {showComments && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            borderTop: "1px solid var(--border-light)",
-            padding: "1.25rem 1.125rem 1.5rem",
-            background: "var(--bg-elevated)",
-            borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
-          }}
-        >
-          <CommentSection postId={serie.id} onCountChange={setCommentCount} />
-        </div>
-      )}
-    </article>
+      </article>
+    </>
   );
 }
 
 /* ── PostCardPerfil ─────────────────────────────────── */
 
 function PostCardPerfil({
-  post, index, user, nomeExibicao, autorUid, isOwner, onToast,
+  post, index, user, nomeExibicao, autorUid, isOwner, onToast, filaAudio = [],
 }: {
   post: any; index: number; user: User; nomeExibicao: string;
   autorUid: string; isOwner: boolean; onToast: (msg: string) => void;
+  filaAudio?: any[];
 }) {
   const router = useRouter();
   const currentUid = auth.currentUser?.uid;
@@ -368,16 +724,20 @@ function PostCardPerfil({
   const [gerandoPdf, setGerandoPdf] = useState(false);
   const [downloadCount, setDownloadCount] = useState<number>(post.downloads ?? 0);
   const [showLoginBanner, setShowLoginBanner] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [showComments, setShowComments] = useState(false);
 
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
-  // ?from=perfil — indica ao PostDetailContent que deve navegar pelos posts do mesmo autor
   const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}?from=perfil`;
   const fullUrl = typeof window !== "undefined"
     ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`
     : `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
+
+  const currentPath = typeof window !== "undefined"
+    ? window.location.pathname + window.location.search
+    : "/";
 
   function buildFrase() {
     const data = post.data?.toDate
@@ -395,7 +755,7 @@ function PostCardPerfil({
   async function handleLike(e: React.MouseEvent) {
     e.stopPropagation();
     if (!currentUid) {
-      setShowLoginBanner(true);
+      setShowLoginModal(true);
       return;
     }
     if (loadingLike) return;
@@ -490,7 +850,7 @@ function PostCardPerfil({
           onClick={(e) => {
             e.stopPropagation();
             if (!currentUid) {
-              setShowLoginBanner(true);
+              setShowLoginModal(true);
               return;
             }
             setShowComments((v) => !v);
@@ -529,6 +889,12 @@ function PostCardPerfil({
             <IconEye size={13} />{viewCount}
           </span>
         )}
+
+        <BotaoOuvirPerfil
+          post={post}
+          filaAudio={filaAudio}
+          onLoginRequired={() => setShowLoginModal(true)}
+        />
       </div>
       <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
         Ler completo →
@@ -552,96 +918,111 @@ function PostCardPerfil({
 
   if (temImagem) {
     return (
-      <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }}
-        onClick={() => router.push(postPath)}>
-        <div className="card-cover-wrapper">
-          <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
-          <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-            {post.tipo === "sermao" ? "Sermão" : "Estudo"}
-          </span>
-        </div>
-        <div className="card-image-content">
-          <div className="card-header-row" style={{ padding: "0.875rem 1.125rem 0.375rem" }}
-            onClick={(e) => e.stopPropagation()}>
-            <Avatar src={user.fotoUrl} name={nomeExibicao} size={28} />
-            <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-              <span className="author-name-link" style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", fontSize: "0.8rem", cursor: "default" }}>
-                {nomeExibicao}
-              </span>
-              <span className="card-meta">{buildFrase()}</span>
-            </div>
+      <>
+        {showLoginModal && (
+          <BannerLogin modal onClose={() => setShowLoginModal(false)} redirectTo={currentPath} />
+        )}
+        <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }}
+          onClick={() => router.push(postPath)}>
+          <div className="card-cover-wrapper">
+            <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
+            <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
+              {post.tipo === "sermao" ? "Sermão" : "Estudo"}
+            </span>
           </div>
-          <div className="card-body-area" style={{ padding: "0 1.125rem 0.75rem" }}>
-            <h2 className="card-title" style={{ fontSize: "1rem" }}>{post.titulo}</h2>
-            {post.resumo && <p className="card-frase">{post.resumo}</p>}
-          </div>
-          {showLoginBanner && (
-            <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-              <BannerLogin onClose={() => setShowLoginBanner(false)} />
+          <div className="card-image-content">
+            <div className="card-header-row" style={{ padding: "0.875rem 1.125rem 0.375rem" }}
+              onClick={(e) => e.stopPropagation()}>
+              <Avatar src={user.fotoUrl} name={nomeExibicao} size={28} />
+              <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+                <span className="author-name-link" style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", fontSize: "0.8rem", cursor: "default" }}>
+                  {nomeExibicao}
+                </span>
+                <span className="card-meta">{buildFrase()}</span>
+              </div>
             </div>
-          )}
-          {footerRow}
-        </div>
-        {commentsPanel}
-      </article>
+            <div className="card-body-area" style={{ padding: "0 1.125rem 0.75rem" }}>
+              <h2 className="card-title" style={{ fontSize: "1rem" }}>{post.titulo}</h2>
+              {post.resumo && <p className="card-frase">{post.resumo}</p>}
+            </div>
+            {showLoginBanner && (
+              <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+                <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
+              </div>
+            )}
+            {footerRow}
+          </div>
+          {commentsPanel}
+        </article>
+      </>
     );
   }
 
   return (
-    <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
-      <div className="card-header-row" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
-        <Avatar src={user.fotoUrl} name={nomeExibicao} size={36} />
-        <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-          <span className="author-name-link" onClick={(e) => e.stopPropagation()}
-            style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", cursor: "default" }}>
-            {nomeExibicao}
-          </span>
-          <span className="card-meta">{buildFrase()}</span>
-        </div>
-        <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-          {post.tipo === "sermao" ? "Sermão" : "Estudo"}
-        </span>
-      </div>
-      <div className="card-body-area" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
-        <h2 className="card-title">{post.titulo}</h2>
-        {post.resumo && <p className="card-frase">{post.resumo}</p>}
-      </div>
-      {showLoginBanner && (
-        <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-          <BannerLogin onClose={() => setShowLoginBanner(false)} />
-        </div>
+    <>
+      {showLoginModal && (
+        <BannerLogin modal onClose={() => setShowLoginModal(false)} redirectTo={currentPath} />
       )}
-      {footerRow}
-      {commentsPanel}
-    </article>
+      <article className="post-card" style={{ animationDelay: `${index * 60}ms` }}>
+        <div className="card-header-row" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
+          <Avatar src={user.fotoUrl} name={nomeExibicao} size={36} />
+          <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+            <span className="author-name-link" onClick={(e) => e.stopPropagation()}
+              style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", cursor: "default" }}>
+              {nomeExibicao}
+            </span>
+            <span className="card-meta">{buildFrase()}</span>
+          </div>
+          <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
+            {post.tipo === "sermao" ? "Sermão" : "Estudo"}
+          </span>
+        </div>
+        <div className="card-body-area" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
+          <h2 className="card-title">{post.titulo}</h2>
+          {post.resumo && <p className="card-frase">{post.resumo}</p>}
+        </div>
+        {showLoginBanner && (
+          <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+            <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
+          </div>
+        )}
+        {footerRow}
+        {commentsPanel}
+      </article>
+    </>
   );
 }
 
 /* ── CardReflexaoComControles ─────────────────────────── */
 
 function CardReflexaoComControles({
-  reflexao, index, isOwner, onToast,
+  reflexao, index, isOwner, onToast, filaAudio = [], onLoginRequired,
 }: {
   reflexao: Reflexao; index: number; isOwner: boolean; onToast: (msg: string) => void;
+  filaAudio?: any[]; onLoginRequired: () => void;
 }) {
   const router = useRouter();
 
   async function handleDeletar(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!confirm("Tem certeza que deseja apagar esta reflexão?")) return;
+    if (!confirm("Tem certeza que deseja excluir esta reflexão? Esta ação não pode ser desfeita.")) return;
     try {
-      await deleteDoc(doc(db, "reflexoes", reflexao.id!));
-      onToast("Reflexão apagada.");
+      await deleteDoc(doc(db, "posts", reflexao.id!));
+      onToast("Reflexão excluída.");
       router.refresh();
     } catch (err) {
       console.error(err);
-      onToast("Erro ao apagar reflexão.");
+      onToast("Erro ao excluir reflexão.");
     }
   }
 
   return (
     <div style={{ position: "relative" }}>
-      <CardReflexao reflexao={reflexao} />
+      <CardReflexaoComOuvir
+        reflexao={reflexao}
+        filaAudio={filaAudio}
+        onLoginRequired={onLoginRequired}
+      />
       {isOwner && (
         <div
           style={{ display: "flex", gap: "0.5rem", padding: "0 1.125rem 0.875rem", marginTop: "-0.25rem" }}
@@ -681,6 +1062,11 @@ export default function PerfilPublico() {
   const [aba, setAba] = useState<"posts" | "series" | "reflexoes">("posts");
   const [loading, setLoading] = useState(true);
   const [visitorUid, setVisitorUid] = useState<string | null>(null);
+
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const currentPath = typeof window !== "undefined"
+    ? window.location.pathname + window.location.search
+    : "/";
 
   const [toastMsg, setToastMsg] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
@@ -751,9 +1137,41 @@ export default function PerfilPublico() {
 
   const isOwner = !!visitorUid && visitorUid === uid;
 
+  const filaPerfilAudio = posts.map((p) => ({
+    id: p.id,
+    tipo: p.tipo,
+    titulo: p.titulo,
+    autorNome: p.autorNome || "Autor",
+    autorFoto: p.autorFoto ?? null,
+    slug: p.slug,
+    autorSlug: p.autorSlug,
+    audioUrl: p.audioUrl || "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+  }));
+
+  const filaReflexoesAudio = reflexoes
+    .filter((r) => !!r.id)
+    .map((r) => ({
+      id: r.id!,
+      tipo: "reflexao" as const,
+      titulo: r.titulo,
+      autorNome: r.autorNome || "Autor",
+      autorFoto: null,
+      slug: r.slug,
+      autorSlug: r.autorSlug,
+      audioUrl: "https://archive.org/download/testmp3testfile/mpthreetest.mp3",
+    }));
+
   return (
     <>
       <Toast msg={toastMsg} visible={toastVisible} />
+
+      {showLoginModal && (
+        <BannerLogin
+          modal
+          onClose={() => setShowLoginModal(false)}
+          redirectTo={currentPath}
+        />
+      )}
 
       <div className="perfil-wrapper">
         <div className="perfil-card">
@@ -812,9 +1230,15 @@ export default function PerfilPublico() {
               <div className="posts-list">
                 {posts.map((post, i) => (
                   <PostCardPerfil
-                    key={post.id} post={post} index={i}
-                    user={user} nomeExibicao={nomeExibicao}
-                    autorUid={uid!} isOwner={isOwner} onToast={showToast}
+                    key={post.id}
+                    post={post}
+                    index={i}
+                    user={user}
+                    nomeExibicao={nomeExibicao}
+                    autorUid={uid!}
+                    isOwner={isOwner}
+                    onToast={showToast}
+                    filaAudio={filaPerfilAudio}
                   />
                 ))}
               </div>
@@ -845,8 +1269,13 @@ export default function PerfilPublico() {
               <div className="posts-list">
                 {reflexoes.map((r, i) => (
                   <CardReflexaoComControles
-                    key={r.id ?? i} reflexao={r} index={i}
-                    isOwner={isOwner} onToast={showToast}
+                    key={r.id ?? i}
+                    reflexao={r}
+                    index={i}
+                    isOwner={isOwner}
+                    onToast={showToast}
+                    filaAudio={filaReflexoesAudio}
+                    onLoginRequired={() => setShowLoginModal(true)}
                   />
                 ))}
               </div>

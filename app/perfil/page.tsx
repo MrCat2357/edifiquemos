@@ -27,6 +27,8 @@ import { getReflexoesPorAutor } from "@/lib/reflexoes";
 import type { Reflexao } from "@/lib/reflexoes";
 import BotaoGerarReflexoes from "@/components/reflexoes/BotaoGerarReflexoes";
 import CardReflexao from "@/components/reflexoes/CardReflexao";
+import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import { useTTS } from "@/hooks/useTTS";
 import BannerLogin from "@/components/BannerLogin";
 import dynamic from "next/dynamic";
 
@@ -34,6 +36,21 @@ const CommentSection = dynamic(
   () => import("@/components/comments/CommentSection"),
   { ssr: false, loading: () => null }
 );
+
+const FALLBACK_AUDIO = "https://archive.org/download/testmp3testfile/mpthreetest.mp3";
+
+// ---------------------------------------------------------------------------
+// Tipos
+// ---------------------------------------------------------------------------
+
+type VoiceStatus = "none" | "processing" | "ready" | "error";
+
+interface VoiceData {
+  voiceId?: string;
+  voiceSampleUrl?: string;
+  voiceStatus?: VoiceStatus;
+  voiceProvider?: string;
+}
 
 /* ── gerarSlugUnico ─────────────────────────────────── */
 
@@ -123,9 +140,7 @@ function IconComment({ size = 13, active = false }: { size?: number; active?: bo
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={{ flexShrink: 0 }}>
       <path
         d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H9l-3 3v-3H3.5A1.5 1.5 0 0 1 2 9.5v-6Z"
-        stroke="currentColor"
-        strokeWidth="1.35"
-        strokeLinejoin="round"
+        stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"
         fill={active ? "currentColor" : "none"}
       />
     </svg>
@@ -151,6 +166,969 @@ function Toast({ msg, visible }: { msg: string; visible: boolean }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// SecaoMinhaVoz — Fase 9 (com gravador inline estilo WhatsApp)
+// ---------------------------------------------------------------------------
+
+const SALMO_1 = [
+  { num: "¹", texto: "Bem-aventurado o homem que não anda no conselho dos ímpios, não se detém no caminho dos pecadores, nem se assenta na roda dos escarnecedores." },
+  { num: "²", texto: "Antes, o seu prazer está na lei do Senhor, e na sua lei medita de dia e de noite." },
+  { num: "³", texto: "Ele é como árvore plantada junto a corrente de águas, que, no devido tempo, dá o seu fruto, e cuja folhagem não murcha; e tudo quanto ele faz será bem-sucedido." },
+  { num: "⁴", texto: "Os ímpios não são assim; são, porém, como a palha que o vento dispersa." },
+  { num: "⁵", texto: "Por isso, os perversos não prevalecerão no juízo, nem os pecadores, na congregação dos justos." },
+  { num: "⁶", texto: "Pois o Senhor conhece o caminho dos justos, mas o caminho dos ímpios perecerá." },
+];
+
+const MAX_GRAVACAO_MS = 120_000; // 2 minutos
+
+type ModoEntrada = "idle" | "gravando" | "revisando" | "arquivo";
+type EstadoGravacao = "parado" | "gravando";
+
+function formatarTempo(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return `${m}:${ss}`;
+}
+
+function SecaoMinhaVoz({
+  uid,
+  voiceData,
+  onVoiceChange,
+  onToast,
+}: {
+  uid: string;
+  voiceData: VoiceData;
+  onVoiceChange: (data: VoiceData) => void;
+  onToast: (msg: string) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // ── estado geral ──────────────────────────────────────────────────────────
+  const [uploading, setUploading]     = useState(false);
+  const [removendo, setRemovendo]     = useState(false);
+  const [previewing, setPreviewing]   = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [erroEnvio, setErroEnvio]     = useState<string | null>(null);
+
+  // ── modo de entrada: gravador ou arquivo ─────────────────────────────────
+  const [modoEntrada, setModoEntrada] = useState<ModoEntrada>("idle");
+
+  // ── estado do gravador ────────────────────────────────────────────────────
+  const [estadoGravacao, setEstadoGravacao]   = useState<EstadoGravacao>("parado");
+  const [tempoMs, setTempoMs]                 = useState(0);
+  const [amplitude, setAmplitude]             = useState(0);       // 0–1
+  const [erroGravador, setErroGravador]       = useState<string | null>(null);
+  const [avisoTempoMax, setAvisoTempoMax]     = useState(false);
+
+  // ── arquivo / blob prontos para enviar ───────────────────────────────────
+  const [arquivoSelecionado, setArquivoSelecionado] = useState<File | null>(null);  // upload
+  const [blobGravado, setBlobGravado]               = useState<Blob | null>(null);  // gravador
+  const [urlPreviewGravacao, setUrlPreviewGravacao] = useState<string | null>(null);
+
+  // ── refs do gravador ──────────────────────────────────────────────────────
+  const mediaRecorderRef  = useRef<MediaRecorder | null>(null);
+  const chunksRef         = useRef<BlobPart[]>([]);
+  const streamRef         = useRef<MediaStream | null>(null);
+  const audioCtxRef       = useRef<AudioContext | null>(null);
+  const analyserRef       = useRef<AnalyserNode | null>(null);
+  const animFrameRef      = useRef<number | null>(null);
+  const timerIntervalRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const inicioGravacaoRef = useRef<number>(0);
+  const autoStopRef       = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const voiceStatus = voiceData.voiceStatus ?? "none";
+  const MAX_FILE_SIZE = 10 * 1024 * 1024;
+  const ALLOWED_TYPES = ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave", "audio/mp4", "audio/x-m4a", "audio/webm", "audio/ogg"];
+
+  // ── limpeza ao desmontar ──────────────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      pararRecursos();
+      if (urlPreviewGravacao) URL.revokeObjectURL(urlPreviewGravacao);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function pararRecursos() {
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    if (autoStopRef.current) clearTimeout(autoStopRef.current);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    audioCtxRef.current?.close().catch(() => {});
+    animFrameRef.current = null;
+    timerIntervalRef.current = null;
+    autoStopRef.current = null;
+    streamRef.current = null;
+    audioCtxRef.current = null;
+    analyserRef.current = null;
+  }
+
+  // ── iniciar gravação ──────────────────────────────────────────────────────
+  async function iniciarGravacao() {
+    setErroGravador(null);
+    setAvisoTempoMax(false);
+
+    if (!window.MediaRecorder) {
+      setErroGravador("Seu navegador não suporta gravação. Use a opção 'Escolher arquivo'.");
+      return;
+    }
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setErroGravador("Permissão de microfone negada. Verifique as configurações do seu navegador.");
+      return;
+    }
+
+    streamRef.current = stream;
+    chunksRef.current = [];
+
+    // Escolhe o melhor formato suportado
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : MediaRecorder.isTypeSupported("audio/webm")
+      ? "audio/webm"
+      : "";
+
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    mediaRecorderRef.current = recorder;
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+      const url  = URL.createObjectURL(blob);
+      setBlobGravado(blob);
+      setUrlPreviewGravacao(url);
+      setModoEntrada("revisando");
+      setEstadoGravacao("parado");
+      pararRecursos();
+    };
+
+    recorder.start(100); // coleta chunks a cada 100ms
+
+    // ── amplitude via AnalyserNode ──────────────────────────────────────────
+    try {
+      const ctx      = new AudioContext();
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      audioCtxRef.current = ctx;
+      analyserRef.current = analyser;
+
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      function tick() {
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((s, v) => s + v, 0) / data.length;
+        setAmplitude(Math.min(avg / 80, 1)); // normaliza ~0-1
+        animFrameRef.current = requestAnimationFrame(tick);
+      }
+      tick();
+    } catch { /* amplitude opcional — não bloqueia gravação */ }
+
+    // ── timer ──────────────────────────────────────────────────────────────
+    inicioGravacaoRef.current = Date.now();
+    setTempoMs(0);
+    timerIntervalRef.current = setInterval(() => {
+      setTempoMs(Date.now() - inicioGravacaoRef.current);
+    }, 200);
+
+    // ── auto-stop aos 120s ─────────────────────────────────────────────────
+    autoStopRef.current = setTimeout(() => {
+      setAvisoTempoMax(true);
+      pararGravacao();
+    }, MAX_GRAVACAO_MS);
+
+    setEstadoGravacao("gravando");
+  }
+
+  function pararGravacao() {
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    if (autoStopRef.current) clearTimeout(autoStopRef.current);
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    setAmplitude(0);
+  }
+
+  function descartarGravacao() {
+    if (urlPreviewGravacao) URL.revokeObjectURL(urlPreviewGravacao);
+    setBlobGravado(null);
+    setUrlPreviewGravacao(null);
+    setTempoMs(0);
+    setAvisoTempoMax(false);
+    setErroGravador(null);
+    setEstadoGravacao("parado");
+    setModoEntrada("gravando"); // volta para o painel com o botão de gravar
+  }
+
+  function fecharPainel() {
+    pararRecursos();
+    if (urlPreviewGravacao) URL.revokeObjectURL(urlPreviewGravacao);
+    setBlobGravado(null);
+    setUrlPreviewGravacao(null);
+    setArquivoSelecionado(null);
+    setTempoMs(0);
+    setAvisoTempoMax(false);
+    setErroGravador(null);
+    setErroEnvio(null);
+    setEstadoGravacao("parado");
+    setModoEntrada("idle");
+  }
+
+  // ── escolher arquivo ──────────────────────────────────────────────────────
+  function onEscolherArquivo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setErroEnvio(null);
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setErroEnvio("Formato inválido. Use MP3, WAV ou M4A.");
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      setErroEnvio("Arquivo muito grande. Máximo: 10 MB.");
+      return;
+    }
+    setArquivoSelecionado(file);
+  }
+
+  // ── enviar para a API (reutilizado por gravação e upload) ─────────────────
+  async function handleCriarVoz(origem: "arquivo" | "gravacao") {
+    const payload =
+      origem === "arquivo"
+        ? arquivoSelecionado
+        : blobGravado
+        ? new File([blobGravado], "gravacao.webm", { type: blobGravado.type || "audio/webm" })
+        : null;
+
+    if (!payload) return;
+    setUploading(true);
+    setErroEnvio(null);
+
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error("Usuário não autenticado.");
+      const token = await user.getIdToken();
+
+      const formData = new FormData();
+      formData.append("audio", payload, (payload as File).name ?? "gravacao.webm");
+
+      const res = await fetch("/api/voice/create", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error ?? `Erro ${res.status}`);
+
+      onVoiceChange({
+        voiceId: data.voiceId,
+        voiceSampleUrl: data.voiceSampleUrl,
+        voiceStatus: "ready",
+        voiceProvider: "elevenlabs",
+      });
+      fecharPainel();
+      onToast("Voz criada com sucesso!");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Erro ao criar voz.";
+      setErroEnvio(msg);
+      onToast("Erro ao criar voz.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  // ── remover voz ───────────────────────────────────────────────────────────
+  async function handleRemoverVoz() {
+    if (!confirm("Remover sua voz clonada? Próximas gerações usarão a voz padrão.")) return;
+    setRemovendo(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error("Não autenticado.");
+      const token = await user.getIdToken();
+      const res = await fetch("/api/voice/create", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error ?? `Erro ${res.status}`);
+      }
+      onVoiceChange({ voiceStatus: "none" });
+      onToast("Voz removida. Voltando para voz padrão.");
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Erro ao remover voz.");
+    } finally {
+      setRemovendo(false);
+    }
+  }
+
+  // ── preview da voz pronta ─────────────────────────────────────────────────
+  async function handlePreview() {
+    if (previewing || audioPlaying) {
+      previewAudioRef.current?.pause();
+      previewAudioRef.current = null;
+      setAudioPlaying(false);
+      return;
+    }
+    setPreviewing(true);
+    try {
+      const user = auth.currentUser;
+      if (!user) throw new Error("Não autenticado.");
+      const token = await user.getIdToken();
+      const res = await fetch("/api/voice/preview", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error ?? `Erro ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      previewAudioRef.current = audio;
+      audio.onended = () => { setAudioPlaying(false); URL.revokeObjectURL(url); previewAudioRef.current = null; };
+      audio.onerror = () => { setAudioPlaying(false); URL.revokeObjectURL(url); previewAudioRef.current = null; };
+      await audio.play();
+      setAudioPlaying(true);
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : "Erro ao gerar preview.");
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  // ── helpers visuais ───────────────────────────────────────────────────────
+  const statusConfig: Record<VoiceStatus, { label: string; color: string; bg: string; icon: string }> = {
+    none:       { label: "Sem voz configurada", color: "var(--text-3)",          bg: "var(--bg-card)",      icon: "🎙️" },
+    processing: { label: "Processando…",        color: "var(--amber, #f59e0b)",  bg: "rgba(245,158,11,.1)", icon: "⏳" },
+    ready:      { label: "Voz pronta",           color: "var(--emerald)",         bg: "var(--emerald-dim)",  icon: "✅" },
+    error:      { label: "Erro na criação",      color: "var(--red, #ef4444)",    bg: "rgba(239,68,68,.08)", icon: "⚠️" },
+  };
+  const sc = statusConfig[voiceStatus];
+
+  const btnBase: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", gap: "6px",
+    padding: "8px 16px", borderRadius: "var(--radius-full)",
+    fontSize: "0.82rem", fontWeight: 600, cursor: "pointer",
+    transition: "all 0.15s", fontFamily: "inherit",
+  };
+
+  // Barras de amplitude — 5 barras com alturas variadas
+  const barHeights = [0.5, 0.75, 1, 0.75, 0.5];
+
+  return (
+    <div style={{
+      background: "var(--bg-card)", border: "1px solid var(--border)",
+      borderRadius: "var(--radius-lg)", padding: "1.5rem", marginBottom: "1.5rem",
+    }}>
+      {/* Cabeçalho */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", marginBottom: "1rem" }}>
+        <span style={{ fontSize: "1.1rem" }}>🎙️</span>
+        <h2 style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--text-1)", margin: 0 }}>Minha Voz</h2>
+      </div>
+
+      {/* Badge de status */}
+      <div style={{
+        display: "inline-flex", alignItems: "center", gap: "6px",
+        padding: "5px 12px", borderRadius: "var(--radius-full)",
+        background: sc.bg, color: sc.color, fontSize: "0.78rem", fontWeight: 600,
+        marginBottom: "1.125rem", border: `1px solid ${sc.color}22`,
+      }}>
+        <span>{sc.icon}</span><span>{sc.label}</span>
+      </div>
+
+      {/* Descrição */}
+      <p style={{ fontSize: "0.82rem", color: "var(--text-3)", lineHeight: 1.6, marginBottom: "1.25rem" }}>
+        {voiceStatus === "ready"
+          ? "Seus próximos sermões e estudos serão narrados com a sua voz. Para atualizar, grave ou envie uma nova amostra."
+          : "Grave sua voz agora ou envie um arquivo de 30 a 120 segundos de fala limpa."}
+      </p>
+
+      {/* Botões "Ouvir minha voz" + "Remover" quando voz está pronta */}
+      {voiceStatus === "ready" && (
+        <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap", marginBottom: "1.25rem" }}>
+          <button onClick={handlePreview} disabled={previewing} style={{
+            ...btnBase,
+            border: "1px solid var(--emerald-dim)",
+            background: audioPlaying ? "var(--emerald-dim)" : "transparent",
+            color: "var(--emerald)", opacity: previewing ? 0.7 : 1,
+            cursor: previewing ? "default" : "pointer",
+          }}>
+            {previewing ? (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+            ) : audioPlaying ? (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+            )}
+            {previewing ? "Gerando preview…" : audioPlaying ? "Parar" : "Ouvir minha voz"}
+          </button>
+          <button onClick={handleRemoverVoz} disabled={removendo} style={{
+            ...btnBase, border: "1px solid var(--border)", background: "transparent",
+            color: "var(--text-3)", opacity: removendo ? 0.6 : 1, cursor: removendo ? "default" : "pointer",
+          }}>
+            {removendo ? "Removendo…" : "🗑 Remover voz"}
+          </button>
+        </div>
+      )}
+
+      {/* ── Seção de amostra — visível exceto em "processing" ── */}
+      {voiceStatus !== "processing" && (
+        <div>
+          <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-2)", display: "block", marginBottom: "0.75rem" }}>
+            {voiceStatus === "ready" ? "Atualizar amostra de voz" : "Criar amostra de voz"}
+          </label>
+
+          {/* Dois botões de entrada — visíveis só quando não há painel aberto */}
+          {modoEntrada === "idle" && (
+            <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap" }}>
+              <button
+                onClick={() => { setErroEnvio(null); setModoEntrada("gravando"); setEstadoGravacao("parado"); }}
+                style={{
+                  ...btnBase,
+                  border: "1px solid var(--emerald-dim)",
+                  background: "var(--emerald-dim)",
+                  color: "var(--emerald)",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
+                  <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+                Gravar agora
+              </button>
+
+              <button
+                onClick={() => { setErroEnvio(null); setModoEntrada("arquivo"); fileInputRef.current?.click(); }}
+                style={{
+                  ...btnBase,
+                  border: "1px dashed var(--border)",
+                  background: "transparent",
+                  color: "var(--text-3)",
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                Escolher arquivo
+              </button>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".mp3,.wav,.m4a,.webm,.ogg,audio/*"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  onEscolherArquivo(e);
+                  // Se arquivo válido foi selecionado, permanece em "arquivo"
+                  // para mostrar botão de confirmar
+                }}
+              />
+            </div>
+          )}
+
+          {/* ── Painel: arquivo selecionado ── */}
+          {modoEntrada === "arquivo" && (
+            <div style={{
+              marginTop: "0.875rem", padding: "1.125rem",
+              background: "var(--bg-elevated)", borderRadius: "var(--radius-lg)",
+              border: "1px solid var(--border)",
+            }}>
+              {arquivoSelecionado ? (
+                <>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-2)", marginBottom: "0.875rem" }}>
+                    📎 <strong>{arquivoSelecionado.name}</strong>
+                    <span style={{ color: "var(--text-3)", marginLeft: "6px" }}>
+                      ({(arquivoSelecionado.size / 1024 / 1024).toFixed(1)} MB)
+                    </span>
+                  </p>
+                  <div style={{ display: "flex", gap: "0.625rem" }}>
+                    <button
+                      onClick={() => handleCriarVoz("arquivo")} disabled={uploading}
+                      style={{
+                        ...btnBase, border: "none", background: "var(--emerald)", color: "#fff",
+                        opacity: uploading ? 0.7 : 1, cursor: uploading ? "default" : "pointer",
+                      }}
+                    >
+                      {uploading ? "Enviando…" : voiceStatus === "ready" ? "Atualizar voz" : "Criar minha voz"}
+                    </button>
+                    <button onClick={fecharPainel} disabled={uploading} style={{
+                      ...btnBase, border: "1px solid var(--border)", background: "transparent",
+                      color: "var(--text-3)", cursor: uploading ? "default" : "pointer",
+                    }}>
+                      Cancelar
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-3)" }}>Nenhum arquivo selecionado.</p>
+                  <button onClick={fecharPainel} style={{ ...btnBase, border: "none", background: "none", color: "var(--text-3)", padding: "4px 8px" }}>✕</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Painel: gravador ── */}
+          {(modoEntrada === "gravando" || modoEntrada === "revisando") && (
+            <div style={{
+              marginTop: "0.875rem", padding: "1.25rem",
+              background: "var(--bg-elevated)", borderRadius: "var(--radius-lg)",
+              border: "1px solid var(--border)",
+            }}>
+
+              {/* Sugestão de leitura — visível antes e durante a gravação */}
+              {modoEntrada === "gravando" && (
+                <div style={{
+                  marginBottom: "1.25rem", padding: "1rem",
+                  background: "var(--bg-card)", borderRadius: "var(--radius-lg)",
+                  border: "1px solid var(--border)",
+                }}>
+                  <p style={{ fontSize: "0.72rem", color: "var(--emerald)", fontWeight: 600, marginBottom: "0.625rem", letterSpacing: "0.03em", textTransform: "uppercase" }}>
+                    Sugestão de leitura — leia em voz natural, no seu próprio ritmo
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    {SALMO_1.map((v) => (
+                      <p key={v.num} style={{ fontSize: "0.85rem", lineHeight: 1.7, color: "var(--text-2)", margin: 0 }}>
+                        <span style={{ color: "var(--emerald)", fontWeight: 700, marginRight: "4px" }}>{v.num}</span>
+                        {v.texto}
+                      </p>
+                    ))}
+                  </div>
+                  <p style={{ fontSize: "0.72rem", color: "var(--text-3)", marginTop: "0.75rem", fontStyle: "italic" }}>
+                    Salmos 1:1-6
+                  </p>
+                </div>
+              )}
+
+              {/* Controles do gravador */}
+              {modoEntrada === "gravando" && estadoGravacao === "parado" && (
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+                  <button
+                    onClick={iniciarGravacao}
+                    style={{
+                      width: "52px", height: "52px", borderRadius: "50%",
+                      border: "none", background: "var(--emerald)", color: "#fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      cursor: "pointer", flexShrink: 0,
+                      boxShadow: "0 0 0 4px var(--emerald-dim)",
+                      transition: "transform 0.15s",
+                    }}
+                    title="Iniciar gravação"
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
+                      <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                  </button>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-3)", margin: 0 }}>
+                    Toque no microfone para começar a gravar
+                  </p>
+                  <button onClick={fecharPainel} style={{ marginLeft: "auto", ...btnBase, border: "none", background: "none", color: "var(--text-3)", padding: "4px 8px" }}>✕</button>
+                </div>
+              )}
+
+              {modoEntrada === "gravando" && estadoGravacao === "gravando" && (
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+                  {/* Botão parar */}
+                  <button
+                    onClick={pararGravacao}
+                    style={{
+                      width: "52px", height: "52px", borderRadius: "50%",
+                      border: "none", background: "#ef4444", color: "#fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      cursor: "pointer", flexShrink: 0,
+                      boxShadow: "0 0 0 4px rgba(239,68,68,0.2)",
+                      animation: "pulse-red 1.4s ease-in-out infinite",
+                    }}
+                    title="Parar gravação"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                  </button>
+
+                  {/* Barras de amplitude */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "3px", height: "32px" }}>
+                    {barHeights.map((h, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          width: "4px",
+                          height: `${Math.max(6, amplitude * h * 32)}px`,
+                          background: "var(--emerald)",
+                          borderRadius: "2px",
+                          transition: "height 0.1s ease",
+                          opacity: 0.6 + amplitude * 0.4,
+                        }}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Timer */}
+                  <span style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text-1)", fontVariantNumeric: "tabular-nums", minWidth: "36px" }}>
+                    {formatarTempo(tempoMs)}
+                  </span>
+
+                  <span style={{ fontSize: "0.72rem", color: "var(--text-3)", marginLeft: "auto" }}>
+                    máx. 2:00
+                  </span>
+                </div>
+              )}
+
+              {/* Aviso de tempo máximo */}
+              {avisoTempoMax && (
+                <p style={{ fontSize: "0.78rem", color: "var(--amber, #f59e0b)", marginTop: "0.5rem" }}>
+                  ⏱ Tempo máximo atingido. Ouça e confirme abaixo.
+                </p>
+              )}
+
+              {/* ── Estado de revisão: mini-player ── */}
+              {modoEntrada === "revisando" && urlPreviewGravacao && (
+                <div>
+                  <p style={{ fontSize: "0.82rem", color: "var(--text-2)", marginBottom: "0.75rem", fontWeight: 600 }}>
+                    ✅ Gravação concluída — ouça antes de enviar:
+                  </p>
+                  <audio
+                    src={urlPreviewGravacao}
+                    controls
+                    style={{ width: "100%", marginBottom: "1rem", borderRadius: "var(--radius-full)", accentColor: "var(--emerald)" }}
+                  />
+                  <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap" }}>
+                    <button
+                      onClick={() => handleCriarVoz("gravacao")} disabled={uploading}
+                      style={{
+                        ...btnBase, border: "none", background: "var(--emerald)", color: "#fff",
+                        opacity: uploading ? 0.7 : 1, cursor: uploading ? "default" : "pointer",
+                      }}
+                    >
+                      {uploading ? "Enviando…" : voiceStatus === "ready" ? "Atualizar voz" : "Usar esta gravação"}
+                    </button>
+                    <button onClick={descartarGravacao} disabled={uploading} style={{
+                      ...btnBase, border: "1px solid var(--border)", background: "transparent",
+                      color: "var(--text-3)", cursor: uploading ? "default" : "pointer",
+                    }}>
+                      🔄 Gravar novamente
+                    </button>
+                    <button onClick={fecharPainel} disabled={uploading} style={{
+                      ...btnBase, border: "none", background: "none",
+                      color: "var(--text-3)", cursor: uploading ? "default" : "pointer",
+                    }}>
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Erro do gravador */}
+              {erroGravador && (
+                <p style={{ fontSize: "0.78rem", color: "var(--red, #ef4444)", marginTop: "0.75rem" }}>
+                  ⚠️ {erroGravador}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Erro de envio */}
+          {erroEnvio && (
+            <p style={{ fontSize: "0.78rem", color: "var(--red, #ef4444)", marginTop: "0.5rem" }}>
+              ⚠️ {erroEnvio}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Estado "processing" */}
+      {voiceStatus === "processing" && (
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--amber, #f59e0b)", fontSize: "0.82rem" }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+          </svg>
+          Sua voz está sendo processada pelo provedor. Isso pode levar alguns instantes.
+        </div>
+      )}
+
+      <style>{`
+        @keyframes pulse-red {
+          0%, 100% { box-shadow: 0 0 0 4px rgba(239,68,68,0.2); }
+          50%       { box-shadow: 0 0 0 8px rgba(239,68,68,0.08); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ─── BotaoOuvirSerieCard ──────────────────────────────────────────────────────
+
+function BotaoOuvirSerieCard({ serie, onLoginRequired }: { serie: any; onLoginRequired: () => void }) {
+  const {
+    playQueue, pause, resume, isPlaying,
+    isLoading: audioLoading, contextType, current: currentAudio,
+  } = useAudioPlayer();
+
+  const { resolveAudioUrl } = useTTS();
+
+  const [carregandoPosts, setCarregandoPosts] = useState(false);
+  const [postsCarregados, setPostsCarregados] = useState<any[] | null>(null);
+
+  const serieAtiva =
+    contextType === "serie" &&
+    currentAudio !== null &&
+    postsCarregados !== null &&
+    postsCarregados.some((p: any) => p.id === currentAudio.id);
+
+  const tocando   = serieAtiva && isPlaying;
+  const carregando = (serieAtiva && audioLoading) || carregandoPosts;
+
+  async function buscarPostsDaSerie(): Promise<any[]> {
+    if (postsCarregados !== null) return postsCarregados;
+    const postIds: string[] = serie.postIds ?? [];
+    if (postIds.length === 0) return [];
+    const snaps = await Promise.all(postIds.map((id: string) => getDoc(doc(db, "posts", id))));
+    const lista = snaps.filter((s) => s.exists()).map((s) => ({ id: s.id, ...s.data() }));
+    setPostsCarregados(lista);
+    return lista;
+  }
+
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!auth.currentUser) { onLoginRequired(); return; }
+    if (serieAtiva) { tocando ? pause() : resume(); return; }
+    setCarregandoPosts(true);
+    try {
+      const posts = await buscarPostsDaSerie();
+      if (posts.length === 0) return;
+      const filaResolvida = await Promise.all(
+        posts.map(async (p: any) => {
+          let audioUrl = p.audioUrl && p.audioStatus === "ready" ? p.audioUrl : undefined;
+          try {
+            audioUrl = await resolveAudioUrl({
+              postId: p.id,
+              tipo: p.tipo === "artigo" ? "estudo" : p.tipo,
+              titulo: p.titulo,
+              audioUrlExistente: audioUrl,
+            });
+          } catch { audioUrl = audioUrl ?? FALLBACK_AUDIO; }
+          return {
+            id: p.id, tipo: p.tipo as "sermao" | "artigo" | "reflexao",
+            titulo: p.titulo, autorNome: p.autorNome || "Autor",
+            autorFoto: p.autorFoto ?? null, slug: p.slug, autorSlug: p.autorSlug, audioUrl,
+          };
+        })
+      );
+      const filaValida = filaResolvida.filter((p) => !!p.audioUrl && p.audioUrl !== FALLBACK_AUDIO);
+      if (filaValida.length === 0) return;
+      playQueue(filaValida[0], filaValida, "serie");
+    } catch (err) { console.error("Erro ao carregar posts da série:", err); }
+    setCarregandoPosts(false);
+  }
+
+  if (!serie.postIds || serie.postIds.length === 0) return null;
+
+  return (
+    <button
+      onClick={handleClick}
+      title={tocando ? "Pausar série" : serieAtiva ? "Continuar série" : "Ouvir série completa"}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: "4px",
+        padding: "4px 8px", borderRadius: "var(--radius-full)", border: "1px solid",
+        borderColor: serieAtiva ? "var(--emerald-dim)" : "transparent",
+        background: serieAtiva ? "var(--emerald-dim)" : "transparent",
+        color: serieAtiva ? "var(--emerald)" : "var(--text-3)",
+        fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
+        transition: "all 0.15s", fontFamily: "inherit", flexShrink: 0,
+        boxShadow: tocando ? "0 0 0 2px var(--emerald-dim)" : "none",
+      }}
+    >
+      {carregando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+        </svg>
+      ) : tocando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+      )}
+      <span>{carregando ? "Gerando áudios…" : tocando ? "Pausar" : serieAtiva ? "Continuar" : "Ouvir série"}</span>
+      {tocando && <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>}
+    </button>
+  );
+}
+
+// ─── BotaoOuvirPerfil ─────────────────────────────────────────────────────────
+
+function BotaoOuvirPerfil({
+  post, filaAudio = [], onLoginRequired,
+}: {
+  post: any; filaAudio?: any[]; onLoginRequired: () => void;
+}) {
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { resolveAudioUrl, isGenerating: ttsGenerating, error: ttsError } = useTTS();
+
+  const audioAtivo    = isCurrentPublication(post.id);
+  const audioTocando  = isCurrentlyPlaying(post.id);
+  const audioCarregando = audioAtivo && audioLoading;
+  const ocupado       = ttsGenerating || audioCarregando;
+
+  const label =
+    ttsGenerating   ? "Gerando…"         :
+    audioCarregando ? "Carregando…"      :
+    ttsError        ? "Tentar novamente" :
+    audioTocando    ? "Pausar"           :
+    audioAtivo      ? "Continuar"        :
+    "Ouvir";
+
+  const btnColor       = ttsError ? "var(--red, #ef4444)"     : audioAtivo ? "var(--emerald)"     : "var(--text-3)";
+  const btnBorderColor = ttsError ? "var(--red-dim, #fecaca)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+  const btnBg          = ttsError ? "var(--red-dim, #fef2f2)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+
+  async function handleClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!auth.currentUser) { onLoginRequired(); return; }
+    try {
+      const audioUrl = await resolveAudioUrl({
+        postId: post.id,
+        tipo: post.tipo === "artigo" ? "estudo" : post.tipo,
+        titulo: post.titulo,
+        audioUrlExistente: post.audioUrl && post.audioStatus === "ready" ? post.audioUrl : undefined,
+      });
+      const pub = {
+        id: post.id, tipo: post.tipo, titulo: post.titulo,
+        autorNome: post.autorNome || "Autor", autorFoto: post.autorFoto ?? null,
+        slug: post.slug, autorSlug: post.autorSlug, audioUrl,
+      };
+      if (filaAudio.length > 0) {
+        const filaAtualizada = filaAudio.map((item) => item.id === post.id ? { ...item, audioUrl } : item);
+        playQueue(pub, filaAtualizada, "perfil");
+      } else {
+        playOrToggle(pub);
+      }
+    } catch { /* ttsError já setado pelo hook */ }
+  }
+
+  return (
+    <button
+      onClick={handleClick} disabled={ocupado}
+      title={ttsError ? "Clique para tentar novamente" : audioTocando ? "Pausar" : "Ouvir este conteúdo"}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: "4px",
+        padding: "4px 8px", borderRadius: "var(--radius-full)", border: "1px solid",
+        borderColor: btnBorderColor, background: btnBg, color: btnColor,
+        fontSize: "0.72rem", fontWeight: 600, cursor: ocupado ? "default" : "pointer",
+        opacity: ocupado ? 0.7 : 1, transition: "all 0.15s", fontFamily: "inherit", flexShrink: 0,
+        boxShadow: audioTocando ? "0 0 0 2px var(--emerald-dim)" : "none",
+      }}
+    >
+      {ttsGenerating ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+      ) : ttsError ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      ) : audioTocando ? (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      ) : (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+      )}
+      <span>{label}</span>
+      {audioTocando && <span style={{ fontSize: "0.65rem", fontStyle: "italic", opacity: 0.7 }}>· agora</span>}
+    </button>
+  );
+}
+
+// ─── CardReflexaoComOuvir ─────────────────────────────────────────────────────
+
+function CardReflexaoComOuvir({
+  reflexao, filaAudio = [], onLoginRequired,
+}: {
+  reflexao: Reflexao; filaAudio?: any[]; onLoginRequired: () => void;
+}) {
+  const { playQueue, playOrToggle, isCurrentlyPlaying, isCurrentPublication, isLoading: audioLoading } = useAudioPlayer();
+  const { resolveAudioUrl, isGenerating: ttsGenerating, error: ttsError } = useTTS();
+
+  const audioAtivo      = isCurrentPublication(reflexao.id ?? "");
+  const audioTocando    = isCurrentlyPlaying(reflexao.id ?? "");
+  const audioCarregando = audioAtivo && audioLoading;
+  const ocupado         = ttsGenerating || audioCarregando;
+
+  const label =
+    ttsGenerating   ? "Gerando…"         :
+    audioCarregando ? "Carregando…"      :
+    ttsError        ? "Tentar novamente" :
+    audioTocando    ? "Pausar"           :
+    audioAtivo      ? "Continuar"        :
+    "Ouvir";
+
+  const btnColor       = ttsError ? "var(--red, #ef4444)"     : audioAtivo ? "var(--emerald)"     : "var(--text-3)";
+  const btnBorderColor = ttsError ? "var(--red-dim, #fecaca)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+  const btnBg          = ttsError ? "var(--red-dim, #fef2f2)" : audioAtivo ? "var(--emerald-dim)" : "transparent";
+
+  async function handleOuvir(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!auth.currentUser) { onLoginRequired(); return; }
+    if (!reflexao.id) return;
+    try {
+      const audioUrl = await resolveAudioUrl({
+        postId: reflexao.id,
+        tipo: "reflexao",
+        titulo: reflexao.titulo,
+        audioUrlExistente: (reflexao as any).audioUrl && (reflexao as any).audioStatus === "ready"
+          ? (reflexao as any).audioUrl : undefined,
+      });
+      const pub = {
+        id: reflexao.id, tipo: "reflexao" as const, titulo: reflexao.titulo,
+        autorNome: reflexao.autorNome, autorFoto: null,
+        slug: reflexao.slug, autorSlug: reflexao.autorSlug, audioUrl,
+      };
+      if (filaAudio.length > 0) {
+        const filaAtualizada = filaAudio.map((item) => item.id === reflexao.id ? { ...item, audioUrl } : item);
+        playQueue(pub, filaAtualizada, "perfil");
+      } else {
+        playOrToggle(pub);
+      }
+    } catch { /* ttsError já setado pelo hook */ }
+  }
+
+  return (
+    <CardReflexao
+      reflexao={reflexao}
+      botaoOuvir={
+        <button
+          onClick={handleOuvir} disabled={ocupado}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: "0.3rem",
+            padding: "4px 10px", borderRadius: "var(--radius-full)", border: "1px solid",
+            borderColor: btnBorderColor, background: btnBg, color: btnColor,
+            fontSize: "0.75rem", fontWeight: 600,
+            cursor: ocupado ? "default" : "pointer", opacity: ocupado ? 0.7 : 1,
+            transition: "all 0.18s ease", fontFamily: "inherit",
+          }}
+        >
+          {ttsGenerating ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          ) : ttsError ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          ) : audioTocando ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v14l11-7-11-7z"/></svg>
+          )}
+          <span>{label}</span>
+        </button>
+      }
+    />
+  );
+}
+
 /* ── SerieCardMeuPerfil ─────────────────────────────── */
 
 function SerieCardMeuPerfil({
@@ -160,6 +1138,8 @@ function SerieCardMeuPerfil({
 }) {
   const router = useRouter();
   const postCount = serie.postIds?.length ?? 0;
+  const currentPath = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/perfil";
+  const [showLoginBanner, setShowLoginBanner] = useState(false);
 
   async function handleDeletar(e: React.MouseEvent) {
     e.stopPropagation();
@@ -168,10 +1148,7 @@ function SerieCardMeuPerfil({
       await deleteDoc(doc(db, "series", serie.id));
       onToast("Série apagada.");
       router.refresh();
-    } catch (err) {
-      console.error(err);
-      onToast("Erro ao apagar série.");
-    }
+    } catch (err) { console.error(err); onToast("Erro ao apagar série."); }
   }
 
   return (
@@ -183,10 +1160,7 @@ function SerieCardMeuPerfil({
       {serie.imagemUrl && (
         <div className="card-cover-wrapper">
           <img src={serie.imagemUrl} alt={serie.titulo} className="card-cover-img" />
-          <span className="cat-badge card-cover-badge" style={{
-            background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)",
-            color: "var(--emerald)", borderColor: "var(--emerald-dim)",
-          }}>
+          <span className="cat-badge card-cover-badge" style={{ background: "rgba(10,15,10,0.72)", backdropFilter: "blur(6px)", color: "var(--emerald)", borderColor: "var(--emerald-dim)" }}>
             📚 Série
           </span>
         </div>
@@ -194,47 +1168,25 @@ function SerieCardMeuPerfil({
       <div style={{ padding: serie.imagemUrl ? "0.875rem 1.125rem 0.875rem" : undefined }}>
         {!serie.imagemUrl && (
           <div className="card-header-row" style={{ cursor: "default" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ flex: 1 }}>
-              <span className="card-meta">{postCount} publicação{postCount !== 1 ? "ões" : ""}</span>
-            </div>
-            <span className="cat-badge" style={{
-              color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)",
-            }}>
-              📚 Série
-            </span>
+            <div style={{ flex: 1 }}><span className="card-meta">{postCount} publicação{postCount !== 1 ? "ões" : ""}</span></div>
+            <span className="cat-badge" style={{ color: "var(--emerald)", background: "var(--emerald-dim)", borderColor: "var(--emerald-dim)" }}>📚 Série</span>
           </div>
         )}
         <div className="card-body-area" style={serie.imagemUrl ? { paddingTop: 0 } : undefined}>
-          {serie.imagemUrl && (
-            <p className="card-meta" style={{ marginBottom: "0.375rem" }}>
-              {postCount} publicação{postCount !== 1 ? "ões" : ""}
-            </p>
-          )}
-          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>
-            {serie.titulo}
-          </h2>
+          {serie.imagemUrl && <p className="card-meta" style={{ marginBottom: "0.375rem" }}>{postCount} publicação{postCount !== 1 ? "ões" : ""}</p>}
+          <h2 className="card-title" style={serie.imagemUrl ? { fontSize: "1rem" } : undefined}>{serie.titulo}</h2>
           {serie.descricao && <p className="card-frase">{serie.descricao}</p>}
         </div>
-        <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
-          onClick={(e) => e.stopPropagation()}>
-          <button
-            onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }}
-            className="post-btn-edit"
-            style={{ fontSize: "0.78rem", padding: "5px 12px" }}
-          >
-            ✏ Editar
-          </button>
-          <button
-            onClick={handleDeletar}
-            className="post-btn-delete"
-            style={{ fontSize: "0.78rem", padding: "5px 12px" }}
-          >
-            🗑 Apagar
-          </button>
-          <span className="read-link" style={{ marginLeft: "auto" }}
-            onClick={() => router.push(`/series/${serie.slug}`)}>
-            Ver série →
-          </span>
+        {showLoginBanner && (
+          <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
+            <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
+          </div>
+        )}
+        <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }} onClick={(e) => e.stopPropagation()}>
+          <button onClick={(e) => { e.stopPropagation(); router.push(`/editar-serie/${serie.id}`); }} className="post-btn-edit" style={{ fontSize: "0.78rem", padding: "5px 12px" }}>✏ Editar</button>
+          <button onClick={handleDeletar} className="post-btn-delete" style={{ fontSize: "0.78rem", padding: "5px 12px" }}>🗑 Apagar</button>
+          <BotaoOuvirSerieCard serie={serie} onLoginRequired={() => setShowLoginBanner(true)} />
+          <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(`/series/${serie.slug}`)}>Ver série →</span>
         </div>
       </div>
     </article>
@@ -244,17 +1196,15 @@ function SerieCardMeuPerfil({
 /* ── PostCardMeuPerfil ──────────────────────────────── */
 
 function PostCardMeuPerfil({
-  post, index, fotoUrl, nomeExibicao, onToast,
+  post, index, fotoUrl, nomeExibicao, onToast, filaAudio = [],
 }: {
   post: any; index: number; fotoUrl: string | null;
-  nomeExibicao: string; onToast: (msg: string) => void;
+  nomeExibicao: string; onToast: (msg: string) => void; filaAudio?: any[];
 }) {
   const router = useRouter();
   const currentUid = auth.currentUser?.uid;
 
-  const [liked, setLiked] = useState<boolean>(() =>
-    currentUid ? (post.likedBy ?? []).includes(currentUid) : false
-  );
+  const [liked, setLiked] = useState<boolean>(() => currentUid ? (post.likedBy ?? []).includes(currentUid) : false);
   const [likeCount, setLikeCount] = useState<number>(post.likes ?? 0);
   const [loadingLike, setLoadingLike] = useState(false);
   const [gerandoPdf, setGerandoPdf] = useState(false);
@@ -265,15 +1215,11 @@ function PostCardMeuPerfil({
   const viewCount: number = post.visualizacoes ?? 0;
   const temImagem = !!post.imagemUrl;
 
-  // ?from=perfil — indica ao PostDetailContent que deve navegar pelos posts do mesmo autor
   const postPath = `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}?from=perfil`;
   const fullUrl = typeof window !== "undefined"
     ? `${window.location.origin}/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`
     : `/posts/${post.tipo === "sermao" ? "sermoes" : "estudos"}/${post.slug}`;
-
-  const currentPath = typeof window !== "undefined"
-    ? window.location.pathname + window.location.search
-    : "/perfil";
+  const currentPath = typeof window !== "undefined" ? window.location.pathname + window.location.search : "/perfil";
 
   function buildFrase() {
     const data = formatData(post.data);
@@ -317,10 +1263,7 @@ function PostCardMeuPerfil({
         conteudo: post.conteudo || "Acesse o link para ler o conteúdo completo:\n" + fullUrl,
         tipo: post.tipo,
         onDownload: async () => {
-          try {
-            await updateDoc(doc(db, "posts", post.id), { downloads: increment(1) });
-            setDownloadCount((n) => n + 1);
-          } catch {}
+          try { await updateDoc(doc(db, "posts", post.id), { downloads: increment(1) }); setDownloadCount((n) => n + 1); } catch {}
         },
       });
     } catch (err) { console.error(err); onToast("Erro ao gerar PDF."); }
@@ -328,98 +1271,58 @@ function PostCardMeuPerfil({
   }
 
   const footerRow = (
-    <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }}
-      onClick={(e) => e.stopPropagation()}>
+    <div className="card-footer-row" style={{ display: "flex", alignItems: "center", gap: "0" }} onClick={(e) => e.stopPropagation()}>
       <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-        <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike}
-          disabled={loadingLike}
+        <button className={`action-btn ${liked ? "liked" : ""}`} onClick={handleLike} disabled={loadingLike}
           title={currentUid ? (liked ? "Remover curtida" : "Curtir") : "Curtir"}
           style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
           <IconHeart size={13} filled={liked} />
           Amei
           {likeCount > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)" }}>{likeCount}</span>}
         </button>
-
         <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (!currentUid) { setShowLoginBanner(true); return; }
-            setShowComments((v) => !v);
-          }}
+          onClick={(e) => { e.stopPropagation(); if (!currentUid) { setShowLoginBanner(true); return; } setShowComments((v) => !v); }}
           title="Ver comentários"
-          style={{
-            display: "inline-flex", alignItems: "center", gap: "4px",
-            padding: 0, background: "none", border: "none",
-            color: showComments ? "var(--emerald)" : "var(--text-3)",
-            cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
-            transition: "color 0.15s",
-          }}
+          style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none", color: showComments ? "var(--emerald)" : "var(--text-3)", cursor: "pointer", fontSize: "0.72rem", fontWeight: 600, transition: "color 0.15s" }}
         >
           <IconComment size={13} active={showComments} />
           Comentários
-          {(post.commentCount ?? 0) > 0 && (
-            <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>
-              {post.commentCount}
-            </span>
-          )}
+          {(post.commentCount ?? 0) > 0 && <span style={{ fontSize: "0.72rem", color: "var(--text-3)", fontWeight: 700 }}>{post.commentCount}</span>}
         </button>
-
-        <button className="action-btn" onClick={handleDownloadPdf} disabled={gerandoPdf}
-          title="Baixar como PDF"
+        <button className="action-btn" onClick={handleDownloadPdf} disabled={gerandoPdf} title="Baixar como PDF"
           style={{ opacity: gerandoPdf ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: "4px", padding: 0, background: "none", border: "none" }}>
           {gerandoPdf ? <><span className="btn-spinner" />PDF</> : <><IconDownload size={13} />PDF</>}
-          {downloadCount > 0 && (
-            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }}
-              title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>
-              {downloadCount}
-            </span>
-          )}
+          {downloadCount > 0 && <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-3)" }} title={`${downloadCount} download${downloadCount !== 1 ? "s" : ""}`}>{downloadCount}</span>}
         </button>
         {viewCount > 0 && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }}
-            title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "0.72rem", fontWeight: 600, color: "var(--text-3)" }} title={`${viewCount} visualização${viewCount !== 1 ? "ões" : ""}`}>
             <IconEye size={13} />{viewCount}
           </span>
         )}
+        <BotaoOuvirPerfil post={post} filaAudio={filaAudio} onLoginRequired={() => setShowLoginBanner(true)} />
       </div>
-      <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>
-        Ler completo →
-      </span>
+      <span className="read-link" style={{ marginLeft: "auto" }} onClick={() => router.push(postPath)}>Ler completo →</span>
     </div>
   );
 
   const commentsPanel = showComments && (
-    <div
-      onClick={(e) => e.stopPropagation()}
-      style={{
-        borderTop: "1px solid var(--border-light)",
-        padding: "1.25rem 1.125rem 1.5rem",
-        background: "var(--bg-elevated)",
-        borderRadius: "0 0 var(--radius-lg) var(--radius-lg)",
-      }}
-    >
+    <div onClick={(e) => e.stopPropagation()} style={{ borderTop: "1px solid var(--border-light)", padding: "1.25rem 1.125rem 1.5rem", background: "var(--bg-elevated)", borderRadius: "0 0 var(--radius-lg) var(--radius-lg)" }}>
       <CommentSection postId={post.id} />
     </div>
   );
 
   if (temImagem) {
     return (
-      <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }}
-        onClick={() => router.push(postPath)}>
+      <article className="post-card post-card-image" style={{ animationDelay: `${index * 60}ms` }} onClick={() => router.push(postPath)}>
         <div className="card-cover-wrapper">
           <img src={post.imagemUrl} alt={post.titulo} className="card-cover-img" />
-          <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-            {post.tipo === "sermao" ? "Sermão" : "Estudo"}
-          </span>
+          <span className={`cat-badge card-cover-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>{post.tipo === "sermao" ? "Sermão" : "Estudo"}</span>
         </div>
         <div className="card-image-content">
-          <div className="card-header-row" style={{ padding: "0.875rem 1.125rem 0.375rem" }}
-            onClick={(e) => e.stopPropagation()}>
+          <div className="card-header-row" style={{ padding: "0.875rem 1.125rem 0.375rem" }} onClick={(e) => e.stopPropagation()}>
             <Avatar src={fotoUrl} name={nomeExibicao} size={28} />
             <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-              <span className="author-name-link" style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", fontSize: "0.8rem", cursor: "default" }}>
-                {nomeExibicao}
-              </span>
+              <span className="author-name-link" style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", fontSize: "0.8rem", cursor: "default" }}>{nomeExibicao}</span>
               <span className="card-meta">{buildFrase()}</span>
             </div>
           </div>
@@ -429,10 +1332,7 @@ function PostCardMeuPerfil({
           </div>
           {showLoginBanner && (
             <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-              <BannerLogin
-                onClose={() => setShowLoginBanner(false)}
-                redirectTo={currentPath}
-              />
+              <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
             </div>
           )}
           {footerRow}
@@ -447,14 +1347,10 @@ function PostCardMeuPerfil({
       <div className="card-header-row" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
         <Avatar src={fotoUrl} name={nomeExibicao} size={36} />
         <div className="author-col" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
-          <span className="author-name-link" style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", cursor: "default" }}>
-            {nomeExibicao}
-          </span>
+          <span className="author-name-link" style={{ display: "inline", width: "fit-content", alignSelf: "flex-start", cursor: "default" }}>{nomeExibicao}</span>
           <span className="card-meta">{buildFrase()}</span>
         </div>
-        <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>
-          {post.tipo === "sermao" ? "Sermão" : "Estudo"}
-        </span>
+        <span className={`cat-badge ${post.tipo === "sermao" ? "cat-sermao" : "cat-artigo"}`}>{post.tipo === "sermao" ? "Sermão" : "Estudo"}</span>
       </div>
       <div className="card-body-area" onClick={() => router.push(postPath)} style={{ cursor: "pointer" }}>
         <h2 className="card-title">{post.titulo}</h2>
@@ -462,10 +1358,7 @@ function PostCardMeuPerfil({
       </div>
       {showLoginBanner && (
         <div style={{ padding: "0 1.125rem 0.625rem" }} onClick={(e) => e.stopPropagation()}>
-          <BannerLogin
-            onClose={() => setShowLoginBanner(false)}
-            redirectTo={currentPath}
-          />
+          <BannerLogin onClose={() => setShowLoginBanner(false)} redirectTo={currentPath} />
         </div>
       )}
       {footerRow}
@@ -486,6 +1379,9 @@ function PerfilContent() {
   const [fotoUrl, setFotoUrl] = useState<string | null>(null);
   const [uid, setUid] = useState<string | null>(null);
   const [autorSlug, setAutorSlug] = useState("");
+
+  // ── Fase 9: estado da voz ────────────────────────────
+  const [voiceData, setVoiceData] = useState<VoiceData>({});
 
   const [editando, setEditando] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -532,9 +1428,18 @@ function PerfilContent() {
         setBio(d.bio || "");
         setFotoUrl(d.fotoUrl || null);
         setAutorSlug(d.slug || "");
+
+        // ── Fase 9: carregar dados de voz ──
+        setVoiceData({
+          voiceId:        d.voiceId        ?? undefined,
+          voiceSampleUrl: d.voiceSampleUrl ?? undefined,
+          voiceStatus:    d.voiceStatus    ?? "none",
+          voiceProvider:  d.voiceProvider  ?? undefined,
+        });
       } else {
         setNome(user.displayName || "");
         setFotoUrl(user.photoURL || null);
+        setVoiceData({ voiceStatus: "none" });
       }
 
       const [postsSnap, seriesSnap, reflexoesData] = await Promise.all([
@@ -575,15 +1480,12 @@ function PerfilContent() {
 
   useEffect(() => {
     if (aba === "series" && uid) {
-      getDocs(query(
-        collection(db, "series"),
-        where("autorId", "==", uid),
-        orderBy("criadoEm", "desc")
-      )).then((snap) => {
-        const lista: any[] = [];
-        snap.forEach((d) => lista.push({ id: d.id, ...d.data() }));
-        setSeries(lista);
-      }).catch(console.error);
+      getDocs(query(collection(db, "series"), where("autorId", "==", uid), orderBy("criadoEm", "desc")))
+        .then((snap) => {
+          const lista: any[] = [];
+          snap.forEach((d) => lista.push({ id: d.id, ...d.data() }));
+          setSeries(lista);
+        }).catch(console.error);
     }
   }, [aba, uid]);
 
@@ -617,28 +1519,20 @@ function PerfilContent() {
         novaFotoUrl = await getDownloadURL(storageRef);
         setUploadandoFoto(false);
       }
-      const nomeCompleto = rascTitulo.trim()
-        ? `${rascTitulo.trim()} ${rascNome.trim()}`
-        : rascNome.trim();
+      const nomeCompleto = rascTitulo.trim() ? `${rascTitulo.trim()} ${rascNome.trim()}` : rascNome.trim();
       const slug = await gerarSlugUnico(nomeCompleto, user.uid);
       await updateDoc(doc(db, "users", user.uid), {
         nome: rascNome, titulo: rascTitulo, bio: rascBio,
         fotoUrl: novaFotoUrl, slug,
       });
-      await updateProfile(user, {
-        displayName: rascNome, photoURL: novaFotoUrl ?? undefined,
-      });
+      await updateProfile(user, { displayName: rascNome, photoURL: novaFotoUrl ?? undefined });
       const [postsSnap, seriesSnap] = await Promise.all([
         getDocs(query(collection(db, "posts"), where("autorId", "==", user.uid))),
         getDocs(query(collection(db, "series"), where("autorId", "==", user.uid))),
       ]);
       const batch = writeBatch(db);
-      postsSnap.forEach((postDoc) => {
-        batch.update(postDoc.ref, { autorNome: nomeCompleto, autorFoto: novaFotoUrl });
-      });
-      seriesSnap.forEach((serieDoc) => {
-        batch.update(serieDoc.ref, { autorNome: nomeCompleto, autorFoto: novaFotoUrl });
-      });
+      postsSnap.forEach((postDoc) => batch.update(postDoc.ref, { autorNome: nomeCompleto, autorFoto: novaFotoUrl }));
+      seriesSnap.forEach((serieDoc) => batch.update(serieDoc.ref, { autorNome: nomeCompleto, autorFoto: novaFotoUrl }));
       await batch.commit();
       await carregar();
       setEditando(false);
@@ -648,8 +1542,23 @@ function PerfilContent() {
 
   if (loading) return <div className="post-detail-loading"><div className="spinner" />Carregando perfil...</div>;
 
-  const nomeExibicao = titulo.trim() ? `${titulo.trim()} ${nome.trim()}` : nome.trim() || "Usuário";
+  const nomeExibicao    = titulo.trim() ? `${titulo.trim()} ${nome.trim()}` : nome.trim() || "Usuário";
   const rascNomeExibicao = rascTitulo.trim() ? `${rascTitulo.trim()} ${rascNome.trim()}` : rascNome.trim() || "Seu nome";
+
+  const filaPerfilAudio = posts.map((p) => ({
+    id: p.id, tipo: p.tipo, titulo: p.titulo,
+    autorNome: p.autorNome || "Autor", autorFoto: p.autorFoto ?? null,
+    slug: p.slug, autorSlug: p.autorSlug,
+    audioUrl: p.audioUrl || FALLBACK_AUDIO,
+  }));
+
+  const filaReflexoesAudio = reflexoes
+    .filter((r) => !!r.id)
+    .map((r) => ({
+      id: r.id!, tipo: "reflexao" as const, titulo: r.titulo,
+      autorNome: r.autorNome || "Autor", autorFoto: null,
+      slug: r.slug, autorSlug: r.autorSlug, audioUrl: FALLBACK_AUDIO,
+    }));
 
   return (
     <>
@@ -657,7 +1566,7 @@ function PerfilContent() {
 
       <div className="perfil-wrapper">
 
-        {/* MODO VISUALIZAÇÃO */}
+        {/* ── MODO VISUALIZAÇÃO ── */}
         {!editando && (
           <div className="perfil-card">
             <Avatar src={fotoUrl} name={nomeExibicao} size={64} />
@@ -665,18 +1574,9 @@ function PerfilContent() {
               <h1 className="perfil-nome">{nomeExibicao}</h1>
               {bio ? <p className="perfil-bio">{bio}</p> : <p className="perfil-bio-vazia">Sem descrição.</p>}
               <div style={{ display: "flex", gap: "1.25rem" }}>
-                <div className="perfil-stat">
-                  <span className="perfil-stat-num">{posts.length}</span>
-                  <span className="perfil-stat-label">publicações</span>
-                </div>
-                <div className="perfil-stat">
-                  <span className="perfil-stat-num">{series.length}</span>
-                  <span className="perfil-stat-label">série{series.length !== 1 ? "s" : ""}</span>
-                </div>
-                <div className="perfil-stat">
-                  <span className="perfil-stat-num">{reflexoes.length}</span>
-                  <span className="perfil-stat-label">reflexões</span>
-                </div>
+                <div className="perfil-stat"><span className="perfil-stat-num">{posts.length}</span><span className="perfil-stat-label">publicações</span></div>
+                <div className="perfil-stat"><span className="perfil-stat-num">{series.length}</span><span className="perfil-stat-label">série{series.length !== 1 ? "s" : ""}</span></div>
+                <div className="perfil-stat"><span className="perfil-stat-num">{reflexoes.length}</span><span className="perfil-stat-label">reflexões</span></div>
               </div>
             </div>
             <div style={{ alignSelf: "flex-start" }}>
@@ -685,7 +1585,7 @@ function PerfilContent() {
           </div>
         )}
 
-        {/* MODO EDIÇÃO */}
+        {/* ── MODO EDIÇÃO ── */}
         {editando && (
           <div className="perfil-card" style={{ flexDirection: "column", gap: "1.75rem", alignItems: "stretch" }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.875rem" }}>
@@ -736,7 +1636,18 @@ function PerfilContent() {
           </div>
         )}
 
-        {/* ABAS */}
+        {/* ── FASE 9: SEÇÃO MINHA VOZ ── */}
+        {/* TEMPORARIAMENTE DESATIVADO — reativar quando tiver plano ElevenLabs Starter
+        {uid && (
+          <SecaoMinhaVoz
+            uid={uid}
+            voiceData={voiceData}
+            onVoiceChange={(newData) => setVoiceData((prev) => ({ ...prev, ...newData }))}
+            onToast={showToast}
+          />
+        )}
+        */}  
+        {/* ── ABAS ── */}
         <div className="perfil-posts-section">
           <div style={{ display: "flex", gap: "0", borderBottom: "1px solid var(--border)", marginBottom: "1.5rem" }}>
             {(["posts", "series", "reflexoes"] as const).map((a) => (
@@ -744,16 +1655,11 @@ function PerfilContent() {
                 key={a}
                 onClick={() => setAba(a)}
                 style={{
-                  padding: "0.625rem 1.25rem",
-                  fontSize: "0.875rem",
-                  fontWeight: 600,
-                  background: "none",
-                  border: "none",
+                  padding: "0.625rem 1.25rem", fontSize: "0.875rem", fontWeight: 600,
+                  background: "none", border: "none",
                   borderBottom: aba === a ? "2px solid var(--emerald)" : "2px solid transparent",
                   color: aba === a ? "var(--emerald)" : "var(--text-3)",
-                  cursor: "pointer",
-                  transition: "all 0.15s",
-                  marginBottom: "-1px",
+                  cursor: "pointer", transition: "all 0.15s", marginBottom: "-1px",
                 }}
               >
                 {a === "posts" && `Publicações (${posts.length})`}
@@ -765,18 +1671,13 @@ function PerfilContent() {
 
           {aba === "posts" && (
             <>
-              {posts.length === 0 && (
-                <div className="empty-state">Você ainda não publicou nada.</div>
-              )}
+              {posts.length === 0 && <div className="empty-state">Você ainda não publicou nada.</div>}
               <div className="posts-list">
                 {posts.map((post, i) => (
                   <PostCardMeuPerfil
-                    key={post.id}
-                    post={post}
-                    index={i}
-                    fotoUrl={fotoUrl}
-                    nomeExibicao={nomeExibicao}
-                    onToast={showToast}
+                    key={post.id} post={post} index={i}
+                    fotoUrl={fotoUrl} nomeExibicao={nomeExibicao}
+                    onToast={showToast} filaAudio={filaPerfilAudio}
                   />
                 ))}
               </div>
@@ -788,22 +1689,14 @@ function PerfilContent() {
               {series.length === 0 ? (
                 <div className="empty-state">
                   Você ainda não criou nenhuma série.{" "}
-                  <span
-                    style={{ color: "var(--emerald)", cursor: "pointer", textDecoration: "underline" }}
-                    onClick={() => router.push("/criar-serie")}
-                  >
+                  <span style={{ color: "var(--emerald)", cursor: "pointer", textDecoration: "underline" }} onClick={() => router.push("/criar-serie")}>
                     Criar primeira série
                   </span>
                 </div>
               ) : (
                 <div className="posts-list">
                   {series.map((serie, i) => (
-                    <SerieCardMeuPerfil
-                      key={serie.id}
-                      serie={serie}
-                      index={i}
-                      onToast={showToast}
-                    />
+                    <SerieCardMeuPerfil key={serie.id} serie={serie} index={i} onToast={showToast} />
                   ))}
                 </div>
               )}
@@ -814,22 +1707,19 @@ function PerfilContent() {
             <>
               <div style={{ marginBottom: "1.25rem" }}>
                 {uid && autorSlug && (
-                  <BotaoGerarReflexoes
-                    autorId={uid}
-                    autorNome={nomeExibicao}
-                    autorSlug={autorSlug}
-                  />
+                  <BotaoGerarReflexoes autorId={uid} autorNome={nomeExibicao} autorSlug={autorSlug} />
                 )}
               </div>
-
               {reflexoes.length === 0 ? (
-                <div className="empty-state">
-                  Você ainda não criou nenhuma reflexão. Clique em "Criar Reflexões" para começar.
-                </div>
+                <div className="empty-state">Você ainda não criou nenhuma reflexão. Clique em "Criar Reflexões" para começar.</div>
               ) : (
                 <div className="posts-list">
                   {reflexoes.map((r, i) => (
-                    <CardReflexao key={r.id ?? i} reflexao={r} />
+                    <CardReflexaoComOuvir
+                      key={r.id ?? i} reflexao={r}
+                      filaAudio={filaReflexoesAudio}
+                      onLoginRequired={() => {}}
+                    />
                   ))}
                 </div>
               )}
@@ -841,26 +1731,14 @@ function PerfilContent() {
       <style>{`
         .post-card-image { cursor: pointer; }
         .card-cover-wrapper {
-          position: relative; width: 100%;
-          max-height: 420px; min-height: 160px;
-          overflow: hidden;
-          border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-          background: #0d1310;
-          display: flex; align-items: center; justify-content: center;
+          position: relative; width: 100%; max-height: 420px; min-height: 160px;
+          overflow: hidden; border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+          background: #0d1310; display: flex; align-items: center; justify-content: center;
         }
-        .card-cover-img {
-          width: 100%; height: 100%;
-          object-fit: contain; display: block;
-          max-height: 420px;
-          transition: transform 0.35s ease;
-        }
+        .card-cover-img { width: 100%; height: 100%; object-fit: contain; display: block; max-height: 420px; transition: transform 0.35s ease; }
         .post-card-image:hover .card-cover-img { transform: scale(1.025); }
         .serie-card:hover .card-cover-img { transform: scale(1.025); }
-        .card-cover-badge {
-          position: absolute; top: 0.625rem; right: 0.75rem;
-          backdrop-filter: blur(6px);
-          background: rgba(10, 15, 10, 0.72) !important;
-        }
+        .card-cover-badge { position: absolute; top: 0.625rem; right: 0.75rem; backdrop-filter: blur(6px); background: rgba(10, 15, 10, 0.72) !important; }
         .card-image-content { display: flex; flex-direction: column; }
         @media (max-width: 640px) {
           .card-cover-wrapper { max-height: 320px; min-height: 120px; }

@@ -17,6 +17,7 @@ export async function getReflexaoPorSlugAdmin(slug: string): Promise<Reflexao | 
     id: d.id,
     ...data,
     criadoEm: null,
-    editadoEm: null, // Timestamp do Firestore não é serializável pelo Next.js
+    editadoEm: null,
+    audioUpdatedAt: null, // Timestamp do Firestore não é serializável pelo Next.js
   } as Reflexao;
 }
