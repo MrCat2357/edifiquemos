@@ -5,23 +5,14 @@ import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import MiniPlayer from "./MiniPlayer";
 import ExpandedPlayer from "./ExpandedPlayer";
 import NowPlayingSidebar from "./NowPlayingSidebar";
+import ResumePrompt from "./ResumePrompt";
 
 /**
- * GlobalAudioPlayer — Fase 5
+ * GlobalAudioPlayer — Fase 11
  *
  * Mobile  (<1024px): MiniPlayer (bottom bar) + ExpandedPlayer (fullscreen)
  * Desktop (≥1024px): NowPlayingSidebar (fixed right panel)
- *
- * Correções 5.2:
- * - Remove botão "▶ Ouvir" flutuante que sobrepunha a sidebar no desktop.
- *   Esse botão é suprimido via CSS quando o player está ativo.
- *   Seletores cobertos:
- *     • .audio-listen-btn        — classe recomendada nos botões dos cards
- *     • [data-audio-listen-btn]  — alternativa via data-attribute
- *   No desktop com player ativo ambos somem via display:none.
- *
- * - NowPlayingSidebar tem zIndex:80 (abaixo do header, acima do conteúdo).
- *   O botão × dentro dela tem zIndex:10 relativo ao aside, sempre clicável.
+ * Ambos  : ResumePrompt (toast de retomada automática)
  */
 export default function GlobalAudioPlayer() {
   const { current } = useAudioPlayer();
@@ -60,8 +51,10 @@ export default function GlobalAudioPlayer() {
         <NowPlayingSidebar />
       </div>
 
+      {/* ── Retomada automática (mobile + desktop) ───────────────────── */}
+      <ResumePrompt />
+
       <style>{`
-        /* Variáveis base — sempre presentes */
         :root {
           --header-h: 64px;
           --sidebar-player-w: 0px;
@@ -83,27 +76,11 @@ export default function GlobalAudioPlayer() {
           ${current ? `
             :root { --sidebar-player-w: 280px; }
 
-            /*
-              Empurra o conteúdo principal para não ficar atrás da sidebar.
-              Usa transition para suavizar a abertura/fechamento.
-            */
             main {
               padding-right: calc(280px + 1rem);
               transition: padding-right 250ms cubic-bezier(0.32, 0.72, 0, 1);
             }
 
-            /*
-              Oculta QUALQUER botão "Ouvir" flutuante enquanto a sidebar
-              do player estiver aberta, evitando sobreposição com o botão ×.
-
-              Adicione UMA das marcações abaixo nos seus botões "Ouvir":
-                • className="audio-listen-btn"
-                • data-audio-listen-btn="true"
-
-              O componente AudioListenButton (se existir) já pode usar
-              useAudioPlayer().current para se auto-ocultar em vez de
-              depender só do CSS — mas este CSS é o fallback garantido.
-            */
             .audio-listen-btn,
             [data-audio-listen-btn] {
               display: none !important;
