@@ -1637,6 +1637,7 @@ function PerfilContent() {
         )}
 
         {/* ── FASE 9: SEÇÃO MINHA VOZ ── */}
+        {/* TEMPORARIAMENTE DESATIVADO — reativar quando tiver plano ElevenLabs Starter
         {uid && (
           <SecaoMinhaVoz
             uid={uid}
@@ -1645,7 +1646,7 @@ function PerfilContent() {
             onToast={showToast}
           />
         )}
-
+        */}  
         {/* ── ABAS ── */}
         <div className="perfil-posts-section">
           <div style={{ display: "flex", gap: "0", borderBottom: "1px solid var(--border)", marginBottom: "1.5rem" }}>
