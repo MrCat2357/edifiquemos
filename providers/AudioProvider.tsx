@@ -28,11 +28,11 @@ export type PreloadStatus = "idle" | "loading" | "ready";
 
 // ── Fase 11 — novos tipos ────────────────────────────────────────────────────
 
-export type PlaybackSpeed = 1 | 1.5 | 2;
+export type PlaybackSpeed = 0.5 | 0.75 | 1 | 1.5 | 2;
 
 export type SleepTimerMode =
   | { type: "off" }
-  | { type: "duration"; minutes: number; endsAt: number } // endsAt = Date.now() + ms
+  | { type: "duration"; minutes: number; endsAt: number }
   | { type: "end_of_track" };
 
 export type HistoryItem = {
@@ -44,7 +44,7 @@ export type HistoryItem = {
   slug: string;
   autorSlug?: string;
   audioUrl: string;
-  playedAt: number; // timestamp ms
+  playedAt: number;
 };
 
 // Persistência no localStorage
@@ -67,10 +67,9 @@ type AudioState = {
   currentIndex: number;
   contextType: AudioContextType;
   preloadStatus: PreloadStatus;
-  // Fase 11
   playbackSpeed: PlaybackSpeed;
   sleepTimer: SleepTimerMode;
-  sleepTimerRemaining: number | null; // segundos restantes, null se off
+  sleepTimerRemaining: number | null;
   history: HistoryItem[];
 };
 
@@ -93,7 +92,6 @@ type AudioActions = {
   registerNavigationCallback: (
     cb: ((direction: "next" | "previous", pub: AudioPublication) => void) | null
   ) => void;
-  // Fase 11
   setPlaybackSpeed: (speed: PlaybackSpeed) => void;
   setSleepTimer: (mode: SleepTimerMode) => void;
   clearHistory: () => void;
@@ -114,10 +112,15 @@ export function useAudioContext(): AudioContextValue {
 
 // ─── Helpers de localStorage ─────────────────────────────────────────────────
 
+const VALID_SPEEDS: PlaybackSpeed[] = [0.5, 0.75, 1, 1.5, 2];
+
 function loadSpeed(): PlaybackSpeed {
   try {
     const v = localStorage.getItem(LS_SPEED);
-    if (v === "1" || v === "1.5" || v === "2") return parseFloat(v) as PlaybackSpeed;
+    if (v) {
+      const n = parseFloat(v) as PlaybackSpeed;
+      if (VALID_SPEEDS.includes(n)) return n;
+    }
   } catch {}
   return 1;
 }
@@ -272,7 +275,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
   const playbackSpeedRef = useRef<PlaybackSpeed>(1);
   const sleepTimerRef = useRef<SleepTimerMode>({ type: "off" });
   const sleepTimerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Salvar posição periodicamente
   const resumeSaveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const registerOnEndedCallback = useCallback((cb: (() => void) | null) => {
@@ -300,10 +302,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     setHistory(hist);
   }, []);
 
-  // ── Fase 11: retomada automática ─────────────────────────────────────────
-  // Exposto via hook separado para evitar auto-play sem interação do usuário.
-  // O componente raiz pode chamar getResumeState() e oferecer ao usuário.
-
   // ── Fase 11: sleep timer tick ─────────────────────────────────────────────
   useEffect(() => {
     if (sleepTimerIntervalRef.current) {
@@ -317,7 +315,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (sleepTimer.type === "end_of_track") {
-      setSleepTimerRemaining(null); // exibe ícone, sem countdown
+      setSleepTimerRemaining(null);
       return;
     }
 
@@ -326,7 +324,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         const remaining = Math.max(0, Math.round((sleepTimer.endsAt - Date.now()) / 1000));
         setSleepTimerRemaining(remaining);
         if (remaining <= 0) {
-          // Pausar áudio
           const audio = audioRef.current;
           if (audio) {
             const p = playPromiseRef.current;
@@ -430,16 +427,14 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       setIsPlaying(false);
     });
 
-    // ── ended: sleep timer "end_of_track" + autoplay ─────────────────────
     audio.addEventListener("ended", () => {
       setIsPlaying(false);
       if (pausedSinceRef.current === null) pausedSinceRef.current = Date.now();
 
-      // Fase 11: sleep timer "ao fim desta faixa"
       if (sleepTimerRef.current.type === "end_of_track") {
         setSleepTimerState({ type: "off" });
         setSleepTimerRemaining(null);
-        return; // não avança para o próximo
+        return;
       }
 
       const idx = currentIndexRef.current;
@@ -709,12 +704,10 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     currentIndex,
     contextType,
     preloadStatus,
-    // Fase 11
     playbackSpeed,
     sleepTimer,
     sleepTimerRemaining,
     history,
-    // Ações base
     play,
     pause,
     resume,
@@ -727,7 +720,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     playPrevious,
     registerOnEndedCallback,
     registerNavigationCallback,
-    // Fase 11
     setPlaybackSpeed,
     setSleepTimer,
     clearHistory,
@@ -738,7 +730,6 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
 }
 
 // ── Fase 11: helper público para retomada automática ─────────────────────────
-// Chamado pelo componente raiz para oferecer retomada ao usuário
 export function getResumeState(): ResumeState | null {
   return loadResumeState();
 }
