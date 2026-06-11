@@ -40,6 +40,18 @@ export async function POST(req: NextRequest) {
     const publicacaoOrigemTipo: "sermao" | "artigo" =
       postData.tipo === "artigo" ? "artigo" : "sermao";
 
+    // Busca a foto do autor no perfil — não bloqueia a criação se falhar
+    let autorFoto: string | null = null;
+    try {
+      const userSnap = await adminDb.collection("users").doc(autorId).get();
+      if (userSnap.exists) {
+        autorFoto = userSnap.data()?.fotoUrl ?? null;
+      }
+    } catch (err) {
+      console.warn("[reflexoes/salvar] Não foi possível buscar autorFoto:", err);
+      // autorFoto permanece null — criação prossegue normalmente
+    }
+
     // Gera imagem única por reflexão em paralelo
     const imagensGeradas = await Promise.all(
       reflexoes.map((r) => gerarImagemReflexao(r.titulo, imagemCapaOrigem))
@@ -57,6 +69,7 @@ export async function POST(req: NextRequest) {
         autorId,
         autorNome,
         autorSlug,
+        autorFoto,                    // ← campo adicionado
         publicacaoOrigemId,
         publicacaoOrigemSlug,
         publicacaoOrigemTipo,

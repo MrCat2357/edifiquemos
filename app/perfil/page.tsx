@@ -205,29 +205,24 @@ function SecaoMinhaVoz({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // ── estado geral ──────────────────────────────────────────────────────────
   const [uploading, setUploading]     = useState(false);
   const [removendo, setRemovendo]     = useState(false);
   const [previewing, setPreviewing]   = useState(false);
   const [audioPlaying, setAudioPlaying] = useState(false);
   const [erroEnvio, setErroEnvio]     = useState<string | null>(null);
 
-  // ── modo de entrada: gravador ou arquivo ─────────────────────────────────
   const [modoEntrada, setModoEntrada] = useState<ModoEntrada>("idle");
 
-  // ── estado do gravador ────────────────────────────────────────────────────
   const [estadoGravacao, setEstadoGravacao]   = useState<EstadoGravacao>("parado");
   const [tempoMs, setTempoMs]                 = useState(0);
-  const [amplitude, setAmplitude]             = useState(0);       // 0–1
+  const [amplitude, setAmplitude]             = useState(0);
   const [erroGravador, setErroGravador]       = useState<string | null>(null);
   const [avisoTempoMax, setAvisoTempoMax]     = useState(false);
 
-  // ── arquivo / blob prontos para enviar ───────────────────────────────────
-  const [arquivoSelecionado, setArquivoSelecionado] = useState<File | null>(null);  // upload
-  const [blobGravado, setBlobGravado]               = useState<Blob | null>(null);  // gravador
+  const [arquivoSelecionado, setArquivoSelecionado] = useState<File | null>(null);
+  const [blobGravado, setBlobGravado]               = useState<Blob | null>(null);
   const [urlPreviewGravacao, setUrlPreviewGravacao] = useState<string | null>(null);
 
-  // ── refs do gravador ──────────────────────────────────────────────────────
   const mediaRecorderRef  = useRef<MediaRecorder | null>(null);
   const chunksRef         = useRef<BlobPart[]>([]);
   const streamRef         = useRef<MediaStream | null>(null);
@@ -242,7 +237,6 @@ function SecaoMinhaVoz({
   const MAX_FILE_SIZE = 10 * 1024 * 1024;
   const ALLOWED_TYPES = ["audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave", "audio/mp4", "audio/x-m4a", "audio/webm", "audio/ogg"];
 
-  // ── limpeza ao desmontar ──────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       pararRecursos();
@@ -265,7 +259,6 @@ function SecaoMinhaVoz({
     analyserRef.current = null;
   }
 
-  // ── iniciar gravação ──────────────────────────────────────────────────────
   async function iniciarGravacao() {
     setErroGravador(null);
     setAvisoTempoMax(false);
@@ -286,7 +279,6 @@ function SecaoMinhaVoz({
     streamRef.current = stream;
     chunksRef.current = [];
 
-    // Escolhe o melhor formato suportado
     const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
       : MediaRecorder.isTypeSupported("audio/webm")
@@ -310,9 +302,8 @@ function SecaoMinhaVoz({
       pararRecursos();
     };
 
-    recorder.start(100); // coleta chunks a cada 100ms
+    recorder.start(100);
 
-    // ── amplitude via AnalyserNode ──────────────────────────────────────────
     try {
       const ctx      = new AudioContext();
       const analyser = ctx.createAnalyser();
@@ -325,20 +316,18 @@ function SecaoMinhaVoz({
       function tick() {
         analyser.getByteFrequencyData(data);
         const avg = data.reduce((s, v) => s + v, 0) / data.length;
-        setAmplitude(Math.min(avg / 80, 1)); // normaliza ~0-1
+        setAmplitude(Math.min(avg / 80, 1));
         animFrameRef.current = requestAnimationFrame(tick);
       }
       tick();
-    } catch { /* amplitude opcional — não bloqueia gravação */ }
+    } catch { /* amplitude opcional */ }
 
-    // ── timer ──────────────────────────────────────────────────────────────
     inicioGravacaoRef.current = Date.now();
     setTempoMs(0);
     timerIntervalRef.current = setInterval(() => {
       setTempoMs(Date.now() - inicioGravacaoRef.current);
     }, 200);
 
-    // ── auto-stop aos 120s ─────────────────────────────────────────────────
     autoStopRef.current = setTimeout(() => {
       setAvisoTempoMax(true);
       pararGravacao();
@@ -366,7 +355,7 @@ function SecaoMinhaVoz({
     setAvisoTempoMax(false);
     setErroGravador(null);
     setEstadoGravacao("parado");
-    setModoEntrada("gravando"); // volta para o painel com o botão de gravar
+    setModoEntrada("gravando");
   }
 
   function fecharPainel() {
@@ -383,7 +372,6 @@ function SecaoMinhaVoz({
     setModoEntrada("idle");
   }
 
-  // ── escolher arquivo ──────────────────────────────────────────────────────
   function onEscolherArquivo(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -399,7 +387,6 @@ function SecaoMinhaVoz({
     setArquivoSelecionado(file);
   }
 
-  // ── enviar para a API (reutilizado por gravação e upload) ─────────────────
   async function handleCriarVoz(origem: "arquivo" | "gravacao") {
     const payload =
       origem === "arquivo"
@@ -446,7 +433,6 @@ function SecaoMinhaVoz({
     }
   }
 
-  // ── remover voz ───────────────────────────────────────────────────────────
   async function handleRemoverVoz() {
     if (!confirm("Remover sua voz clonada? Próximas gerações usarão a voz padrão.")) return;
     setRemovendo(true);
@@ -471,7 +457,6 @@ function SecaoMinhaVoz({
     }
   }
 
-  // ── preview da voz pronta ─────────────────────────────────────────────────
   async function handlePreview() {
     if (previewing || audioPlaying) {
       previewAudioRef.current?.pause();
@@ -507,7 +492,6 @@ function SecaoMinhaVoz({
     }
   }
 
-  // ── helpers visuais ───────────────────────────────────────────────────────
   const statusConfig: Record<VoiceStatus, { label: string; color: string; bg: string; icon: string }> = {
     none:       { label: "Sem voz configurada", color: "var(--text-3)",          bg: "var(--bg-card)",      icon: "🎙️" },
     processing: { label: "Processando…",        color: "var(--amber, #f59e0b)",  bg: "rgba(245,158,11,.1)", icon: "⏳" },
@@ -523,7 +507,6 @@ function SecaoMinhaVoz({
     transition: "all 0.15s", fontFamily: "inherit",
   };
 
-  // Barras de amplitude — 5 barras com alturas variadas
   const barHeights = [0.5, 0.75, 1, 0.75, 0.5];
 
   return (
@@ -531,13 +514,11 @@ function SecaoMinhaVoz({
       background: "var(--bg-card)", border: "1px solid var(--border)",
       borderRadius: "var(--radius-lg)", padding: "1.5rem", marginBottom: "1.5rem",
     }}>
-      {/* Cabeçalho */}
       <div style={{ display: "flex", alignItems: "center", gap: "0.625rem", marginBottom: "1rem" }}>
         <span style={{ fontSize: "1.1rem" }}>🎙️</span>
         <h2 style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--text-1)", margin: 0 }}>Minha Voz</h2>
       </div>
 
-      {/* Badge de status */}
       <div style={{
         display: "inline-flex", alignItems: "center", gap: "6px",
         padding: "5px 12px", borderRadius: "var(--radius-full)",
@@ -547,14 +528,12 @@ function SecaoMinhaVoz({
         <span>{sc.icon}</span><span>{sc.label}</span>
       </div>
 
-      {/* Descrição */}
       <p style={{ fontSize: "0.82rem", color: "var(--text-3)", lineHeight: 1.6, marginBottom: "1.25rem" }}>
         {voiceStatus === "ready"
           ? "Seus próximos sermões e estudos serão narrados com a sua voz. Para atualizar, grave ou envie uma nova amostra."
           : "Grave sua voz agora ou envie um arquivo de 30 a 120 segundos de fala limpa."}
       </p>
 
-      {/* Botões "Ouvir minha voz" + "Remover" quando voz está pronta */}
       {voiceStatus === "ready" && (
         <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap", marginBottom: "1.25rem" }}>
           <button onClick={handlePreview} disabled={previewing} style={{
@@ -582,14 +561,12 @@ function SecaoMinhaVoz({
         </div>
       )}
 
-      {/* ── Seção de amostra — visível exceto em "processing" ── */}
       {voiceStatus !== "processing" && (
         <div>
           <label style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--text-2)", display: "block", marginBottom: "0.75rem" }}>
             {voiceStatus === "ready" ? "Atualizar amostra de voz" : "Criar amostra de voz"}
           </label>
 
-          {/* Dois botões de entrada — visíveis só quando não há painel aberto */}
           {modoEntrada === "idle" && (
             <div style={{ display: "flex", gap: "0.625rem", flexWrap: "wrap" }}>
               <button
@@ -632,14 +609,11 @@ function SecaoMinhaVoz({
                 style={{ display: "none" }}
                 onChange={(e) => {
                   onEscolherArquivo(e);
-                  // Se arquivo válido foi selecionado, permanece em "arquivo"
-                  // para mostrar botão de confirmar
                 }}
               />
             </div>
           )}
 
-          {/* ── Painel: arquivo selecionado ── */}
           {modoEntrada === "arquivo" && (
             <div style={{
               marginTop: "0.875rem", padding: "1.125rem",
@@ -681,15 +655,12 @@ function SecaoMinhaVoz({
             </div>
           )}
 
-          {/* ── Painel: gravador ── */}
           {(modoEntrada === "gravando" || modoEntrada === "revisando") && (
             <div style={{
               marginTop: "0.875rem", padding: "1.25rem",
               background: "var(--bg-elevated)", borderRadius: "var(--radius-lg)",
               border: "1px solid var(--border)",
             }}>
-
-              {/* Sugestão de leitura — visível antes e durante a gravação */}
               {modoEntrada === "gravando" && (
                 <div style={{
                   marginBottom: "1.25rem", padding: "1rem",
@@ -713,7 +684,6 @@ function SecaoMinhaVoz({
                 </div>
               )}
 
-              {/* Controles do gravador */}
               {modoEntrada === "gravando" && estadoGravacao === "parado" && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
                   <button
@@ -743,7 +713,6 @@ function SecaoMinhaVoz({
 
               {modoEntrada === "gravando" && estadoGravacao === "gravando" && (
                 <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-                  {/* Botão parar */}
                   <button
                     onClick={pararGravacao}
                     style={{
@@ -759,7 +728,6 @@ function SecaoMinhaVoz({
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
                   </button>
 
-                  {/* Barras de amplitude */}
                   <div style={{ display: "flex", alignItems: "center", gap: "3px", height: "32px" }}>
                     {barHeights.map((h, i) => (
                       <div
@@ -776,7 +744,6 @@ function SecaoMinhaVoz({
                     ))}
                   </div>
 
-                  {/* Timer */}
                   <span style={{ fontSize: "1rem", fontWeight: 700, color: "var(--text-1)", fontVariantNumeric: "tabular-nums", minWidth: "36px" }}>
                     {formatarTempo(tempoMs)}
                   </span>
@@ -787,14 +754,12 @@ function SecaoMinhaVoz({
                 </div>
               )}
 
-              {/* Aviso de tempo máximo */}
               {avisoTempoMax && (
                 <p style={{ fontSize: "0.78rem", color: "var(--amber, #f59e0b)", marginTop: "0.5rem" }}>
                   ⏱ Tempo máximo atingido. Ouça e confirme abaixo.
                 </p>
               )}
 
-              {/* ── Estado de revisão: mini-player ── */}
               {modoEntrada === "revisando" && urlPreviewGravacao && (
                 <div>
                   <p style={{ fontSize: "0.82rem", color: "var(--text-2)", marginBottom: "0.75rem", fontWeight: 600 }}>
@@ -831,7 +796,6 @@ function SecaoMinhaVoz({
                 </div>
               )}
 
-              {/* Erro do gravador */}
               {erroGravador && (
                 <p style={{ fontSize: "0.78rem", color: "var(--red, #ef4444)", marginTop: "0.75rem" }}>
                   ⚠️ {erroGravador}
@@ -840,7 +804,6 @@ function SecaoMinhaVoz({
             </div>
           )}
 
-          {/* Erro de envio */}
           {erroEnvio && (
             <p style={{ fontSize: "0.78rem", color: "var(--red, #ef4444)", marginTop: "0.5rem" }}>
               ⚠️ {erroEnvio}
@@ -849,7 +812,6 @@ function SecaoMinhaVoz({
         </div>
       )}
 
-      {/* Estado "processing" */}
       {voiceStatus === "processing" && (
         <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--amber, #f59e0b)", fontSize: "0.82rem" }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -1086,7 +1048,8 @@ function CardReflexaoComOuvir({
       });
       const pub = {
         id: reflexao.id, tipo: "reflexao" as const, titulo: reflexao.titulo,
-        autorNome: reflexao.autorNome, autorFoto: null,
+        autorNome: reflexao.autorNome,
+        autorFoto: reflexao.autorFoto ?? null, // ← CORRIGIDO: usa o campo do documento
         slug: reflexao.slug, autorSlug: reflexao.autorSlug, audioUrl,
       };
       if (filaAudio.length > 0) {
@@ -1380,7 +1343,6 @@ function PerfilContent() {
   const [uid, setUid] = useState<string | null>(null);
   const [autorSlug, setAutorSlug] = useState("");
 
-  // ── Fase 9: estado da voz ────────────────────────────
   const [voiceData, setVoiceData] = useState<VoiceData>({});
 
   const [editando, setEditando] = useState(false);
@@ -1429,7 +1391,6 @@ function PerfilContent() {
         setFotoUrl(d.fotoUrl || null);
         setAutorSlug(d.slug || "");
 
-        // ── Fase 9: carregar dados de voz ──
         setVoiceData({
           voiceId:        d.voiceId        ?? undefined,
           voiceSampleUrl: d.voiceSampleUrl ?? undefined,
@@ -1552,11 +1513,12 @@ function PerfilContent() {
     audioUrl: p.audioUrl || FALLBACK_AUDIO,
   }));
 
+  // ← CORRIGIDO: usa reflexao.autorFoto ?? null em vez de null hardcoded
   const filaReflexoesAudio = reflexoes
     .filter((r) => !!r.id)
     .map((r) => ({
       id: r.id!, tipo: "reflexao" as const, titulo: r.titulo,
-      autorNome: r.autorNome || "Autor", autorFoto: null,
+      autorNome: r.autorNome || "Autor", autorFoto: r.autorFoto ?? null,
       slug: r.slug, autorSlug: r.autorSlug, audioUrl: FALLBACK_AUDIO,
     }));
 
@@ -1566,7 +1528,6 @@ function PerfilContent() {
 
       <div className="perfil-wrapper">
 
-        {/* ── MODO VISUALIZAÇÃO ── */}
         {!editando && (
           <div className="perfil-card">
             <Avatar src={fotoUrl} name={nomeExibicao} size={64} />
@@ -1585,7 +1546,6 @@ function PerfilContent() {
           </div>
         )}
 
-        {/* ── MODO EDIÇÃO ── */}
         {editando && (
           <div className="perfil-card" style={{ flexDirection: "column", gap: "1.75rem", alignItems: "stretch" }}>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.875rem" }}>
@@ -1646,7 +1606,8 @@ function PerfilContent() {
             onToast={showToast}
           />
         )}
-        */}  
+        */}
+
         {/* ── ABAS ── */}
         <div className="perfil-posts-section">
           <div style={{ display: "flex", gap: "0", borderBottom: "1px solid var(--border)", marginBottom: "1.5rem" }}>

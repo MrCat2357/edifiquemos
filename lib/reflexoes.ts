@@ -18,6 +18,7 @@ export interface Reflexao {
   autorId: string;
   autorNome: string;
   autorSlug: string;
+  autorFoto?: string | null; // ← adicionado: foto do autor para o player de áudio
   publicacaoOrigemId: string;
   publicacaoOrigemSlug: string;
   publicacaoOrigemTipo: "sermao" | "artigo";

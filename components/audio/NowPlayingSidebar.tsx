@@ -170,21 +170,58 @@ function VolumeSlider({ volume, onToggle, onChange, accent }: {
 
 // ─── SpeedControl ─────────────────────────────────────────────────────────────
 
+const ALL_SPEEDS: PlaybackSpeed[] = [0.5, 0.75, 1, 1.5, 2];
+const WINDOW_SIZE = 3;
+
+function initialWindowStart(speed: PlaybackSpeed): number {
+  const idx = ALL_SPEEDS.indexOf(speed);
+  if (idx < 0) return 0;
+  // Centralise a velocidade ativa na janela sempre que possível
+  const ideal = idx - 1;
+  return Math.max(0, Math.min(ideal, ALL_SPEEDS.length - WINDOW_SIZE));
+}
+
 function SpeedControl({ speed, onChange }: { speed: PlaybackSpeed; onChange: (s: PlaybackSpeed) => void }) {
-  const speeds: PlaybackSpeed[] = [1, 1.5, 2];
+  const [windowStart, setWindowStart] = useState(() => initialWindowStart(speed));
+
+  const canLeft  = windowStart > 0;
+  const canRight = windowStart < ALL_SPEEDS.length - WINDOW_SIZE;
+  const visible  = ALL_SPEEDS.slice(windowStart, windowStart + WINDOW_SIZE);
+
+  const arrowStyle = (enabled: boolean): React.CSSProperties => ({
+    display: "flex", alignItems: "center", justifyContent: "center",
+    width: 18, height: 18, borderRadius: "50%", border: "1px solid",
+    borderColor: enabled ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.06)",
+    background: "transparent",
+    color: enabled ? "var(--text-2, rgba(255,255,255,0.7))" : "rgba(255,255,255,0.15)",
+    cursor: enabled ? "pointer" : "default",
+    fontSize: "0.7rem", fontWeight: 700, fontFamily: "inherit",
+    transition: "all 0.15s", flexShrink: 0, padding: 0, lineHeight: 1,
+  });
+
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
-      <span style={{ fontSize: "0.62rem", fontWeight: 600, color: "var(--text-3, rgba(255,255,255,0.4))", letterSpacing: "0.06em", textTransform: "uppercase", marginRight: "0.1rem" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+      <span style={{ fontSize: "0.62rem", fontWeight: 600, color: "var(--text-3, rgba(255,255,255,0.4))", letterSpacing: "0.06em", textTransform: "uppercase" }}>
         Vel.
       </span>
-      {speeds.map((s) => (
+
+      <button
+        onClick={() => canLeft && setWindowStart((w) => w - 1)}
+        disabled={!canLeft}
+        aria-label="Velocidades anteriores"
+        style={arrowStyle(canLeft)}
+      >
+        ‹
+      </button>
+
+      {visible.map((s) => (
         <button
           key={s}
           onClick={() => onChange(s)}
           aria-label={`Velocidade ${s}x`}
           aria-pressed={speed === s}
           style={{
-            padding: "3px 8px", borderRadius: 99, border: "1px solid",
+            padding: "3px 7px", borderRadius: 99, border: "1px solid",
             borderColor: speed === s ? "currentColor" : "rgba(255,255,255,0.1)",
             background: speed === s ? "rgba(255,255,255,0.1)" : "transparent",
             color: speed === s ? "var(--text-1, #f0fdf4)" : "var(--text-3, rgba(255,255,255,0.4))",
@@ -196,6 +233,15 @@ function SpeedControl({ speed, onChange }: { speed: PlaybackSpeed; onChange: (s:
           {s}×
         </button>
       ))}
+
+      <button
+        onClick={() => canRight && setWindowStart((w) => w + 1)}
+        disabled={!canRight}
+        aria-label="Próximas velocidades"
+        style={arrowStyle(canRight)}
+      >
+        ›
+      </button>
     </div>
   );
 }
@@ -243,7 +289,6 @@ function SleepTimerControl({
 
       {open && (
         <>
-          {/* Backdrop */}
           <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 10 }} />
           <div style={{
             position: "absolute", bottom: "calc(100% + 6px)", right: 0,
@@ -384,7 +429,6 @@ export default function NowPlayingSidebar() {
     current, isPlaying, isLoading, currentTime, duration,
     volume, queue, currentIndex, toggle, seek, setVolume, close,
     playNext, playPrevious, preloadStatus,
-    // Fase 11
     playbackSpeed, setPlaybackSpeed,
     sleepTimer, sleepTimerRemaining, setSleepTimer,
     history, clearHistory, playFromHistory,
@@ -412,7 +456,6 @@ export default function NowPlayingSidebar() {
   const visible = !!current;
   const badge   = current ? typeBadge(current.tipo) : null;
   const accent  = current ? accentColor(current.tipo) : "var(--emerald, #10b981)";
-  const timeRemaining = duration > 0 ? Math.max(0, duration - currentTime) : null;
 
   const tabBtn = (tab: SidebarTab, icon: React.ReactNode, label: string) => (
     <button
@@ -477,7 +520,7 @@ export default function NowPlayingSidebar() {
             {/* Content area — scrollable */}
             <div style={{ flex: 1, overflowY: "auto", padding: "1rem 1.25rem 2rem", display: "flex", flexDirection: "column", gap: "1rem" }}>
 
-              {/* ── TAB: PLAYER ────────────────────────────────────────── */}
+              {/* ── TAB: PLAYER ── */}
               {activeTab === "player" && (
                 <>
                   {/* Cover art */}
@@ -509,7 +552,7 @@ export default function NowPlayingSidebar() {
                     </button>
                   </div>
 
-                  {/* Progress + tempo restante */}
+                  {/* Progress */}
                   <ProgressBar currentTime={currentTime} duration={duration} onSeek={seek} accent={accent} />
 
                   {/* Controls */}
@@ -541,7 +584,7 @@ export default function NowPlayingSidebar() {
                   {/* Volume */}
                   <VolumeSlider volume={volume} onToggle={handleVolumeToggle} onChange={setVolume} accent={accent} />
 
-                  {/* Fase 11 — controles extras: velocidade + sleep timer */}
+                  {/* Velocidade + sleep timer */}
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
                     <SpeedControl speed={playbackSpeed} onChange={setPlaybackSpeed} />
                     <SleepTimerControl
@@ -557,12 +600,12 @@ export default function NowPlayingSidebar() {
                 </>
               )}
 
-              {/* ── TAB: FILA ──────────────────────────────────────────── */}
+              {/* ── TAB: FILA ── */}
               {activeTab === "queue" && (
                 <MiniQueue queue={queue} currentIndex={currentIndex} accent={accent} />
               )}
 
-              {/* ── TAB: HISTÓRICO ─────────────────────────────────────── */}
+              {/* ── TAB: HISTÓRICO ── */}
               {activeTab === "history" && (
                 <HistoryPanel
                   history={history}
