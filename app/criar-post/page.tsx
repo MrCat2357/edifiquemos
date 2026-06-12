@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { db, auth } from "@/lib/firebase";
 import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { addDoc, collection, doc, getDoc } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, updateDoc } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { gerarSlugUnico } from "@/lib/slug";
 import FileImportButton from "@/components/Button";
@@ -17,6 +17,29 @@ const TIPO_LINK_OPTIONS: { value: LinkReferencia["tipo"]; label: string; icon: s
   { value: "site",    label: "Site",       icon: "🌐" },
   { value: "outro",   label: "Outro",      icon: "🔗" },
 ];
+
+/* Formatos de slide aceitos */
+const SLIDE_EXTENSIONS = ["pptx", "ppt", "odp", "key", "pdf"] as const;
+const SLIDE_MIME_TYPES = [
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // pptx
+  "application/vnd.ms-powerpoint",                                              // ppt
+  "application/vnd.oasis.opendocument.presentation",                            // odp
+  "application/x-iwork-keynote-sffkey",                                         // key
+  "application/pdf",                                                             // pdf
+];
+const SLIDE_MAX_PAGES = 70;
+const SLIDE_MAX_MB    = 50;
+
+type SlideExt = (typeof SLIDE_EXTENSIONS)[number];
+
+/* ─── Contagem de páginas PDF client-side ─────────────── */
+async function contarPaginasPDF(file: File): Promise<number> {
+  // Usa pdf-lib apenas para contar — leve e sem renderização
+  const { PDFDocument } = await import("pdf-lib");
+  const bytes = await file.arrayBuffer();
+  const pdf   = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  return pdf.getPageCount();
+}
 
 async function getAutorInfo(uid: string): Promise<{ nome: string; foto: string | null }> {
   try {
@@ -33,15 +56,14 @@ async function getAutorInfo(uid: string): Promise<{ nome: string; foto: string |
   }
 }
 
-/* ─── Upload helper ──────────────────────────────────── */
-
+/* ─── Upload helper (imagem de capa) ────────────────────── */
 async function uploadImagem(
   file: File,
   uid: string,
   onProgress: (p: number) => void
 ): Promise<string> {
   const storage = getStorage();
-  const ext = file.name.split(".").pop() ?? "jpg";
+  const ext  = file.name.split(".").pop() ?? "jpg";
   const path = `capas/${uid}/${Date.now()}.${ext}`;
   const sRef = storageRef(storage, path);
   const task = uploadBytesResumable(sRef, file);
@@ -56,22 +78,35 @@ async function uploadImagem(
   });
 }
 
-/* ─── Fire-and-forget TTS generation ────────────────── */
+/* ─── Upload helper (slide) ─────────────────────────────── */
+async function uploadSlide(
+  file: File,
+  uid: string,
+  postId: string,
+  onProgress: (p: number) => void
+): Promise<string> {
+  const storage = getStorage();
+  const ext  = file.name.split(".").pop()?.toLowerCase() ?? "pdf";
+  const path = `slides/${uid}/${postId}/original.${ext}`;
+  const sRef = storageRef(storage, path);
+  const task = uploadBytesResumable(sRef, file);
 
-/**
- * Dispara a geração de áudio em background após publicar.
- * Nunca lança exceção — falhas são silenciosas (o áudio será gerado
- * quando o usuário clicar em "Ouvir").
- */
+  return new Promise((resolve, reject) => {
+    task.on(
+      "state_changed",
+      (snap) => onProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+      reject,
+      async () => resolve(await getDownloadURL(task.snapshot.ref))
+    );
+  });
+}
+
+/* ─── Fire-and-forget TTS generation ────────────────────── */
 async function dispararGeracaoAudio(postId: string): Promise<void> {
   try {
     const user = auth.currentUser;
     if (!user) return;
-
     const idToken = await user.getIdToken();
-
-    // Fire-and-forget: não fazemos await do resultado completo,
-    // apenas iniciamos a requisição e ignoramos erros de rede/TTS.
     fetch("/api/tts/gerar", {
       method: "POST",
       headers: {
@@ -79,16 +114,11 @@ async function dispararGeracaoAudio(postId: string): Promise<void> {
         Authorization: `Bearer ${idToken}`,
       },
       body: JSON.stringify({ postId }),
-    }).catch(() => {
-      // Silencioso — a geração acontecerá quando o usuário clicar em "Ouvir"
-    });
-  } catch {
-    // Silencioso — getIdToken pode falhar em edge cases; não bloqueia publicação
-  }
+    }).catch(() => {});
+  } catch {}
 }
 
-/* ─── Componente de upload de imagem ─────────────────── */
-
+/* ─── Componente de upload de imagem ─────────────────────── */
 function ImageUpload({
   value,
   onChange,
@@ -140,12 +170,7 @@ function ImageUpload({
         <img
           src={preview}
           alt="Pré-visualização da capa"
-          style={{
-            width: "100%",
-            maxHeight: "380px",
-            objectFit: "contain",
-            display: "block",
-          }}
+          style={{ width: "100%", maxHeight: "380px", objectFit: "contain", display: "block" }}
         />
         <button
           type="button"
@@ -161,9 +186,7 @@ function ImageUpload({
           }}
           onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.7)")}
           onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(10,15,10,0.75)")}
-        >
-          ✕
-        </button>
+        >✕</button>
         <div
           style={{
             position: "absolute", bottom: "0.5rem", left: "0.5rem",
@@ -172,9 +195,7 @@ function ImageUpload({
             padding: "2px 10px", borderRadius: "var(--radius-full)",
             backdropFilter: "blur(4px)",
           }}
-        >
-          Imagem de capa
-        </div>
+        >Imagem de capa</div>
       </div>
     );
   }
@@ -217,8 +238,161 @@ function ImageUpload({
   );
 }
 
-/* ─── Banner pós-publicação ──────────────────────────── */
+/* ─── Componente de importação de slide ──────────────────── */
 
+type SlideStatus =
+  | { type: "idle" }
+  | { type: "validating" }
+  | { type: "ready"; file: File; pages: number | null; formato: SlideExt }
+  | { type: "error"; message: string };
+
+function SlideImportButton({
+  status,
+  onSelect,
+  onClear,
+}: {
+  status: SlideStatus;
+  onSelect: (file: File) => void;
+  onClear: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(file: File) {
+    // Tamanho
+    if (file.size > SLIDE_MAX_MB * 1024 * 1024) {
+      onSelect(Object.assign(file, { __error: `Arquivo muito grande. Limite: ${SLIDE_MAX_MB} MB.` }));
+      return;
+    }
+    onSelect(file);
+  }
+
+  if (status.type === "idle" || status.type === "error") {
+    return (
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        title="Importar apresentação de slides"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.35rem",
+          padding: "5px 12px",
+          borderRadius: "var(--radius-full)",
+          border: status.type === "error"
+            ? "1px solid rgba(239,68,68,0.6)"
+            : "1px solid var(--emerald)",
+          background: status.type === "error"
+            ? "rgba(239,68,68,0.08)"
+            : "var(--emerald-dim)",
+          color: status.type === "error" ? "rgb(239,68,68)" : "var(--emerald)",
+          fontWeight: 700,
+          fontSize: "0.78rem",
+          cursor: "pointer",
+          transition: "all 0.2s",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {status.type === "error" ? "⚠ Tentar novamente" : "🗂 Importar slide"}
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".pptx,.ppt,.odp,.key,.pdf"
+          style={{ display: "none" }}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
+        />
+      </button>
+    );
+  }
+
+  if (status.type === "validating") {
+    return (
+      <button
+        type="button"
+        disabled
+        style={{
+          display: "flex", alignItems: "center", gap: "0.35rem",
+          padding: "5px 12px", borderRadius: "var(--radius-full)",
+          border: "1px solid var(--border-light)", background: "var(--bg-elevated)",
+          color: "var(--text-3)", fontWeight: 600, fontSize: "0.78rem", opacity: 0.7,
+        }}
+      >
+        <span style={{
+          display: "inline-block", width: 10, height: 10,
+          border: "2px solid var(--text-3)", borderTopColor: "var(--emerald)",
+          borderRadius: "50%", animation: "spin 0.7s linear infinite",
+        }} />
+        Verificando…
+      </button>
+    );
+  }
+
+  // ready
+  const ext = status.formato.toUpperCase();
+  const pagesLabel = status.pages !== null ? ` · ${status.pages} pág.` : "";
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}>
+      <div
+        style={{
+          display: "flex", alignItems: "center", gap: "0.4rem",
+          padding: "4px 10px", borderRadius: "var(--radius-full)",
+          border: "1px solid var(--emerald)", background: "var(--emerald-dim)",
+          fontSize: "0.75rem", fontWeight: 700, color: "var(--emerald)",
+          maxWidth: "220px", overflow: "hidden",
+        }}
+      >
+        <span style={{ flexShrink: 0 }}>🗂</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {ext}{pagesLabel}
+        </span>
+        <span
+          style={{
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            color: "var(--text-3)", fontWeight: 400, fontSize: "0.72rem",
+          }}
+        >
+          {status.file.name}
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={onClear}
+        title="Remover slide"
+        style={{
+          background: "none", border: "none", color: "var(--text-3)",
+          cursor: "pointer", fontSize: "0.85rem", lineHeight: 1,
+          padding: "3px 6px", borderRadius: "var(--radius-sm)", transition: "color 0.15s",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.color = "rgb(239,68,68)")}
+        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-3)")}
+      >✕</button>
+    </div>
+  );
+}
+
+/* ─── Aviso de erro de slide ─────────────────────────────── */
+function SlideErrorBanner({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "flex-start", gap: "0.625rem",
+        background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.35)",
+        borderRadius: "var(--radius-sm)", padding: "0.75rem 1rem",
+        fontSize: "0.8rem", color: "rgb(239,68,68)", lineHeight: 1.5,
+      }}
+    >
+      <span style={{ flexShrink: 0, fontSize: "1rem" }}>⚠️</span>
+      <span style={{ flex: 1 }}>{message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        style={{ background: "none", border: "none", color: "rgba(239,68,68,0.7)", cursor: "pointer", fontSize: "0.85rem", padding: "0 2px" }}
+      >✕</button>
+    </div>
+  );
+}
+
+/* ─── Banner pós-publicação ──────────────────────────────── */
 function BannerReflexao({
   slugPublicado,
   onFechar,
@@ -231,30 +405,18 @@ function BannerReflexao({
   return (
     <div
       style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.7)",
-        backdropFilter: "blur(6px)",
-        zIndex: 200,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "1.25rem",
-        animation: "fadeInOverlay 0.25s ease",
+        position: "fixed", inset: 0,
+        background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)",
+        zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "1.25rem", animation: "fadeInOverlay 0.25s ease",
       }}
     >
       <div
         style={{
-          background: "var(--bg-card)",
-          border: "1px solid var(--emerald-dim)",
-          borderRadius: "var(--radius-lg)",
-          padding: "2rem",
-          maxWidth: "460px",
-          width: "100%",
-          position: "relative",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1.25rem",
+          background: "var(--bg-card)", border: "1px solid var(--emerald-dim)",
+          borderRadius: "var(--radius-lg)", padding: "2rem",
+          maxWidth: "460px", width: "100%", position: "relative",
+          display: "flex", flexDirection: "column", gap: "1.25rem",
           boxShadow: "0 12px 48px rgba(0,0,0,0.6), 0 0 0 1px var(--emerald-dim)",
           animation: "slideUpCard 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
         }}
@@ -270,9 +432,7 @@ function BannerReflexao({
           }}
           onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-1)")}
           onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-3)")}
-        >
-          ✕
-        </button>
+        >✕</button>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.625rem", textAlign: "center" }}>
           <div style={{ fontSize: "2.5rem", lineHeight: 1, filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.4))" }}>🎉</div>
           <h2 style={{ fontSize: "1.2rem", fontWeight: 800, color: "var(--text-1)", letterSpacing: "-0.025em", margin: 0 }}>
@@ -316,13 +476,13 @@ function BannerReflexao({
   );
 }
 
-/* ─── Page ───────────────────────────────────────────── */
+/* ─── Page ───────────────────────────────────────────────── */
 
 export default function CriarPost() {
   const router = useRouter();
 
   const [titulo,   setTitulo]   = useState("");
-  const [conteudo, setConteudo] = useState(""); // armazena HTML rico
+  const [conteudo, setConteudo] = useState("");
   const [tipo,     setTipo]     = useState("sermao");
   const [igreja,   setIgreja]   = useState("");
   const [data,     setData]     = useState("");
@@ -332,8 +492,12 @@ export default function CriarPost() {
   const [imagemFile,     setImagemFile]     = useState<File | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
-  const [loading,  setLoading]  = useState(false);
-  const [error,    setError]    = useState("");
+  /* slide */
+  const [slideStatus,         setSlideStatus]         = useState<SlideStatus>({ type: "idle" });
+  const [slideUploadProgress, setSlideUploadProgress] = useState<number | null>(null);
+
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState("");
   const [mostrarAviso, setMostrarAviso] = useState(false);
 
   const [corrigindo,           setCorrigindo]           = useState(false);
@@ -343,6 +507,12 @@ export default function CriarPost() {
   /* banner pós-publicação */
   const [mostrarBannerReflexao, setMostrarBannerReflexao] = useState(false);
   const [slugPublicado, setSlugPublicado] = useState<{ slug: string; tipo: string } | null>(null);
+
+  /* ── Validação de publicação ── */
+  const textoPlain = conteudo.replace(/<[^>]*>/g, "").trim();
+  const temConteudo = textoPlain.length > 0;
+  const temSlide    = slideStatus.type === "ready";
+  const podePublicar = titulo.trim().length > 0 && (temConteudo || temSlide);
 
   /* ── Draft session storage ── */
   useEffect(() => {
@@ -358,18 +528,64 @@ export default function CriarPost() {
     }
   }, []);
 
-  /* Mostra botão de corrigir se há conteúdo real (strip HTML p/ verificar) */
   useEffect(() => {
-    const textoPlain = conteudo.replace(/<[^>]*>/g, "").trim();
     setMostrarBotaoCorrigir(textoPlain.length > 20);
     setCorrecaoFeita(false);
   }, [conteudo]);
 
   /* ── Links helpers ── */
-  function addLink() { setLinks((p) => [...p, { label: "", url: "", tipo: "youtube" }]); }
+  function addLink()    { setLinks((p) => [...p, { label: "", url: "", tipo: "youtube" }]); }
   function removeLink(i: number) { setLinks((p) => p.filter((_, idx) => idx !== i)); }
   function updateLink(i: number, field: keyof LinkReferencia, value: string) {
     setLinks((p) => p.map((l, idx) => (idx === i ? { ...l, [field]: value } : l)));
+  }
+
+  /* ── Slide helpers ── */
+  async function handleSlideSelect(file: File) {
+    // Validar extensão
+    const ext = file.name.split(".").pop()?.toLowerCase() as SlideExt | undefined;
+    if (!ext || !SLIDE_EXTENSIONS.includes(ext as SlideExt)) {
+      setSlideStatus({ type: "error", message: "Formato não suportado. Use .pptx, .ppt, .odp, .key ou .pdf." });
+      return;
+    }
+
+    // Validar tamanho
+    if (file.size > SLIDE_MAX_MB * 1024 * 1024) {
+      setSlideStatus({ type: "error", message: `Arquivo muito grande. O limite é ${SLIDE_MAX_MB} MB.` });
+      return;
+    }
+
+    // Para PDF: contar páginas client-side
+    if (ext === "pdf") {
+      setSlideStatus({ type: "validating" });
+      try {
+        const pages = await contarPaginasPDF(file);
+        if (pages > SLIDE_MAX_PAGES) {
+          setSlideStatus({
+            type: "error",
+            message: `Este PDF tem ${pages} páginas, mas o limite é ${SLIDE_MAX_PAGES}. Reduza o número de slides antes de importar.`,
+          });
+          return;
+        }
+        setSlideStatus({ type: "ready", file, pages, formato: "pdf" });
+      } catch {
+        // Se falhar a leitura, aceita mesmo assim (pode ser PDF complexo)
+        setSlideStatus({ type: "ready", file, pages: null, formato: "pdf" });
+      }
+      return;
+    }
+
+    // Para outros formatos: aceitar com aviso de validação server-side
+    setSlideStatus({
+      type: "ready",
+      file,
+      pages: null, // validado no servidor
+      formato: ext as SlideExt,
+    });
+  }
+
+  function handleSlideClear() {
+    setSlideStatus({ type: "idle" });
   }
 
   /* ── Correção gramatical ── */
@@ -391,15 +607,7 @@ export default function CriarPost() {
   /* ── Submit ── */
   async function handleCriarPost(e: React.FormEvent) {
     e.preventDefault();
-    if (loading) return;
-
-    /* Texto puro para validação */
-    const textoPlain = conteudo.replace(/<[^>]*>/g, "").trim();
-
-    if (!titulo.trim() || !textoPlain) {
-      setError("Título e conteúdo são obrigatórios.");
-      return;
-    }
+    if (loading || !podePublicar) return;
 
     const user = auth.currentUser;
 
@@ -418,7 +626,7 @@ export default function CriarPost() {
       const slug = await gerarSlugUnico(autorNome, titulo);
       const linksFiltrados = links.filter((l) => l.label.trim() && l.url.trim());
 
-      /* upload opcional da imagem */
+      /* 1. Upload opcional da imagem de capa */
       let imagemUrl: string | null = null;
       if (imagemFile) {
         setUploadProgress(0);
@@ -426,10 +634,10 @@ export default function CriarPost() {
         setUploadProgress(null);
       }
 
-      /* conteudo já vem como HTML — salvo diretamente */
+      /* 2. Criar o documento no Firestore */
       const docRef = await addDoc(collection(db, "posts"), {
         titulo:      titulo.trim().toUpperCase(),
-        conteudo:    conteudo.trim(),   // HTML rico preservado
+        conteudo:    conteudo.trim(),
         tipo,
         igreja:      igreja.trim()  || "",
         data:        data.trim()    || "",
@@ -439,16 +647,32 @@ export default function CriarPost() {
         slug,
         links:       linksFiltrados,
         imagemUrl:   imagemUrl ?? null,
-        // Sinaliza imediatamente que a geração de áudio está pendente;
-        // a rota /api/tts/gerar atualizará para "generating" ao iniciar.
         audioStatus: "none",
+        // Campos de slide — serão preenchidos com updateDoc logo abaixo se houver arquivo
+        slideArquivoUrl: null,
+        slideFormato:    null,
       });
+
+      /* 3. Upload do slide (agora temos o postId) e updateDoc */
+      if (slideStatus.type === "ready") {
+        setSlideUploadProgress(0);
+        const slideUrl = await uploadSlide(
+          slideStatus.file,
+          user.uid,
+          docRef.id,
+          setSlideUploadProgress
+        );
+        setSlideUploadProgress(null);
+
+        await updateDoc(docRef, {
+          slideArquivoUrl: slideUrl,
+          slideFormato:    slideStatus.formato,
+        });
+      }
 
       sessionStorage.removeItem("draft-post");
 
-      // ── Fire-and-forget: dispara geração de áudio sem bloquear a publicação ──
-      // Se falhar por qualquer motivo, o post já está publicado e o áudio
-      // será gerado quando o usuário clicar em "Ouvir".
+      /* 4. Fire-and-forget TTS */
       dispararGeracaoAudio(docRef.id);
 
       setSlugPublicado({ slug, tipo });
@@ -457,11 +681,20 @@ export default function CriarPost() {
       return;
     } catch (err) {
       console.error(err);
-      setError("Erro ao publicar.");
+      setError("Erro ao publicar. Tente novamente.");
       setUploadProgress(null);
+      setSlideUploadProgress(null);
     }
 
     setLoading(false);
+  }
+
+  /* ── Label do botão Publicar ── */
+  function labelBotao() {
+    if (!loading) return "Publicar";
+    if (uploadProgress !== null)      return `Enviando imagem… ${uploadProgress}%`;
+    if (slideUploadProgress !== null) return `Enviando slide… ${slideUploadProgress}%`;
+    return "Publicando…";
   }
 
   /* ── Handlers do banner ── */
@@ -637,7 +870,11 @@ export default function CriarPost() {
               <label className="auth-label" style={{ margin: 0 }}>
                 Conteúdo
               </label>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+
+              {/* Barra de ações do conteúdo */}
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+
+                {/* Botão importar arquivo existente */}
                 <FileImportButton
                   onImport={(texto) =>
                     setConteudo((prev) =>
@@ -647,6 +884,15 @@ export default function CriarPost() {
                     )
                   }
                 />
+
+                {/* Botão importar slide */}
+                <SlideImportButton
+                  status={slideStatus}
+                  onSelect={handleSlideSelect}
+                  onClear={handleSlideClear}
+                />
+
+                {/* Botão corrigir gramática */}
                 {mostrarBotaoCorrigir && (
                   <button
                     type="button"
@@ -654,35 +900,20 @@ export default function CriarPost() {
                     disabled={corrigindo}
                     title="Corrigir erros de gramática e ortografia com IA"
                     style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.35rem",
-                      padding: "5px 12px",
-                      borderRadius: "var(--radius-full)",
+                      display: "flex", alignItems: "center", gap: "0.35rem",
+                      padding: "5px 12px", borderRadius: "var(--radius-full)",
                       border: correcaoFeita ? "1px solid var(--emerald)" : "1px solid var(--border-light)",
                       background: correcaoFeita ? "var(--emerald-dim)" : "var(--bg-elevated)",
                       color: correcaoFeita ? "var(--emerald)" : "var(--text-2)",
-                      fontWeight: 600,
-                      fontSize: "0.78rem",
+                      fontWeight: 600, fontSize: "0.78rem",
                       cursor: corrigindo ? "wait" : "pointer",
-                      transition: "all 0.2s",
-                      whiteSpace: "nowrap",
+                      transition: "all 0.2s", whiteSpace: "nowrap",
                       opacity: corrigindo ? 0.7 : 1,
                     }}
                   >
                     {corrigindo ? (
                       <>
-                        <span
-                          style={{
-                            display: "inline-block",
-                            width: "10px",
-                            height: "10px",
-                            border: "2px solid var(--text-3)",
-                            borderTopColor: "var(--emerald)",
-                            borderRadius: "50%",
-                            animation: "spin 0.7s linear infinite",
-                          }}
-                        />
+                        <span style={{ display: "inline-block", width: "10px", height: "10px", border: "2px solid var(--text-3)", borderTopColor: "var(--emerald)", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
                         Corrigindo...
                       </>
                     ) : correcaoFeita ? (
@@ -695,13 +926,62 @@ export default function CriarPost() {
               </div>
             </div>
 
-            {/* Editor rico substitui o <textarea> */}
+            {/* Aviso de erro de slide (abaixo da barra de ações, acima do editor) */}
+            {slideStatus.type === "error" && (
+              <SlideErrorBanner
+                message={slideStatus.message}
+                onDismiss={() => setSlideStatus({ type: "idle" })}
+              />
+            )}
+
+            {/* Aviso non-blocking para formatos não-PDF (validação server-side) */}
+            {slideStatus.type === "ready" && slideStatus.formato !== "pdf" && (
+              <div
+                style={{
+                  display: "flex", alignItems: "flex-start", gap: "0.5rem",
+                  background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.3)",
+                  borderRadius: "var(--radius-sm)", padding: "0.625rem 0.875rem",
+                  fontSize: "0.78rem", color: "rgba(234,179,8,0.9)", lineHeight: 1.5,
+                  marginBottom: "0.25rem",
+                }}
+              >
+                <span style={{ flexShrink: 0 }}>ℹ️</span>
+                <span>
+                  A contagem de páginas de arquivos <strong>.{slideStatus.formato}</strong> será verificada pelo servidor após a publicação. Se exceder {SLIDE_MAX_PAGES} páginas, o slide não será processado.
+                </span>
+              </div>
+            )}
+
+            {/* Editor rico */}
             <RichTextEditor
               value={conteudo}
               onChange={setConteudo}
-              placeholder="Escreva seu sermão ou estudo aqui, ou importe um arquivo acima…"
+              placeholder={
+                temSlide
+                  ? "Conteúdo opcional quando há slide anexado. Adicione notas, resumo ou texto complementar…"
+                  : "Escreva seu sermão ou estudo aqui, ou importe um arquivo acima…"
+              }
               minHeight="14rem"
             />
+
+            {/* Hint: conteúdo opcional quando slide presente */}
+            {temSlide && !temConteudo && (
+              <p style={{ fontSize: "0.72rem", color: "var(--text-3)", marginTop: "0.375rem" }}>
+                ✓ Slide importado — o conteúdo de texto é opcional.
+              </p>
+            )}
+
+            {/* Progress bar do upload de slide */}
+            {slideUploadProgress !== null && (
+              <div style={{ marginTop: "0.5rem" }}>
+                <div style={{ height: 4, background: "var(--border-light)", borderRadius: "var(--radius-full)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${slideUploadProgress}%`, background: "var(--emerald)", borderRadius: "var(--radius-full)", transition: "width 0.2s ease" }} />
+                </div>
+                <p style={{ fontSize: "0.72rem", color: "var(--text-3)", marginTop: "0.25rem" }}>
+                  Enviando slide… {slideUploadProgress}%
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Igreja e Data */}
@@ -754,41 +1034,24 @@ export default function CriarPost() {
                 type="button"
                 onClick={addLink}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.3rem",
-                  padding: "5px 12px",
-                  borderRadius: "var(--radius-full)",
-                  border: "1px solid var(--border-light)",
-                  background: "var(--bg-elevated)",
-                  color: "var(--emerald)",
-                  fontWeight: 600,
-                  fontSize: "0.78rem",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  transition: "all 0.15s",
+                  display: "flex", alignItems: "center", gap: "0.3rem",
+                  padding: "5px 12px", borderRadius: "var(--radius-full)",
+                  border: "1px solid var(--border-light)", background: "var(--bg-elevated)",
+                  color: "var(--emerald)", fontWeight: 600, fontSize: "0.78rem",
+                  cursor: "pointer", whiteSpace: "nowrap", transition: "all 0.15s",
                 }}
-              >
-                + Adicionar
-              </button>
+              >+ Adicionar</button>
             </div>
 
             {links.length === 0 && (
               <div
                 style={{
-                  border: "1px dashed var(--border-light)",
-                  borderRadius: "var(--radius-lg)",
-                  padding: "1.25rem",
-                  textAlign: "center",
-                  color: "var(--text-3)",
-                  fontSize: "0.82rem",
+                  border: "1px dashed var(--border-light)", borderRadius: "var(--radius-lg)",
+                  padding: "1.25rem", textAlign: "center", color: "var(--text-3)", fontSize: "0.82rem",
                 }}
               >
                 Nenhum link adicionado ainda.{" "}
-                <span
-                  style={{ color: "var(--emerald)", cursor: "pointer", fontWeight: 600 }}
-                  onClick={addLink}
-                >
+                <span style={{ color: "var(--emerald)", cursor: "pointer", fontWeight: 600 }} onClick={addLink}>
                   Clique em "+ Adicionar"
                 </span>{" "}
                 para inserir um link de referência.
@@ -801,13 +1064,9 @@ export default function CriarPost() {
                   <div
                     key={i}
                     style={{
-                      background: "var(--bg-elevated)",
-                      border: "1px solid var(--border-light)",
-                      borderRadius: "var(--radius-lg)",
-                      padding: "0.875rem 1rem",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "0.625rem",
+                      background: "var(--bg-elevated)", border: "1px solid var(--border-light)",
+                      borderRadius: "var(--radius-lg)", padding: "0.875rem 1rem",
+                      display: "flex", flexDirection: "column", gap: "0.625rem",
                     }}
                   >
                     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -821,15 +1080,11 @@ export default function CriarPost() {
                             type="button"
                             onClick={() => updateLink(i, "tipo", opt.value)}
                             style={{
-                              padding: "3px 10px",
-                              borderRadius: "var(--radius-full)",
+                              padding: "3px 10px", borderRadius: "var(--radius-full)",
                               border: link.tipo === opt.value ? "1px solid var(--emerald)" : "1px solid var(--border-light)",
                               background: link.tipo === opt.value ? "var(--emerald-dim)" : "var(--bg-card)",
                               color: link.tipo === opt.value ? "var(--emerald)" : "var(--text-3)",
-                              fontSize: "0.72rem",
-                              fontWeight: 600,
-                              cursor: "pointer",
-                              transition: "all 0.15s",
+                              fontSize: "0.72rem", fontWeight: 600, cursor: "pointer", transition: "all 0.15s",
                             }}
                           >
                             {opt.icon} {opt.label}
@@ -845,9 +1100,7 @@ export default function CriarPost() {
                           borderRadius: "var(--radius-sm)", transition: "color 0.15s", flexShrink: 0,
                         }}
                         title="Remover link"
-                      >
-                        ✕
-                      </button>
+                      >✕</button>
                     </div>
                     <input
                       placeholder={
@@ -886,16 +1139,29 @@ export default function CriarPost() {
           <button
             type="button"
             onClick={handleCriarPost}
-            disabled={loading}
+            disabled={loading || !podePublicar}
             className="auth-btn-primary"
-            style={{ marginTop: "0.25rem" }}
+            style={{
+              marginTop: "0.25rem",
+              opacity: podePublicar ? 1 : 0.45,
+              cursor: podePublicar ? "pointer" : "not-allowed",
+              transition: "opacity 0.2s",
+            }}
           >
-            {loading
-              ? uploadProgress !== null
-                ? `Enviando imagem… ${uploadProgress}%`
-                : "Publicando..."
-              : "Publicar"}
+            {labelBotao()}
           </button>
+
+          {/* Hint abaixo do botão quando bloqueado */}
+          {!podePublicar && titulo.trim().length === 0 && (
+            <p style={{ fontSize: "0.72rem", color: "var(--text-3)", textAlign: "center", marginTop: "-0.5rem" }}>
+              Preencha o título para publicar.
+            </p>
+          )}
+          {!podePublicar && titulo.trim().length > 0 && !temConteudo && !temSlide && (
+            <p style={{ fontSize: "0.72rem", color: "var(--text-3)", textAlign: "center", marginTop: "-0.5rem" }}>
+              Adicione um conteúdo ou importe um slide para publicar.
+            </p>
+          )}
         </div>
       </div>
 
