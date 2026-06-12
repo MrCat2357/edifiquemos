@@ -2,10 +2,17 @@
  * app/api/tts/gerar/route.ts
  *
  * Fase 10 — Suporte a audioStatus "stale" + gravação de audioVoiceId.
+ * + Fire-and-forget: aceita chamada com apenas { postId } vindo do criar-post,
+ *   busca titulo/tipo do Firestore, responde 202 imediatamente e processa
+ *   em background. Quando chamado pelo player (com titulo + tipo no body),
+ *   comportamento original é preservado integralmente.
  *
- * Mudanças desta fase em relação à Fase 9:
- *   MUDANÇA 13 — Status "stale" tratado como "none" (força regeneração lazy)
- *   MUDANÇA 14 — Campo audioVoiceId salvo junto com audioUrl após geração
+ * Mudanças em relação à Fase 10 original:
+ *   MUDANÇA FF-1 — tipo e titulo tornados opcionais no body; quando ausentes,
+ *                  são lidos do Firestore antes de prosseguir.
+ *   MUDANÇA FF-2 — quando called with x-fire-and-forget: "1" header (ou sem
+ *                  titulo/tipo), responde 202 { iniciado: true } imediatamente
+ *                  e continua processando em background (best-effort).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -70,10 +77,11 @@ function getS3Client(): S3Client {
 type AudioStatus = "none" | "generating" | "ready" | "error" | "stale";
 type VoiceStatus = "none" | "processing" | "ready" | "error";
 
+// MUDANÇA FF-1 — tipo e titulo agora opcionais
 interface TTSRequestBody {
   postId: string;
-  tipo:   "sermao" | "estudo" | "reflexao";
-  titulo: string;
+  tipo?:  "sermao" | "estudo" | "reflexao";
+  titulo?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -376,9 +384,9 @@ async function gerarBufferElevenLabs(voiceId: string, texto: string): Promise<Bu
         text:     texto,
         model_id: "eleven_multilingual_v2",
         voice_settings: {
-          stability:       0.5,
+          stability:        0.5,
           similarity_boost: 0.75,
-          style:           0.0,
+          style:            0.0,
           use_speaker_boost: true,
         },
       }),
@@ -432,7 +440,166 @@ function concatenarMP3s(buffers: Buffer[]): Buffer {
 }
 
 // ---------------------------------------------------------------------------
-// Handler PATCH (ações administrativas) — inalterado da Fase 9
+// MUDANÇA FF-2 — Geração em background (usado pelo fire-and-forget)
+// Executa todo o pipeline de geração de áudio de forma assíncrona.
+// Erros são capturados e gravados no Firestore sem propagar.
+// ---------------------------------------------------------------------------
+
+async function gerarAudioEmBackground(
+  postId:  string,
+  titulo:  string,
+  tipo:    "sermao" | "estudo" | "reflexao",
+  adminDb: FirebaseFirestore.Firestore,
+): Promise<void> {
+  const postRef  = adminDb.collection("posts").doc(postId);
+  const postSnap = await postRef.get();
+  const postData = postSnap.data() ?? {};
+
+  const audioErrorCount  = (postData.audioErrorCount as number | undefined) ?? 0;
+  const conteudo         = postData.conteudo         as string | undefined;
+  const autorId          = postData.autorId          as string | undefined;
+
+  if (!conteudo) {
+    console.warn(`[TTS BG] Post ${postId} sem conteúdo, abortando geração.`);
+    await postRef.set({ audioStatus: "none" as AudioStatus }, { merge: true });
+    return;
+  }
+
+  // ── Buscar voiceId do autor ─────────────────────────────────────────────
+  let autorVoiceId: string | null = null;
+  if (autorId) {
+    try {
+      const autorSnap = await adminDb.collection("users").doc(autorId).get();
+      if (autorSnap.exists) {
+        const autorData   = autorSnap.data() ?? {};
+        const voiceStatus = autorData.voiceStatus as VoiceStatus | undefined;
+        const voiceId     = autorData.voiceId     as string | undefined;
+        if (voiceId && voiceStatus === "ready") {
+          autorVoiceId = voiceId;
+          console.log(`[TTS BG] Usando voz clonada do autor ${autorId}: ${voiceId}`);
+        }
+      }
+    } catch (err) {
+      console.warn("[TTS BG] Falha ao buscar voiceId do autor (non-fatal):", err);
+    }
+  }
+
+  // ── Limpeza e montagem do texto ─────────────────────────────────────────
+  const autorNome         = postData.autorNome         as string | undefined;
+  const igreja            = postData.igreja            as string | undefined;
+  const data              = postData.data              as string | undefined;
+  const fraseInstigadora  = postData.fraseInstigadora  as string | undefined;
+  const perguntaReflexiva = postData.perguntaReflexiva as string | undefined;
+
+  const conteudoLimpo = limparConteudo(conteudo);
+  const textoTTS = montarTextoTTS(
+    titulo, conteudoLimpo, tipo,
+    autorNome, igreja, data, fraseInstigadora, perguntaReflexiva,
+  );
+
+  // ── Geração de áudio ────────────────────────────────────────────────────
+  let audioFinal: Buffer;
+  let provedorUsado: "elevenlabs" | "openai";
+
+  try {
+    if (autorVoiceId && process.env.ELEVENLABS_API_KEY) {
+      const chunks  = dividirEmChunks(textoTTS, ELEVENLABS_MAX_CHARS);
+      const buffers = await gerarBuffersElevenLabs(autorVoiceId, chunks);
+      audioFinal    = concatenarMP3s(buffers);
+      provedorUsado = "elevenlabs";
+    } else {
+      const openai  = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const chunks  = dividirEmChunks(textoTTS);
+      const buffers = await gerarBuffersAudio(openai, chunks);
+      audioFinal    = concatenarMP3s(buffers);
+      provedorUsado = "openai";
+    }
+  } catch (err) {
+    console.error("[TTS BG] Erro ao gerar áudio:", err);
+
+    // Fallback ElevenLabs → OpenAI
+    if (autorVoiceId && process.env.OPENAI_API_KEY) {
+      try {
+        const openai  = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const chunks  = dividirEmChunks(textoTTS);
+        const buffers = await gerarBuffersAudio(openai, chunks);
+        audioFinal    = concatenarMP3s(buffers);
+        provedorUsado = "openai";
+        autorVoiceId  = null;
+        console.log(`[TTS BG] Fallback OpenAI bem-sucedido para post ${postId}`);
+      } catch (fallbackErr) {
+        console.error("[TTS BG] Fallback OpenAI também falhou:", fallbackErr);
+        await postRef.set(
+          { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now(), audioErrorCount: audioErrorCount + 1 },
+          { merge: true }
+        );
+        return;
+      }
+    } else {
+      await postRef.set(
+        { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now(), audioErrorCount: audioErrorCount + 1 },
+        { merge: true }
+      );
+      return;
+    }
+  }
+
+  // ── Upload para R2 ──────────────────────────────────────────────────────
+  const downloadURL = `${process.env.R2_PUBLIC_URL}/tts/posts/${postId}.mp3`;
+  try {
+    await getS3Client().send(new PutObjectCommand({
+      Bucket:      process.env.R2_BUCKET_NAME!,
+      Key:         `tts/posts/${postId}.mp3`,
+      Body:        audioFinal!,
+      ContentType: "audio/mpeg",
+    }));
+    purgarCacheCloudflare([downloadURL]).catch((err) => {
+      console.error("[TTS BG] Erro ao purgar cache Cloudflare (non-fatal):", err);
+    });
+  } catch (err) {
+    console.error("[TTS BG] Erro ao fazer upload para R2:", err);
+    await postRef.set(
+      { audioStatus: "error" as AudioStatus, audioUpdatedAt: Timestamp.now(), audioErrorCount: audioErrorCount + 1 },
+      { merge: true }
+    );
+    return;
+  }
+
+  // ── Computar hash e salvar ──────────────────────────────────────────────
+  const hashAtual = await computarHashConteudo(conteudo);
+
+  // MUDANÇA 14 — Salvar metadados incluindo audioVoiceId
+  await postRef.set(
+    {
+      audioUrl:         downloadURL,
+      audioStatus:      "ready" as AudioStatus,
+      audioUpdatedAt:   Timestamp.now(),
+      audioContentHash: hashAtual,
+      audioErrorCount:  0,
+      audioVoiceId:     autorVoiceId,
+    },
+    { merge: true }
+  );
+
+  console.log(`[TTS BG] Áudio gerado com sucesso: ${postId} (${provedorUsado!})`);
+
+  // ── Log de custo fire-and-forget ────────────────────────────────────────
+  adminDb.collection("tts_logs").add({
+    postId,
+    tipo,
+    charCount:        textoTTS.length,
+    estimatedCostUSD: provedorUsado === "elevenlabs"
+      ? textoTTS.length / 1000 * 0.30
+      : textoTTS.length / 1_000_000 * 15,
+    provedor:         provedorUsado,
+    voiceId:          autorVoiceId ?? null,
+    storage:          "r2",
+    createdAt:        Timestamp.now(),
+  }).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// Handler PATCH (ações administrativas) — inalterado da Fase 10
 // ---------------------------------------------------------------------------
 
 export async function PATCH(req: NextRequest) {
@@ -537,26 +704,25 @@ export async function POST(req: NextRequest) {
   }
 
   // ── 2. Parse e validação do body ─────────────────────────────────────────
+  // MUDANÇA FF-1 — tipo e titulo são opcionais; quando ausentes são lidos do Firestore
   let body: TTSRequestBody;
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "Body inválido." }, { status: 400 }); }
 
-  const { postId, tipo, titulo } = body;
+  const { postId } = body;
+  let { tipo, titulo } = body;
 
-  if (!postId || !tipo || !titulo) {
+  if (!postId) {
     return NextResponse.json(
-      { error: "Campos obrigatórios ausentes: postId, tipo, titulo." },
+      { error: "Campo obrigatório ausente: postId." },
       { status: 400 }
     );
   }
 
-  if (!["sermao", "estudo", "reflexao"].includes(tipo)) {
-    return NextResponse.json(
-      { error: "Tipo inválido. Valores aceitos: sermao, estudo, reflexao." },
-      { status: 400 }
-    );
-  }
+  // Detecta se é chamada fire-and-forget (sem titulo/tipo)
+  const isFireAndForget = !tipo || !titulo;
 
+  // ── 3. Verificação de variáveis de ambiente R2 ───────────────────────────
   if (
     !process.env.R2_ACCOUNT_ID || !process.env.R2_ACCESS_KEY_ID ||
     !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET_NAME ||
@@ -566,7 +732,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Configuração de storage ausente." }, { status: 500 });
   }
 
-  // ── 3. Referência ao documento Firestore ─────────────────────────────────
+  // ── 4. Referência ao documento Firestore ─────────────────────────────────
   const postRef  = adminDb.collection("posts").doc(postId);
   const postSnap = await postRef.get();
   const postData = postSnap.data() ?? {};
@@ -583,7 +749,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Campo 'conteudo' não encontrado." }, { status: 422 });
   }
 
-  // ── Buscar voiceId do autor ───────────────────────────────────────────────
+  // MUDANÇA FF-1 — resolve titulo e tipo do Firestore quando ausentes no body
+  if (!titulo) {
+    titulo = (postData.titulo as string | undefined) ?? "";
+    if (!titulo) return NextResponse.json({ error: "Post sem título." }, { status: 422 });
+  }
+  if (!tipo) {
+    const tipoRaw = postData.tipo as string | undefined;
+    // "artigo" no Firestore mapeia para "estudo" no TTS
+    tipo = (tipoRaw === "artigo" ? "estudo" : tipoRaw) as "sermao" | "estudo" | "reflexao";
+    if (!tipo || !["sermao", "estudo", "reflexao"].includes(tipo)) {
+      tipo = "sermao"; // fallback seguro
+    }
+  }
+
+  // ── 5. Buscar voiceId do autor ───────────────────────────────────────────
   let autorVoiceId: string | null = null;
 
   if (autorId) {
@@ -606,7 +786,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Auto-recovery de posts travados em "generating" ───────────────────────
+  // ── 6. Auto-recovery de posts travados em "generating" ───────────────────
   if (audioStatus === "generating" && audioUpdatedAt) {
     const idadeMs = Date.now() - audioUpdatedAt.toMillis();
     if (idadeMs > STUCK_GENERATING_TIMEOUT_MS) {
@@ -615,25 +795,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Rate limiting por erros consecutivos ─────────────────────────────────
+  // ── 7. Rate limiting por erros consecutivos ──────────────────────────────
   if (audioStatus === "error" && audioErrorCount >= 3) {
     console.warn(`[TTS] Rate limit atingido para post ${postId} (${audioErrorCount} erros)`);
     return NextResponse.json({ error: "Limite de tentativas atingido." }, { status: 429 });
   }
 
   // ── MUDANÇA 13 — Tratar "stale" como "none" (regeneração lazy) ───────────
-  // Se o post está stale, ignoramos o cache existente e forçamos nova geração.
-  // O guard abaixo impede que a lógica de cache-hit seja atingida nesse caso.
   const statusEfetivo: AudioStatus =
     audioStatus === "stale" ? "none" : (audioStatus ?? "none");
 
   if (statusEfetivo === "generating") {
-    // Já está sendo gerado por outra instância — evitar duplicação
+    // Já está sendo gerado — retorna indicação para o cliente aguardar
     console.log(`[TTS] Post ${postId} já em geração, ignorando requisição duplicada.`);
     return NextResponse.json({ gerando: true });
   }
 
-  // ── Invalidação reativa por hash (SHA-256) ────────────────────────────────
+  // ── 8. Invalidação reativa por hash (SHA-256) ────────────────────────────
   const hashAtual       = await computarHashConteudo(conteudo);
   const conteudoEditado = !audioContentHash || audioContentHash !== hashAtual;
 
@@ -653,11 +831,26 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── Marcar como "generating" ──────────────────────────────────────────────
+  // ── 9. Marcar como "generating" ──────────────────────────────────────────
   await postRef.set(
     { audioStatus: "generating" as AudioStatus, audioUpdatedAt: Timestamp.now() },
     { merge: true }
   );
+
+  // ── MUDANÇA FF-2 — Fire-and-forget: responde 202 imediatamente ────────────
+  // Quando chamado sem titulo/tipo (criar-post) ou com header x-fire-and-forget,
+  // responde 202 agora e continua processando em background.
+  // Quando chamado pelo player (com titulo + tipo), executa de forma síncrona
+  // para devolver a audioUrl diretamente na resposta.
+  if (isFireAndForget) {
+    // Inicia geração em background sem bloquear a resposta
+    gerarAudioEmBackground(postId, titulo, tipo, adminDb).catch((err) => {
+      console.error(`[TTS FF] Erro no background para ${postId}:`, err);
+    });
+    return NextResponse.json({ iniciado: true }, { status: 202 });
+  }
+
+  // ── A partir daqui: fluxo síncrono original (chamado pelo player) ─────────
 
   // ── Limpeza e montagem do texto ───────────────────────────────────────────
   const autorNome         = postData.autorNome         as string | undefined;
@@ -702,7 +895,6 @@ export async function POST(req: NextRequest) {
         const buffers = await gerarBuffersAudio(openai, chunks);
         audioFinal    = concatenarMP3s(buffers);
         provedorUsado = "openai";
-        // Fallback usou voz padrão — registra como null para manter rastreabilidade
         autorVoiceId  = null;
         console.log(`[TTS] Fallback OpenAI bem-sucedido para post ${postId}`);
       } catch (fallbackErr) {
@@ -764,7 +956,6 @@ export async function POST(req: NextRequest) {
         audioUpdatedAt:   Timestamp.now(),
         audioContentHash: hashAtual,
         audioErrorCount:  0,
-        // Registra qual voz foi usada (null = voz padrão OpenAI)
         audioVoiceId:     autorVoiceId,
       },
       { merge: true }
