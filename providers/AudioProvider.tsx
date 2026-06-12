@@ -460,7 +460,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
             setDuration(0);
             setIsLoading(true);
             setPreloadStatusRef.current("idle");
-            audio.src = url;
+            audio.src = url.includes("?") ? url : `${url}?t=${Date.now()}`;
             audio.currentTime = 0;
             audio.playbackRate = playbackSpeedRef.current;
             playPromiseRef.current = audio.play();
@@ -497,7 +497,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
         playPromiseRef.current?.catch(() => {});
         return;
       }
-      audio.src = pub.audioUrl;
+      audio.src = pub.audioUrl.includes("?") ? pub.audioUrl : `${pub.audioUrl}?t=${Date.now()}`;
       audio.currentTime = 0;
       audio.playbackRate = playbackSpeedRef.current;
       setCurrentTime(0);
