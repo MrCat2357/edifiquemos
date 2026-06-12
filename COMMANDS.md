@@ -2,6 +2,24 @@
 
 ## Verificação e geração de áudio TTS
 
+### [RODE UMA VEZ] Backfill de hash em áudios já gerados — Staging
+```powershell
+node scripts/backfill-audio-hash.cjs
+```
+
+### [RODE UMA VEZ] Backfill de hash em áudios já gerados — Produção
+```powershell
+$env:NODE_ENV="production"; node scripts/backfill-audio-hash.cjs
+```
+
+> Rode **uma única vez** após o deploy das mudanças de hash.
+> Preenche `audioContentHash` nos posts que já têm `audioStatus "ready"`
+> mas foram gerados antes do sistema de hash existir.
+> Sem isso, `check-stale-audio` marcaria esses posts como `stale` toda vez
+> (hash ausente = sempre divergente), criando um loop de regeneração.
+
+---
+
 ### Verificar áudios desatualizados (stale) — Staging
 ```powershell
 node scripts/check-stale-audio.cjs
