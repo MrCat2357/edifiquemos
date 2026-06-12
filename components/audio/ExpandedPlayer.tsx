@@ -151,17 +151,53 @@ function ProgressBar({
 
 // ─── SpeedControl ─────────────────────────────────────────────────────────────
 
+const ALL_SPEEDS: PlaybackSpeed[] = [0.5, 0.75, 1, 1.5, 2];
+const WINDOW_SIZE = 3;
+
+function initialWindowStart(speed: PlaybackSpeed): number {
+  const idx = ALL_SPEEDS.indexOf(speed);
+  if (idx < 0) return 0;
+  const ideal = idx - 1;
+  return Math.max(0, Math.min(ideal, ALL_SPEEDS.length - WINDOW_SIZE));
+}
+
 function SpeedControl({ speed, onChange }: { speed: PlaybackSpeed; onChange: (s: PlaybackSpeed) => void }) {
-  const speeds: PlaybackSpeed[] = [1, 1.5, 2];
+  const [windowStart, setWindowStart] = useState(() => initialWindowStart(speed));
+
+  const canLeft  = windowStart > 0;
+  const canRight = windowStart < ALL_SPEEDS.length - WINDOW_SIZE;
+  const visible  = ALL_SPEEDS.slice(windowStart, windowStart + WINDOW_SIZE);
+
+  const arrowStyle = (enabled: boolean): React.CSSProperties => ({
+    display: "flex", alignItems: "center", justifyContent: "center",
+    width: 20, height: 20, borderRadius: "50%", border: "1px solid",
+    borderColor: enabled ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.06)",
+    background: "transparent",
+    color: enabled ? "var(--text-2, rgba(255,255,255,0.7))" : "rgba(255,255,255,0.15)",
+    cursor: enabled ? "pointer" : "default",
+    fontSize: "0.75rem", fontWeight: 700, fontFamily: "inherit",
+    transition: "all 0.15s", flexShrink: 0, padding: 0, lineHeight: 1,
+  });
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
       <span style={{
         fontSize: "0.62rem", fontWeight: 600, color: "var(--text-3, rgba(255,255,255,0.4))",
-        letterSpacing: "0.06em", textTransform: "uppercase", marginRight: "0.15rem",
+        letterSpacing: "0.06em", textTransform: "uppercase", marginRight: "0.1rem",
       }}>
         Vel.
       </span>
-      {speeds.map((s) => (
+
+      <button
+        onClick={() => canLeft && setWindowStart((w) => w - 1)}
+        disabled={!canLeft}
+        aria-label="Velocidades anteriores"
+        style={arrowStyle(canLeft)}
+      >
+        ‹
+      </button>
+
+      {visible.map((s) => (
         <button
           key={s}
           onClick={() => onChange(s)}
@@ -180,6 +216,15 @@ function SpeedControl({ speed, onChange }: { speed: PlaybackSpeed; onChange: (s:
           {s}×
         </button>
       ))}
+
+      <button
+        onClick={() => canRight && setWindowStart((w) => w + 1)}
+        disabled={!canRight}
+        aria-label="Próximas velocidades"
+        style={arrowStyle(canRight)}
+      >
+        ›
+      </button>
     </div>
   );
 }
@@ -443,7 +488,6 @@ export default function ExpandedPlayer({ open, onMinimize }: ExpandedPlayerProps
     setVolume,
     playNext,
     playPrevious,
-    // Fase 11
     playbackSpeed,
     setPlaybackSpeed,
     sleepTimer,
@@ -547,7 +591,7 @@ export default function ExpandedPlayer({ open, onMinimize }: ExpandedPlayerProps
             Tocando agora
           </span>
 
-          {/* Volume toggle (direita do header) */}
+          {/* Volume toggle */}
           <button
             onClick={handleVolumeToggle}
             aria-label={muted ? "Ativar volume" : "Silenciar"}
@@ -626,7 +670,7 @@ export default function ExpandedPlayer({ open, onMinimize }: ExpandedPlayerProps
                 </p>
               </div>
 
-              {/* Progress bar — com tempo restante */}
+              {/* Progress bar */}
               <div style={{ flexShrink: 0 }}>
                 <ProgressBar currentTime={currentTime} duration={duration} onSeek={seek} accent={accent} />
               </div>

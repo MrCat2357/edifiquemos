@@ -2,13 +2,7 @@
  * app/api/tts/invalidar/route.ts
  *
  * Invalidação proativa de cache de áudio quando um post é editado.
- *
- * Por que esta rota existe:
- *   Os formulários de edição (sermões, estudos, reflexões) usam o Firebase
- *   SDK direto no client-side (updateDoc). Como a lógica de hash precisa
- *   rodar server-side com Firebase Admin, esta API Route é o ponto central
- *   de invalidação. Os pages de edição chamam este endpoint como
- *   fire-and-forget logo após o updateDoc bem-sucedido.
+ * Chamado fire-and-forget pelos formulários de edição logo após o updateDoc.
  *
  * Contrato:
  *   POST /api/tts/invalidar
@@ -16,36 +10,34 @@
  *   Body: { postId: string; tipo: "sermao" | "estudo" | "reflexao" }
  *
  *   Resposta 200: { invalidado: true | false; motivo?: string }
- *   Falhas: nunca devem quebrar o fluxo do chamador (fire-and-forget).
+ *
+ * Comportamento:
+ *   - Hash igual   → não faz nada (só metadados mudaram, conteúdo intacto)
+ *   - Hash diverge → seta audioStatus = "stale" e inicia geração em background
+ *                    via gerarAudioEmBackground() (chamada direta, sem HTTP)
+ *   - Sempre retorna rápido — o save nunca fica bloqueado
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "firebase-admin/auth";
 import { getApps, getApp, initializeApp, cert } from "firebase-admin/app";
-import { getFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
+import { getFirestore, Timestamp } from "firebase-admin/firestore";
 import { computarHashConteudo } from "@/lib/tts/hash";
+import { gerarAudioEmBackground } from "@/lib/tts/gerarAudio";
 
 // ---------------------------------------------------------------------------
-// Firebase Admin — reutiliza a instância "tts-admin" se já inicializada
+// Firebase Admin
 // ---------------------------------------------------------------------------
 
 const ADMIN_APP_NAME = "tts-admin";
 
 function ensureAdminInitialized() {
   if (getApps().find((a) => a.name === ADMIN_APP_NAME)) return;
-
   const privateKey = (process.env.FIREBASE_ADMIN_PRIVATE_KEY ?? "")
     .replace(/^"|"$/g, "")
     .replace(/\\n/g, "\n");
-
   initializeApp(
-    {
-      credential: cert({
-        projectId: process.env.FIREBASE_ADMIN_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL,
-        privateKey,
-      }),
-    },
+    { credential: cert({ projectId: process.env.FIREBASE_ADMIN_PROJECT_ID, clientEmail: process.env.FIREBASE_ADMIN_CLIENT_EMAIL, privateKey }) },
     ADMIN_APP_NAME
   );
 }
@@ -66,14 +58,13 @@ export async function POST(req: NextRequest) {
   const adminAuth = getAuth(adminApp);
   const adminDb   = getFirestore(adminApp);
 
-  // ── Autenticação ─────────────────────────────────────────────────────────
+  // ── Autenticação ──────────────────────────────────────────────────────────
   const authHeader = req.headers.get("authorization") ?? "";
   const idToken    = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
   if (!idToken) {
     return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
   }
-
   try {
     await adminAuth.verifyIdToken(idToken);
   } catch {
@@ -82,22 +73,15 @@ export async function POST(req: NextRequest) {
 
   // ── Parse do body ─────────────────────────────────────────────────────────
   let body: { postId?: string; tipo?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Body inválido." }, { status: 400 });
-  }
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: "Body inválido." }, { status: 400 }); }
 
   const { postId, tipo } = body;
-
   if (!postId || !tipo) {
-    return NextResponse.json(
-      { error: "Campos obrigatórios ausentes: postId, tipo." },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Campos obrigatórios ausentes: postId, tipo." }, { status: 400 });
   }
 
-  // ── Ler post do Firestore ─────────────────────────────────────────────────
+  // ── Ler post ──────────────────────────────────────────────────────────────
   const postRef  = adminDb.collection("posts").doc(postId);
   const postSnap = await postRef.get();
 
@@ -113,38 +97,60 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ invalidado: false, motivo: "sem_conteudo" });
   }
 
+  // ── Sem hash anterior: post nunca teve áudio gerado — nada a invalidar ────
+  // A geração será disparada normalmente quando o player abrir o post.
   if (!audioContentHash) {
     return NextResponse.json({ invalidado: false, motivo: "sem_hash_anterior" });
   }
 
-  // ── MUDANÇA 9 — computarHashConteudo agora é async (SHA-256) ─────────────
+  // ── Comparar hashes ───────────────────────────────────────────────────────
   const novoHash = await computarHashConteudo(conteudo);
 
   if (audioContentHash === novoHash) {
+    // Conteúdo não mudou (apenas título, igreja, data, links…)
     return NextResponse.json({ invalidado: false, motivo: "conteudo_inalterado" });
   }
 
-  // ── Invalidar cache ───────────────────────────────────────────────────────
+  // ── Hash divergiu: marcar stale ───────────────────────────────────────────
+  // Mantém audioUrl para o player continuar servindo o áudio antigo
+  // enquanto o novo é gerado em background.
   try {
     await postRef.update({
-      audioStatus:      "none",
-      audioUrl:         FieldValue.delete(),
-      audioContentHash: FieldValue.delete(),
+      audioStatus:    "stale",
+      audioUpdatedAt: Timestamp.now(),
     });
   } catch (err) {
-    console.error(`[TTS] Erro ao invalidar cache do post ${postId}:`, err);
-    return NextResponse.json({ error: "Falha ao invalidar cache." }, { status: 500 });
+    console.error(`[TTS invalidar] Erro ao marcar stale ${postId}:`, err);
+    return NextResponse.json({ error: "Falha ao atualizar status." }, { status: 500 });
   }
 
-  // ── Log fire-and-forget ───────────────────────────────────────────────────
+  // ── Disparar geração em background ───────────────────────────────────────
+  // Chamada direta ao módulo — sem HTTP, sem risco de token expirado.
+  // O "tipo" do body pode ser "artigo"; normaliza para "estudo" aqui.
+  const tipoNormalizado = (tipo === "artigo" ? "estudo" : tipo) as "sermao" | "estudo" | "reflexao";
+  const titulo          = (postData.titulo as string | undefined) ?? "";
+
+  gerarAudioEmBackground({
+    postId,
+    titulo,
+    tipo:    tipoNormalizado,
+    adminDb,
+  }).catch((err) => {
+    console.error(`[TTS invalidar] Erro na geração em background para ${postId}:`, err);
+  });
+  // Não await — retorna imediatamente abaixo
+
+  // ── Log ───────────────────────────────────────────────────────────────────
   adminDb.collection("tts_logs").add({
     postId,
-    tipo,
-    evento: "invalidacao_por_edicao",
-    createdAt: Timestamp.now(),
+    tipo: tipoNormalizado,
+    evento:       "invalidacao_por_edicao",
+    novoHash,
+    hashAnterior: audioContentHash,
+    createdAt:    Timestamp.now(),
   }).catch(() => {});
 
-  console.log(`[TTS] Cache invalidado por edição: ${postId}`);
+  console.log(`[TTS invalidar] Stale + regeneração disparada: ${postId}`);
 
   return NextResponse.json({ invalidado: true });
 }
