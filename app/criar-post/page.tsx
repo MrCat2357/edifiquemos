@@ -9,6 +9,9 @@ import { gerarSlugUnico } from "@/lib/slug";
 import FileImportButton from "@/components/Button";
 import RichTextEditor from "@/components/RichTextEditor";
 import type { LinkReferencia } from "@/components/LinksReferencia";
+import dynamic from "next/dynamic";
+
+const SlideCarrossel = dynamic(() => import("@/components/SlideCarrossel"), { ssr: false });
 
 const TIPO_LINK_OPTIONS: { value: LinkReferencia["tipo"]; label: string; icon: string }[] = [
   { value: "youtube", label: "YouTube",    icon: "▶" },
@@ -292,7 +295,14 @@ function SlideImportButton({
           whiteSpace: "nowrap",
         }}
       >
-        {status.type === "error" ? "⚠ Tentar novamente" : "🗂 Importar slide"}
+        {status.type === "error" ? (
+          "⚠ Tentar novamente"
+        ) : (
+          <span style={{ display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.25, gap: "1px" }}>
+            <span>📄 Importar</span>
+            <span>pdf do slide</span>
+          </span>
+        )}
         <input
           ref={inputRef}
           type="file"
@@ -668,6 +678,23 @@ export default function CriarPost() {
           slideArquivoUrl: slideUrl,
           slideFormato:    slideStatus.formato,
         });
+
+
+        if (slideStatus.type === "ready") {
+          const idToken = await user.getIdToken();
+          fetch("/api/slides/converter", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({
+              postId:          docRef.id,
+              slideArquivoUrl: slideUrl,
+              slideFormato:    slideStatus.formato,
+            }),
+          }).catch(() => {}); // fire-and-forget
+        }
       }
 
       sessionStorage.removeItem("draft-post");
@@ -963,6 +990,25 @@ export default function CriarPost() {
               }
               minHeight="14rem"
             />
+
+
+            {/* ── Prévia do slide ── */}
+            {slideStatus.type === "ready" && (
+              <div style={{ marginTop: "0.75rem" }}>
+                <p style={{
+                  fontSize: "0.72rem", fontWeight: 600,
+                  color: "var(--emerald)", marginBottom: "0.5rem",
+                  textTransform: "uppercase", letterSpacing: "0.04em",
+                }}>
+                  Prévia do slide
+                </p>
+                <SlideCarrossel
+                  fonte={slideStatus.file}
+                  altura={420}
+                />
+              </div>
+            )}
+
 
             {/* Hint: conteúdo opcional quando slide presente */}
             {temSlide && !temConteudo && (
