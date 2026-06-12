@@ -56,6 +56,37 @@ async function uploadImagem(
   });
 }
 
+/* ─── Fire-and-forget TTS generation ────────────────── */
+
+/**
+ * Dispara a geração de áudio em background após publicar.
+ * Nunca lança exceção — falhas são silenciosas (o áudio será gerado
+ * quando o usuário clicar em "Ouvir").
+ */
+async function dispararGeracaoAudio(postId: string): Promise<void> {
+  try {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const idToken = await user.getIdToken();
+
+    // Fire-and-forget: não fazemos await do resultado completo,
+    // apenas iniciamos a requisição e ignoramos erros de rede/TTS.
+    fetch("/api/tts/gerar", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({ postId }),
+    }).catch(() => {
+      // Silencioso — a geração acontecerá quando o usuário clicar em "Ouvir"
+    });
+  } catch {
+    // Silencioso — getIdToken pode falhar em edge cases; não bloqueia publicação
+  }
+}
+
 /* ─── Componente de upload de imagem ─────────────────── */
 
 function ImageUpload({
@@ -396,21 +427,29 @@ export default function CriarPost() {
       }
 
       /* conteudo já vem como HTML — salvo diretamente */
-      await addDoc(collection(db, "posts"), {
-        titulo:    titulo.trim().toUpperCase(),
-        conteudo:  conteudo.trim(),   // HTML rico preservado
+      const docRef = await addDoc(collection(db, "posts"), {
+        titulo:      titulo.trim().toUpperCase(),
+        conteudo:    conteudo.trim(),   // HTML rico preservado
         tipo,
-        igreja:    igreja.trim()  || "",
-        data:      data.trim()    || "",
-        autorId:   user.uid,
+        igreja:      igreja.trim()  || "",
+        data:        data.trim()    || "",
+        autorId:     user.uid,
         autorNome,
-        autorFoto: autorFoto ?? null,
+        autorFoto:   autorFoto ?? null,
         slug,
-        links:     linksFiltrados,
-        imagemUrl: imagemUrl ?? null,
+        links:       linksFiltrados,
+        imagemUrl:   imagemUrl ?? null,
+        // Sinaliza imediatamente que a geração de áudio está pendente;
+        // a rota /api/tts/gerar atualizará para "generating" ao iniciar.
+        audioStatus: "none",
       });
 
       sessionStorage.removeItem("draft-post");
+
+      // ── Fire-and-forget: dispara geração de áudio sem bloquear a publicação ──
+      // Se falhar por qualquer motivo, o post já está publicado e o áudio
+      // será gerado quando o usuário clicar em "Ouvir".
+      dispararGeracaoAudio(docRef.id);
 
       setSlugPublicado({ slug, tipo });
       setMostrarBannerReflexao(true);
