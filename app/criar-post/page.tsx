@@ -8,9 +8,10 @@ import { useRouter } from "next/navigation";
 import { gerarSlugUnico } from "@/lib/slug";
 import FileImportButton from "@/components/Button";
 import RichTextEditor from "@/components/RichTextEditor";
-import SlideCarrossel from "@/components/SlideCarrossel";
 import type { LinkReferencia } from "@/components/LinksReferencia";
+import dynamic from "next/dynamic";
 
+const SlideCarrossel = dynamic(() => import("@/components/SlideCarrossel"), { ssr: false });
 
 const TIPO_LINK_OPTIONS: { value: LinkReferencia["tipo"]; label: string; icon: string }[] = [
   { value: "youtube", label: "YouTube",    icon: "▶" },
